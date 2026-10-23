@@ -1,0 +1,146 @@
+# mxl-avsync — Implementation plan
+
+This plan comes before any code. It is updated as the work goes on: every decision and every deviation from `SPECIFICATION.md` is recorded here, as in the sibling repos.
+
+## Status (2026-10-23)
+
+Design. The maintainer's decisions are in SPECIFICATION §18; the open questions in §18.1 do not block M0–M2.
+
+## Pins
+
+| Component | Pin |
+| --- | --- |
+| MXL | `dmf-mxl/mxl` `release/v1.1` at `218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`, `-DMXL_ENABLE_FABRICS_OFI=OFF`; one `MXL_REF` in `docker/Dockerfile` and `.github/workflows/ci.yaml` |
+| nmos-cpp | `fe303849527394b03bdedc8f161f377fe458bb62` (the siblings' commit) |
+| Blend2D, DejaVu Sans | the versions mxl-multiviewer uses |
+| FFmpeg | Ubuntu 24.04 system libraries (file mode, transcode tests) |
+| zxing-cpp, Nayuki QR, pocketfft, doctest | vendored, versions recorded in M0 |
+
+## Rules for every milestone
+
+The definition of done of the draft (§15 there): code, tests that ran with their real results, updated documentation (README, SPECIFICATION where it changed, this plan), known limits, and the next concrete step. No accuracy is claimed that a test has not shown. Each milestone ends with a short summary in this file: what was built, changed files, tests and results, limits, next step.
+
+## Milestones
+
+The order follows the draft's phases, merged into the siblings' milestone pattern. The phone app is last (M-P0 to M-P2) and starts only after 1.0.
+
+### M0: event model and audio core (draft phases 0–2)
+
+Goal: the measuring core without any media library, with real numbers.
+
+- Repository scaffold, CMake, CI (core only at first), doctest, `AGENTS.md`.
+- `schemas/`: QR payload, manifest, result, event log (JSON Schema 2020-12) and their validation tests.
+- `avsync-core`: event plan (grain grid at 25/50/59.94p and 1080i25, offsets, sweep, determinism), sign convention, grading, statistics, uncertainty model.
+- Chirp synthesis (four shapes, sub-sample placement, sample-index purity).
+- Matched-filter detector (pocketfft, parabolic interpolation, chirp id, quality, missing/duplicate/ambiguous).
+- The robustness suite of SPECIFICATION §14.1 for audio (level, noise, AGC, band-pass, resampling, G.711 μ-law/A-law, gaps, cross-confusion) with a results table: timing error p50/p99 and detection rate per condition.
+- Decide: chirp shapes, default threshold, the uncertainty table. Record them here.
+
+Exit: the audio detector meets ≤ 0.1 ms p99 timing error on the clean PCM path and ≥ 99 % detection at SNR 10 dB and through G.711; or this plan records what it reaches and the spec is adjusted before M1.
+
+### M1: test picture and the file tools (draft phases 3–4: the draft's MVP)
+
+- Picture composition with Blend2D: static layer, timing marker, Gray strip, sweep bar, counters, QR (Nayuki), TEST SIGNAL, fiducials; v210 and 8-bit RGB for files.
+- Marker detector on luma (thresholds from the reference blocks, Gray decode, parity, drops and duplicates, quality) and its synthetic-frame tests.
+- QR decode with zxing-cpp.
+- `mxl-avsync generate`: MOV + ProRes 422 HQ + PCM 24-bit by default, MP4/MKV/AAC/H.264 variants; manifest; the container check (SPECIFICATION §9.3).
+- `mxl-avsync analyze`, `validate`, `merge`: decode with FFmpeg keeping PTS, pairing, grading, statistics, human and JSON reports, `--fail-on`.
+- `tests/integration/file.sh`: offsets 0, +35, −35, a sweep, inserted delays, and the file-mode transcode set of SPECIFICATION §13 (H.264 bitrates, scaling, frame-rate conversion, resampling, level, AGC, G.711). Results into `docs/test-matrix.md`.
+- Decide the container default from the round-trip results; record it here.
+- First container image (CLI only) on `main` (`nightly-dev`).
+
+Exit: the MVP criteria 1–9 of the draft (§13 there) hold for files; criterion 10 (no routing) is trivially true here and is proven for live in M2.
+
+### M2: live generator on MXL
+
+- Config (env > file > defaults, exit 78), state directory, exit codes, roles, `serve`.
+- MXL: own output domain (G2), video writer (TAI paced, static layer copy + changing parts), audio writer (blocks ahead of TAI, pure sample function), flow tokens on format change.
+- NMOS node with the two senders, labels, test-signal tag and description, UUIDv5 ids.
+- REST for the generator, mute and stop/start, `TEST SIGNAL ACTIVE`; `/livez`, `/readyz`, `/metrics` (all families at 0 from the start).
+- Measure: drawing cost per grain and CPU at 1080p50 and 2160p50.
+- `tests/integration/live.sh` part 1: flows exist, events at the right indices (read back with a test reader), mute, stop/start, SIGTERM.
+
+Exit: a routed generator shows the test picture on a multiviewer tile and the chirps on a monitor in the lab; the indices of the marker changes and chirp centres match `T_k` exactly in the test reader.
+
+### M3: live analyzer on MXL
+
+- Video and audio readers: no grain copy, regions only, torn-read check, arrival stamping, batch-commit detection, recreated-flow reopen with a fresh MXL instance, grain size check, interlaced (field) handling, `waiting`/`no_signal`/`format_mismatch`.
+- QR worker, pairer (ids, ±2 periods, `out_of_range`), index and arrival times, latencies and index shifts, grading (median of N, stale), statistics windows, event log with rotation.
+- NMOS receivers (IS-05 with BCP-007-03), route persistence and restore.
+- REST for measurement, events, statistics, grading; WebSocket.
+- Test tool `tests/tools/avsync-shift`: an MXL relay that delays audio or video by n ms or drops/duplicates frames, for the controlled-delay rows of the matrix.
+- `tests/integration/live.sh` part 2: offsets 0/+40/+80 and their grades, +20 ms through the shift tool, generator restart → reopen, mute → invalid, restored routes.
+- Measure: reader wake-up resolution (the arrival-time part of the uncertainty) and CPU per analyzer.
+
+Exit: in the lab the MXL reference path measures 0 ms ± the M0 audio resolution for 1 h at 1080p50 and 1080i25, with latency figures and their uncertainty.
+
+### M4: operator outputs
+
+- Result video flow (960×540 at 25 Hz, redraw 5 Hz, TAI-paced writer, state texts).
+- Web UI (Vue 3, family look): generator and analyzer tabs of SPECIFICATION §16.1.
+- Widgets `avsync` and `generator` with the B.2 contract (CORS, CSP, messages, themes).
+- Config export and import, `KEY=value` export.
+- `deploy/grafana/mxl-avsync.json` and the alert proposal (SPECIFICATION §16.6) in `deploy/prometheus/avsync-rules.yaml`.
+
+Exit: an operator sees the grade in the widget on an operator screen and on a multiviewer tile; a forced +80 ms offset turns both red and fires the alert in a local Prometheus.
+
+### M5: ST 2110 path, hardening, release 1.0.0
+
+- ST 2110 loop through mxl-st2110-gateway in the lab, 1080p50 and 1080i25, 1 h each: AV offset, index shift and latency per essence; the result into `docs/test-matrix.md`, with the gateway version.
+- Performance of both roles on both host classes (8-core AVX2 desktop CPU; Skylake-SP server) into `docs/performance.md`; catalog resources from it.
+- AMWA IS-04-01, IS-05-01, IS-05-02, BCP-007-03-01 (`tests/nmos/amwa.sh`).
+- Container image with OCI and MXL labels, tags, Compose demo (registry stand-in, generator, analyzer, a monitor), `deploy/k8s/` for both roles.
+- README (settings, ports, exit codes, API, widgets, CLI, platform notes), CHANGELOG, NOTICE (licences checked).
+- Platform hand-off as a note to the platform maintainers (they own that repo): the two catalog types, the chart type, the dashboard rows, the alert rules, the measured resources (SPECIFICATION §17).
+- Release 1.0.0 with the platform release notes (Appendix B.3), metric names listed.
+
+Exit: 1.0.0 released; a test production with one generator and two analyzers comes up and down cleanly on the platform.
+
+## After 1.0
+
+| Release | Work |
+| --- | --- |
+| 1.1 | SRT + H.264 path (mxl-srt-gateway, several bitrates incl. low); cross-node through the fabrics agent (two analyzers, `merge` live view); G.711 live once a SIP function exists; fiducial marker search for a scaled or cropped picture (a multiviewer tile) — the same search the phone app needs |
+| 2.0 | the phone app (M-P0 to M-P2 below) |
+| later | per-channel sequences (channel-swap test), lip-sync on programme material, IS-07 events |
+
+### M-P0: phone platform spike (after 1.1's fiducial search)
+
+- Expo dev build with one native module per platform; `avsync-core` compiled in (iOS Objective-C++, Android NDK/JNI).
+- Measure on at least two iOS and three Android models: can video frames and audio input be timestamped on one clock (iOS host time; Android `REALTIME` sensor timestamps and AAudio/Oboe), at what frame rate, with what jitter.
+- Decide: Expo with native modules stays, or native apps (the draft's rule: precise capture timestamps over code reuse). Record it here.
+
+Exit: a documented answer per device class, and the decision.
+
+### M-P1: calibration rig and method
+
+- The LED + piezo reference device (microcontroller, parts list, firmware in `mobile-app/calibration/`), its own timing checked with an oscilloscope.
+- Calibration procedure in the app: measure the rig, store the capture offset per model and OS with date, method, count and spread; expiry rules.
+- `docs/calibration.md`.
+
+Exit: repeat calibrations of one phone agree within their stated spread.
+
+### M-P2: the app
+
+- Camera + microphone capture, fiducial search, rolling-shutter row time, marker and chirp detection, pairing, grading with the analyzer's windows, statistics, local storage, comparison, export of the result JSON.
+- UI of SPECIFICATION §12.1: offset with sign and sentence, quality, calibration state (uncalibrated in orange, no grade colour).
+- Validation on real devices at a monitor fed by a generator with known set offsets (0, ±40 ms), against the live analyzer on the same feed.
+- Store builds (TestFlight, internal Play track) — `TODO_` accounts.
+
+Exit: calibrated phones agree with the live analyzer within their stated uncertainty on the validation set.
+
+## Decisions
+
+1. AV offset and latency are separate; latency only with a TAI/PTP reference (SPECIFICATION §3).
+2. Offsets on index times, latencies on arrival times (§3.3).
+3. Video events exactly on grain origins; no sub-frame video claims in 1.0 (§3.4).
+4. Pairing by identity (Gray strip + four chirp shapes), ±2 periods (§4.3).
+5. One dependency-free core for CLI, media function and phone (§1, §15).
+6. One image, two catalog types, one role per process (§2.1, §17.2).
+7. One measuring point per analyzer instance (§7.4).
+8. Grading windows −5…+15 pass, −40…+60 warn, else fail; on the median of 10 events (§8.3).
+9. No preview stream, no MediaMTX: the picture is in MXL, the result is numbers and a small flow.
+
+## Deviations
+
+None yet.
