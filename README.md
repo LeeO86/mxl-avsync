@@ -2,7 +2,7 @@
 
 AV sync and latency measurement for MXL. A generator writes a visible and audible test signal (timing marker, Gray-coded frame strip, QR code, chirps), live into MXL flows or as test files. An analyzer finds the markers and chirps at any point of a chain and reports the AV offset with a pass/warn/fail grade, and — with the platform's PTP/TAI clock — the audio and video latency. A phone app for measuring at a real monitor comes last.
 
-**Status: measuring core, file tools, control plane, and the phone core.** Live MXL is not linked yet. This repo does not implement ST 2110, SRT, or SIP; those flows come from the sibling gateways. File-mode H.264 and G.711 are test aids. A real phone still needs a device. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
+**Status: measuring core, file tools, control plane, live MXL reader and writer, and the phone core.** `mxl-avsync` links libmxl when the package is found; `avsync-core` does not. `/readyz` is 200 when the video and audio flows are open. This repo does not implement ST 2110, SRT, or SIP; those flows come from the sibling gateways. File-mode H.264 and G.711 are test aids. A real phone still needs a device. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
 
 ## Build
 

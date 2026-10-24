@@ -6,6 +6,10 @@
 #include "report.hpp"
 #include "uuid.hpp"
 
+#ifdef AVSYNC_WITH_MXL
+#include "engine.hpp"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -33,6 +37,18 @@ struct Runtime {
     std::vector<Measurement> events;
     int events_epoch = 0;
     double generator_events = 0;
+    double output_video = 0;
+    double output_audio = 0;
+    double late_video = 0;
+    double late_audio = 0;
+    double resyncs = 0;
+    std::string media_detail;
+    std::string video_flow;
+    std::string audio_flow;
+    int grain_rows = 0;
+    int frame_width = 0;
+    int frame_height = 0;
+    bool interlaced_flow = false;
     std::string source_image_path;
     int source_image_frames = 0;
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
@@ -95,8 +111,10 @@ std::string metrics_text(Runtime& rt)
     os << "# TYPE mxl_avsync_generator_audio_muted gauge\nmxl_avsync_generator_audio_muted " << (gen && !rt.config.audio_enable ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_generator_events_total counter\nmxl_avsync_generator_events_total " << rt.generator_events << "\n";
     for (const char* essence : {"video", "audio"}) {
-        os << "mxl_avsync_output_frames_total{essence=\"" << essence << "\"} 0\n";
-        os << "mxl_avsync_output_frames_late_total{essence=\"" << essence << "\"} 0\n";
+        const double frames = essence == std::string("video") ? rt.output_video : rt.output_audio;
+        const double late = essence == std::string("video") ? rt.late_video : rt.late_audio;
+        os << "mxl_avsync_output_frames_total{essence=\"" << essence << "\"} " << frames << "\n";
+        os << "mxl_avsync_output_frames_late_total{essence=\"" << essence << "\"} " << late << "\n";
         os << "mxl_avsync_output_frames_missed_total{essence=\"" << essence << "\"} 0\n";
     }
     for (const char* state : {"waiting", "no_signal", "not_routed", "running", "format_mismatch"}) {
@@ -104,7 +122,7 @@ std::string metrics_text(Runtime& rt)
         os << "mxl_avsync_input_state{essence=\"video\",state=\"" << state << "\"} " << on << "\n";
         os << "mxl_avsync_input_state{essence=\"audio\",state=\"" << state << "\"} " << on << "\n";
     }
-    os << "mxl_avsync_input_resyncs_total{essence=\"video\"} 0\nmxl_avsync_input_resyncs_total{essence=\"audio\"} 0\n";
+    os << "mxl_avsync_input_resyncs_total{essence=\"video\"} " << rt.resyncs << "\nmxl_avsync_input_resyncs_total{essence=\"audio\"} " << rt.resyncs << "\n";
     for (const char* result : {"paired", "missing_audio", "missing_video", "duplicate", "ambiguous", "out_of_range"}) {
         int count = 0;
         if (ana) {
@@ -125,7 +143,11 @@ std::string metrics_text(Runtime& rt)
     for (const char* name : {"pass", "warn", "fail", "invalid"}) {
         os << "mxl_avsync_grade{grade=\"" << name << "\"} " << (ana && grade == name ? 1 : 0) << "\n";
     }
-    os << "mxl_avsync_av_offset_ms 0\nmxl_avsync_av_offset_deviation_ms 0\n";
+    double offset = 0;
+    if (!rt.events.empty() && rt.events.back().av_offset_ms) {
+        offset = *rt.events.back().av_offset_ms;
+    }
+    os << "mxl_avsync_av_offset_ms " << offset << "\nmxl_avsync_av_offset_deviation_ms 0\n";
     os << "# TYPE mxl_avsync_av_offset_seconds histogram\n";
     for (const char* le : {"-0.5", "-0.2", "-0.1", "-0.06", "-0.04", "-0.015", "-0.005", "0.005", "0.015", "0.04", "0.06", "0.1", "0.2", "0.5", "+Inf"}) {
         os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << le << "\"} 0\n";
@@ -176,7 +198,10 @@ void install_web(HttpServer& http, Runtime& rt)
     http.add("GET", "/api/v1/status", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
         return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
-            {"input_state", rt.input_state}, {"nmos_registered", rt.nmos_registered}, {"audio_enable", rt.config.audio_enable}});
+            {"input_state", rt.input_state}, {"detail", rt.media_detail}, {"nmos_registered", rt.nmos_registered},
+            {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
+            {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
+            {"interlaced", rt.interlaced_flow}});
     });
     http.add("GET", "/statusz", [&](const HttpRequest& request) {
         return http_status_alias(rt);
@@ -594,6 +619,61 @@ int run_service(Config config)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     });
+#ifdef AVSYNC_WITH_MXL
+    std::thread media([&] {
+        LiveCallbacks callbacks;
+        callbacks.copy_config = [&] {
+            std::lock_guard lock(rt.mu);
+            return rt.config;
+        };
+        callbacks.stopped = [&] {
+            std::lock_guard lock(rt.mu);
+            return rt.stopped;
+        };
+        callbacks.set_status = [&](const MediaStatus& status) {
+            std::lock_guard lock(rt.mu);
+            rt.media_ready = status.ready && !rt.stopped;
+            if (!status.state.empty()) {
+                rt.input_state = status.state;
+            }
+            rt.media_detail = status.detail;
+            rt.video_flow = status.video_flow;
+            rt.audio_flow = status.audio_flow;
+            rt.grain_rows = status.grain_rows;
+            rt.frame_width = status.width;
+            rt.frame_height = status.height;
+            rt.interlaced_flow = status.interlaced;
+        };
+        callbacks.add_event = [&](const Measurement& event) {
+            std::lock_guard lock(rt.mu);
+            rt.events.push_back(event);
+            if (rt.events.size() > 1000) {
+                rt.events.erase(rt.events.begin(), rt.events.begin() + static_cast<std::ptrdiff_t>(rt.events.size() - 1000));
+            }
+        };
+        callbacks.count_generator_event = [&] {
+            std::lock_guard lock(rt.mu);
+            rt.generator_events += 1;
+        };
+        callbacks.count_video_grain = [&] {
+            std::lock_guard lock(rt.mu);
+            rt.output_video += 1;
+        };
+        callbacks.count_late = [&](bool video) {
+            std::lock_guard lock(rt.mu);
+            if (video) {
+                rt.late_video += 1;
+            } else {
+                rt.late_audio += 1;
+            }
+        };
+        callbacks.count_resync = [&] {
+            std::lock_guard lock(rt.mu);
+            rt.resyncs += 1;
+        };
+        run_live_media(g_stop, std::move(callbacks));
+    });
+#endif
     while (!g_stop) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -602,6 +682,9 @@ int run_service(Config config)
     if (web_thread.joinable()) web_thread.join();
     if (nmos_thread.joinable()) nmos_thread.join();
     if (beat.joinable()) beat.join();
+#ifdef AVSYNC_WITH_MXL
+    if (media.joinable()) media.join();
+#endif
     if (error) std::rethrow_exception(error);
     return 143;
 }

@@ -6,7 +6,7 @@
 - `mxl-avsync generate`, `analyze`, `validate` and `merge`. Default file is MOV + ProRes 422 HQ + PCM 24-bit. Container time bases are checked.
 - `mxl-avsync serve` with REST, widgets, `/livez`, `/readyz`, `/metrics` and an IS-04/IS-05 node for `AVSYNC_ROLE=generator|analyzer`.
 - Clean PCM timing error is ~0 ms (target ≤ 0.1 ms). SNR 10 dB and the G.711 table-codec test aid are 100 % detection on the unit rows in `docs/test-matrix.md`.
-- Live MXL grains are not in this binary. The ST 2110 hour run is not a feature of this repo; it goes through mxl-st2110-gateway. See the implementation plan.
+- Live MXL video (`video/v210`) and audio (`audio/float32`) reader and writer in `mxlio/`, linked only into `mxl-avsync`. Interlaced flows are fields. `/readyz` is 200 when those flows are open. Closed loop on one host: set offsets 35, 0 and −35 ms came back as 35.0002, 0.0002 and −35.0005 ms. The ST 2110 hour run is not a feature of this repo; it goes through mxl-st2110-gateway.
 
 ## 1.1 / 2.0
 

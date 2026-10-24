@@ -12,11 +12,41 @@ jobs:
       - name: packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config g++ \
-            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
-            python3
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build pkg-config g++ \
+            curl zip unzip tar git ca-certificates python3 \
+            bison flex autoconf automake libtool \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+      - name: Build MXL
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          git init /tmp/mxl
+          git -C /tmp/mxl remote add origin https://github.com/dmf-mxl/mxl.git
+          git -C /tmp/mxl fetch --depth 1 origin "$MXL_REF"
+          git -C /tmp/mxl checkout FETCH_HEAD
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          baseline = subprocess.check_output(["git", "-C", "/opt/vcpkg", "rev-parse", "HEAD"], text=True).strip()
+          doc = json.loads(pathlib.Path("docker/mxl-vcpkg.json").read_text())
+          doc["builtin-baseline"] = baseline
+          pathlib.Path("/tmp/mxl-manifest").mkdir(parents=True, exist_ok=True)
+          pathlib.Path("/tmp/mxl-manifest/vcpkg.json").write_text(json.dumps(doc))
+          PY
+          cmake -S /tmp/mxl -B /tmp/mxl/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_MANIFEST_DIR=/tmp/mxl-manifest \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF -DBUILD_UTILS=OFF -DBUILD_DOCS=OFF \
+            -DMXL_ENABLE_FABRICS_OFI=OFF \
+            -DCMAKE_INSTALL_PREFIX=/opt/mxl
+          cmake --build /tmp/mxl/build -j"$(nproc)"
+          sudo cmake --install /tmp/mxl/build
       - name: build
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$(nproc)"
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="/opt/mxl;/tmp/mxl/build/vcpkg_installed/x64-linux" \
+            -DMXL_RUNTIME_LIB_DIRS="/opt/mxl/lib;/tmp/mxl/build/vcpkg_installed/x64-linux/lib"
+          cmake --build build -j"$(nproc)"
       - name: unit
         run: ./build/avsync-core-tests && ./build/avsync-picture-tests
       - name: api
@@ -27,3 +57,7 @@ jobs:
         run: ./tests/integration/stage2.sh
       - name: phone display rules
         run: node --test mobile-app/src/display.test.mjs
+      - name: live
+        run: |
+          export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          ./tests/integration/live.sh

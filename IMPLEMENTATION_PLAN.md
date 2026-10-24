@@ -4,7 +4,7 @@ This plan comes before any code. It is updated as the work goes on: every decisi
 
 ## Status (2026-10-24)
 
-Core, file tools and the serve control plane are implemented and tested on the cloud VM. Live MXL I/O is not linked: `/readyz` is 503 until a build with libmxl creates flows. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
+Core, file tools, the serve control plane, and the live MXL reader and writer are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
 
 ## Pins
 
@@ -146,7 +146,7 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 1. **Text is Blend2D 0.21.2 with DejaVu Sans 2.37**, the same pin mxl-multiviewer uses. Blend2D and the asmjit in its release tarball are fetched at configure time and linked statically. The font file is `third_party/dejavu/DejaVuSans.ttf`, embedded by `cmake/EmbedBytes.cmake`. `draw_text` still writes white luma into the black boxes. Marker, strip, fiducials and QR are unchanged.
 2. **QR decode is quirc (ISC), not zxing-cpp.** Encode is still Nayuki, error correction M. quirc reads the codes this generator writes. zxing can replace `decode_qr_text`.
 3. **NMOS is an in-tree IS-04 v1.3 / IS-05 v1.1 node, not nmos-cpp.** It exposes the node, device, flows, senders and receivers, the test-signal tag, group hints, and `mxl_domain_id` / `mxl_flow_id` on `urn:x-nmos:transport:mxl`. It does not run the AMWA test suite and it never sends IS-05 to another device. nmos-cpp at `fe303849` remains the pin if a later build swaps the module.
-4. **libmxl is not linked in the default binary.** The pin is recorded (`MXL_REF=218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`). Ubuntu 24.04's fmt/spdlog packages are older than the MXL v1.1 build, so this VM did not produce a live writer. File round trips and the control API are what this environment can prove.
+4. **libmxl is linked only into `mxl-avsync`, through `mxlio/`.** `avsync-core` stays free of it. The pin is `MXL_REF=218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`, built with vcpkg the way mxl-scopes builds it (`-DMXL_ENABLE_FABRICS_OFI=OFF`). A build without that package still runs the file tools and leaves `/readyz` at 503.
 5. **Interlaced file pictures are not a separate mux path yet.** The event plan for 1080i25 is tested (events on first fields, even period). The file generator's exercised rasters are progressive.
 
 ## What was measured
@@ -175,10 +175,34 @@ The on-screen sync scale is a moving square, not the configured offset. Each ste
 - No transport code: not ST 2110, not SRT, not SIP, not fabrics, not WebRTC. Sibling repos move those flows onto MXL. This process only reads and writes MXL flows and files.
 - The hour run is a lab through `mxl-st2110-gateway`, not a binary or a CI job here.
 - File-mode H.264 and G.711 measure the detectors. They are not a substitute for a live gateway.
-- libmxl is not linked. `/readyz` stays 503 until a later build creates flows.
+- Latency is not reported. `sync_state` stays `unknown` until a PTP source is read. The closed-loop numbers below are index-time AV offset on one machine.
 - `mxl-avsync paths` still prints the old host-gap names (`srt-live`, `g711-sip`, `st2110-loop`, `fabrics-cross-node`). That command text is code and was left unchanged in this docs pass.
 - The phone UI has not been run on a device. Phone work does not block live MXL.
 
+## Live MXL (2026-10-24)
+
+Command, from a build configured with `-DCMAKE_PREFIX_PATH="/opt/mxl;/tmp/mxl/build/vcpkg_installed/x64-linux"`:
+
+```
+LD_LIBRARY_PATH=/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  BIN=/tmp/avsync-live/mxl-avsync SAMPLE=/tmp/avsync-live/avsync-sample-flow \
+  bash tests/integration/live.sh
+```
+
+Output:
+
+```
+offset 35: 3585748694 35.000244140625 warn
+offset 0: 3585748696 0.000244140625 pass
+offset -35 after reopen: 3585748698 -35.00048828125 warn
+interlaced field grain
+{"grain_rows":540,"height":1080,"interlaced":true,"media_ready":true,"width":1920}
+index=89643717482 bytes=2764800 grain_rows=540 width=1920 height=1080 interlaced=1 valid=1
+live.sh ok
+```
+
+The three offsets are the newest paired event after each generator start (1080p50, 2/s) on `/dev/shm`. The analyzer's expected offset was 0, so 35 ms and −35 ms grade warn and 0 ms grades pass. The interlaced grain is one field: 540 rows, 2 764 800 bytes, `interlaced_tff`. No latency is claimed.
+
 ## Next step
 
-Link libmxl and add the live MXL video and audio reader and writer in this repo. Do not add gateway, SRT, SIP or fabrics code. The hour run, SRT and SIP stay on the sibling gateways. A device build of the phone app stays later and does not block that work.
+Result picture as its own MXL video flow, and about 1 fps JPEG snapshots of the input and generated flows. Not a transport, and not NMOS-cpp. The hour run, SRT and SIP stay on the sibling gateways.
