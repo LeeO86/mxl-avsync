@@ -103,6 +103,7 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         app/config.cpp
         util/uuid.cpp
         ops/http.cpp
+        ops/ptp.cpp
         ops/service.cpp
         nmos/ids.cpp
         nmos/route.cpp

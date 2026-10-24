@@ -1,6 +1,7 @@
 #include "service.hpp"
 
 #include "http.hpp"
+#include "ptp.hpp"
 #include "paths.hpp"
 #include "picture.hpp"
 #include "report.hpp"
@@ -58,6 +59,8 @@ struct Runtime {
     bool interlaced_flow = false;
     std::string source_image_path;
     int source_image_frames = 0;
+    std::string ptp_sync_state = "unknown";
+    std::string ptp_accuracy_ns = "unknown";
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
 };
 
@@ -162,7 +165,10 @@ std::string metrics_text(Runtime& rt)
     os << "mxl_avsync_av_offset_seconds_sum 0\nmxl_avsync_av_offset_seconds_count 0\n";
     os << "mxl_avsync_video_drops_total 0\nmxl_avsync_video_duplicates_total 0\n";
     os << "mxl_avsync_audio_correlation 0\nmxl_avsync_audio_level_dbfs 0\n";
-    os << "mxl_avsync_reference_sync{type=\"none\",state=\"unknown\"} " << (ana ? 1 : 0) << "\n";
+    for (const char* state : {"locked", "unlocked", "unknown"}) {
+        const int on = ana && rt.ptp_sync_state == state ? 1 : 0;
+        os << "mxl_avsync_reference_sync{type=\"tai-ptp\",state=\"" << state << "\"} " << on << "\n";
+    }
     os << "mxl_avsync_nmos_registry_up " << (rt.nmos_registered ? 1 : 0) << "\n";
     os << "mxl_avsync_nmos_activations_total 0\n";
     return os.str();
@@ -211,7 +217,8 @@ void install_web(HttpServer& http, Runtime& rt)
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
-            {"interlaced", rt.interlaced_flow}});
+            {"interlaced", rt.interlaced_flow},
+            {"ptp", {{"sync_state", rt.ptp_sync_state}, {"accuracy_ns", rt.ptp_accuracy_ns}}}});
     });
     auto preview_response = [](const std::string& slot) {
 #ifdef AVSYNC_WITH_MXL
@@ -656,6 +663,24 @@ int run_service(Config config)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     });
+    std::thread ptp([&] {
+        while (!g_stop) {
+            std::string url;
+            {
+                std::lock_guard lock(rt.mu);
+                url = rt.config.ptp_status_url;
+            }
+            const PtpReading reading = read_ptp_status(url, 300);
+            {
+                std::lock_guard lock(rt.mu);
+                rt.ptp_sync_state = reading.sync_state;
+                rt.ptp_accuracy_ns = reading.accuracy_ns;
+            }
+            for (int i = 0; i < 10 && !g_stop; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    });
 #ifdef AVSYNC_WITH_MXL
     std::thread media([&] {
         LiveCallbacks callbacks;
@@ -721,6 +746,13 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             rt.resyncs += 1;
         };
+        callbacks.clock_reading = [&] {
+            std::lock_guard lock(rt.mu);
+            ClockReading clock;
+            clock.sync_state = rt.ptp_sync_state;
+            clock.accuracy_ns = rt.ptp_accuracy_ns;
+            return clock;
+        };
 #ifdef AVSYNC_WITH_NMOS
         callbacks.input_route = [](bool video) {
             const auto route = get_input_route(video);
@@ -747,6 +779,7 @@ int run_service(Config config)
     if (web_thread.joinable()) web_thread.join();
     if (nmos_thread.joinable()) nmos_thread.join();
     if (beat.joinable()) beat.join();
+    if (ptp.joinable()) ptp.join();
 #ifdef AVSYNC_WITH_MXL
     if (media.joinable()) media.join();
 #endif
