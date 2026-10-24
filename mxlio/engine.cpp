@@ -419,21 +419,50 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (!video_domain.is_open() || !audio_domain.is_open()) {
             video = {};
             audio = {};
-            const auto own_domain = std::filesystem::absolute(config.mxl_output_domain_dir);
-            for (const auto& flow : scan_flows(config.mxl_domain_scan)) {
-                if (std::filesystem::absolute(flow.domain_path) == own_domain) {
+            if (config.nmos_enable) {
+                const auto video_route = callbacks.input_route ? callbacks.input_route(true) : InputRoute{};
+                const auto audio_route = callbacks.input_route ? callbacks.input_route(false) : InputRoute{};
+                if (!video_route.enable || video_route.flow_id.empty() || !audio_route.enable || audio_route.flow_id.empty()) {
+                    status.ready = false;
+                    status.state = "not_routed";
+                    status.detail = "waiting for IS-05";
+                    callbacks.set_status(status);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
                 }
-                if (video.flow_id.empty() && acceptable_video(flow)) {
-                    video = flow;
-                } else if (flow.media_type == "video/v210" && flow.bottom_field_first) {
-                    status.ready = false;
-                    status.state = "format_mismatch";
-                    status.detail = "bottom field first";
-                    callbacks.set_status(status);
+                for (const auto& flow : scan_flows(config.mxl_domain_scan)) {
+                    if (flow.domain_id == video_route.domain_id && flow.flow_id == video_route.flow_id) {
+                        video = flow;
+                    }
+                    if (flow.domain_id == audio_route.domain_id && flow.flow_id == audio_route.flow_id) {
+                        audio = flow;
+                    }
                 }
-                if (audio.flow_id.empty() && acceptable_audio(flow)) {
-                    audio = flow;
+                if (video.flow_id.empty() || audio.flow_id.empty()) {
+                    status.ready = false;
+                    status.state = "waiting";
+                    status.detail = "routed flow is not in the scan path";
+                    callbacks.set_status(status);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    continue;
+                }
+            } else {
+                const auto own_domain = std::filesystem::absolute(config.mxl_output_domain_dir);
+                for (const auto& flow : scan_flows(config.mxl_domain_scan)) {
+                    if (std::filesystem::absolute(flow.domain_path) == own_domain) {
+                        continue;
+                    }
+                    if (video.flow_id.empty() && acceptable_video(flow)) {
+                        video = flow;
+                    } else if (flow.media_type == "video/v210" && flow.bottom_field_first) {
+                        status.ready = false;
+                        status.state = "format_mismatch";
+                        status.detail = "bottom field first";
+                        callbacks.set_status(status);
+                    }
+                    if (audio.flow_id.empty() && acceptable_audio(flow)) {
+                        audio = flow;
+                    }
                 }
             }
             std::string error;

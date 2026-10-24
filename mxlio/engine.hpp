@@ -24,11 +24,18 @@ struct MediaStatus {
     bool interlaced = false;
 };
 
+struct InputRoute {
+    bool enable = false;
+    std::string domain_id;
+    std::string flow_id;
+};
+
 struct LiveCallbacks {
     std::function<Config()> copy_config;
     std::function<bool()> stopped;
     std::function<void(const MediaStatus&)> set_status;
     std::function<void(const std::string& flow, const std::string& domain)> set_result;
+    std::function<InputRoute(bool video)> input_route;
     std::function<void(const Measurement&)> add_event;
     std::function<void()> count_generator_event;
     std::function<void()> count_video_grain;

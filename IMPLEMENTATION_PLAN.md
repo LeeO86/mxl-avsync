@@ -145,7 +145,7 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 
 1. **Text is Blend2D 0.21.2 with DejaVu Sans 2.37**, the same pin mxl-multiviewer uses. Blend2D and the asmjit in its release tarball are fetched at configure time and linked statically. The font file is `third_party/dejavu/DejaVuSans.ttf`, embedded by `cmake/EmbedBytes.cmake`. `draw_text` still writes white luma into the black boxes. Marker, strip, fiducials and QR are unchanged.
 2. **QR decode is quirc (ISC), not zxing-cpp.** Encode is still Nayuki, error correction M. quirc reads the codes this generator writes. zxing can replace `decode_qr_text`.
-3. **NMOS is an in-tree IS-04 v1.3 / IS-05 v1.1 node, not nmos-cpp.** It exposes the node, device, flows, senders and receivers, the test-signal tag, group hints, and `mxl_domain_id` / `mxl_flow_id` on `urn:x-nmos:transport:mxl`. It does not run the AMWA test suite and it never sends IS-05 to another device. nmos-cpp at `fe303849` remains the pin if a later build swaps the module.
+3. **The NMOS node is nmos-cpp `fe303849` when `AVSYNC_WITH_NMOS` is on.** Ids stay `mxl-avsync/<seed>/...` from `util/uuid.cpp`. DNS-SD is off unless `NMOS_DNS_SD=true`. MXL connection resources are IS-05 v1.2, which is the version this pin implements for `urn:x-nmos:transport:mxl`. The process does not send IS-05 to another device. A build without nmos-cpp keeps the small in-tree node.
 4. **libmxl is linked only into `mxl-avsync`, through `mxlio/`.** `avsync-core` stays free of it. The pin is `MXL_REF=218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`, built with vcpkg the way mxl-scopes builds it (`-DMXL_ENABLE_FABRICS_OFI=OFF`). A build without that package still runs the file tools and leaves `/readyz` at 503.
 5. **Interlaced file pictures are not a separate mux path yet.** The event plan for 1080i25 is tested (events on first fields, even period). The file generator's exercised rasters are progressive.
 
@@ -222,6 +222,25 @@ live.sh ok
 
 The generator's input preview was HTTP 404 `no frame yet`. The analyzer result flow was 960×540, one progressive grain, 1 382 400 bytes. The analyzer's generated JPEG is that result tile; its input JPEG is the test signal it is reading.
 
+## NMOS node (2026-10-24)
+
+No registry and no mDNS. DNS-SD left at its default, off.
+
+```
+LD_LIBRARY_PATH=/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  BIN=/tmp/avsync-nmos/mxl-avsync bash tests/integration/nmos.sh
+```
+
+```
+node id 436cc13d-3c14-51cf-8bbb-6864a81d4368
+sender flow 6f6cc5dc-a56c-52e0-89aa-db6d881bb860 domain d69b8f98-1ebb-58ae-9d82-2af8234d9f3e
+analyzer ready after IS-05
+taken port exits 75
+nmos.sh ok
+```
+
+The node id is UUIDv5 of `mxl-avsync/nmos-gen/node`. Senders use `urn:x-nmos:transport:mxl` with empty `interface_bindings`. Activating the analyzer's video and audio receivers with the generator's domain and flow ids made `/readyz` 200 and `input_state` running. A second process on the same NMOS port exited 75. The AMWA nmos-testing suite was not run: this VM has no Docker, and a registry is not started with mDNS on the host network.
+
 ## Next step
 
-Replace the hand-written NMOS node with nmos-cpp. Not a transport. The hour run, SRT and SIP stay on the sibling gateways.
+Read PTP the way the siblings do, or keep `AVSYNC_PTP_STATUS_URL` and leave `sync_state` unknown until it is read. Do not report latency without it.

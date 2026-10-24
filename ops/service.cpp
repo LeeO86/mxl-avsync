@@ -10,6 +10,10 @@
 #include "engine.hpp"
 #include "preview.hpp"
 #endif
+#ifdef AVSYNC_WITH_NMOS
+#include "node.hpp"
+#include "route.hpp"
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -164,6 +168,7 @@ std::string metrics_text(Runtime& rt)
     return os.str();
 }
 
+#ifndef AVSYNC_WITH_NMOS
 nlohmann::json nmos_node(const Config& config)
 {
     const std::string node = uuid_v5("mxl-avsync/" + config.seed() + "/node");
@@ -177,6 +182,7 @@ nlohmann::json nmos_node(const Config& config)
         {"interfaces", {{{"name", "eth0"}, {"chassis_id", nullptr}, {"port_id", nullptr}}}}};
     (void)device;
 }
+#endif
 
 void install_web(HttpServer& http, Runtime& rt)
 {
@@ -514,6 +520,7 @@ std::string widget_html(Runtime& rt, const std::string& id, bool latency, bool t
     return html.str();
 }
 
+#ifndef AVSYNC_WITH_NMOS
 void install_nmos(HttpServer& http, Runtime& rt)
 {
     http.add("GET", "/", [&](const HttpRequest&) {
@@ -594,6 +601,7 @@ void install_nmos(HttpServer& http, Runtime& rt)
             {"transport_params", {{{"mxl_domain_id", nullptr}, {"mxl_flow_id", nullptr}}}}});
     });
 }
+#endif
 
 } // namespace
 
@@ -610,9 +618,17 @@ int run_service(Config config)
     HttpServer web;
     HttpServer nmos;
     install_web(web, rt);
+#ifdef AVSYNC_WITH_NMOS
+    std::unique_ptr<NmosNode> nmos_node;
+    if (rt.config.nmos_enable) {
+        nmos_node = std::make_unique<NmosNode>(rt.config);
+        nmos_node->start();
+    }
+#else
     if (rt.config.nmos_enable) {
         install_nmos(nmos, rt);
     }
+#endif
     std::exception_ptr error;
     std::thread web_thread([&] {
         try {
@@ -623,12 +639,16 @@ int run_service(Config config)
         }
     });
     std::thread nmos_thread([&] {
+#ifndef AVSYNC_WITH_NMOS
         try {
             if (rt.config.nmos_enable) nmos.serve(rt.config.nmos_port);
         } catch (...) {
             error = std::current_exception();
             g_stop = true;
         }
+#else
+        (void)nmos;
+#endif
     });
     std::thread beat([&] {
         while (!g_stop) {
@@ -701,12 +721,27 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             rt.resyncs += 1;
         };
+#ifdef AVSYNC_WITH_NMOS
+        callbacks.input_route = [](bool video) {
+            const auto route = get_input_route(video);
+            InputRoute out;
+            out.enable = route.enable;
+            out.domain_id = route.domain_id;
+            out.flow_id = route.flow_id;
+            return out;
+        };
+#endif
         run_live_media(g_stop, std::move(callbacks));
     });
 #endif
     while (!g_stop) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+#ifdef AVSYNC_WITH_NMOS
+    if (nmos_node) {
+        nmos_node->stop();
+    }
+#endif
     web.stop();
     nmos.stop();
     if (web_thread.joinable()) web_thread.join();
