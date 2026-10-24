@@ -205,6 +205,21 @@ void fill_luma(LumaView view, uint16_t y);
 void draw_static_layer(LumaView view);
 void draw_timing(LumaView view, uint64_t seq, int frame_in_period, int period_frames, bool marker_white);
 void draw_text(LumaView view, int x, int y, std::string_view text, int scale, uint16_t y_value);
+int text_px_width(std::string_view text, int scale);
+int text_px_height(int scale);
+
+// Visual sync scale. Negative is audio early (left, red), zero is white, positive is audio late (right, green).
+enum class SyncDot { Early, Zero, Late };
+SyncDot sync_dot_kind(double position_ms);
+
+// Where the sync square is during one event. Each step is one frame.
+// At 1080p50 and 2/s that is 20 ms, so the window is ±240 ms and the square
+// crosses it once per 25-frame period.
+struct SyncPlace {
+    double scale_ms = 250;
+    double position_ms = 0;
+};
+SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms);
 
 struct MarkerReading {
     enum class State { Black, White, Invalid };
@@ -219,6 +234,48 @@ struct MarkerReading {
 };
 
 MarkerReading read_marker(const uint16_t* luma, int width, int height, int stride);
+
+// Stage 2: find the test picture in a scaled or cropped frame (a multiviewer tile,
+// or a phone camera image) using the four corner fiducials.
+struct PicturePose {
+    bool found = false;
+    double origin_x = 0;
+    double origin_y = 0;
+    double width = 0;
+    double height = 0;
+    double corner_x[4] = {};
+    double corner_y[4] = {};
+    double fiducial_size = 0;
+};
+
+PicturePose locate_picture(const uint16_t* luma, int width, int height, int stride);
+// Sample the located picture into a raster and read the marker on that raster.
+struct LocatedMarker {
+    bool located = false;
+    PicturePose pose;
+    MarkerReading reading;
+    int width = 0;
+    int height = 0;
+    std::vector<uint16_t> canonical;
+};
+LocatedMarker read_located_marker(const uint16_t* luma, int width, int height, int stride);
+
+// Row time inside one rolling-shutter frame. readout_ms is the full-frame readout; 0 is global shutter.
+double marker_row_time_ms(double frame_start_ms, double readout_ms, int row, int height);
+
+// Stage 3 calibration. A record expires after 90 days or an OS change.
+struct CalibrationRecord {
+    std::string model;
+    std::string os_version;
+    double offset_ms = 0; // capture bias: subtract from the raw AV offset
+    double spread_ms = 0;
+    int events = 0;
+    std::string method = "led-piezo";
+    int64_t calibrated_unix_ms = 0;
+};
+enum class CalibrationState { Missing, Expired, Valid };
+CalibrationState calibration_state(const CalibrationRecord* record, std::string_view os_version, int64_t now_unix_ms);
+const char* calibration_state_name(CalibrationState state);
 
 struct VideoObservation {
     bool event = false;
@@ -364,6 +421,38 @@ struct OffsetWords {
 };
 
 OffsetWords describe_offset(double ms);
+
+// Phone measurement on one clock. Video frames may contain a scaled or offset test picture.
+struct PhoneReport {
+    std::vector<Measurement> events;
+    std::string calibration = "missing"; // valid, missing, expired
+    bool show_grade_colour = false;
+    double uncertainty_ms = 0;
+};
+
+class PhoneSession {
+public:
+    PhoneSession(int event_rate, GradeWindows windows);
+    void set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms);
+    void push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms);
+    void push_audio(const float* samples, size_t count, double start_ms, int sample_rate);
+    PhoneReport finish(const std::string& test_id = "PHONE");
+
+private:
+    int event_rate_;
+    GradeWindows windows_;
+    CalibrationState calibration_state_ = CalibrationState::Missing;
+    CalibrationRecord calibration_{};
+    bool tracker_ready_ = false;
+    int canonical_w_ = 0;
+    int canonical_h_ = 0;
+    std::optional<MarkerTracker> tracker_;
+    std::vector<VideoObservation> videos_;
+    std::vector<float> audio_;
+    double audio_origin_ms_ = 0;
+    bool audio_set_ = false;
+    int audio_rate_ = 48000;
+};
 
 struct SeriesStats {
     int valid = 0;

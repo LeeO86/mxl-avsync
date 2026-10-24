@@ -18,6 +18,8 @@ struct GenerateRequest {
     std::string audio_codec = "pcm24";
     std::string title;
     std::string source;
+    std::string subtitle;
+    std::string source_image;
     std::string notes;
     std::string test_id = "TEST-2026-0001";
     std::string out_path;
@@ -36,6 +38,7 @@ struct AnalyzeRequest {
     double to_s = -1;
     int channel = 0;
     std::string fail_on; // "", "warn", "fail"
+    bool locate = false; // stage 2: fiducial search in a scaled or cropped picture
 };
 
 // 0 success, 1 container/analysis failure, 2 no events, 78 bad arguments.

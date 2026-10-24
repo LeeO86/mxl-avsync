@@ -35,6 +35,15 @@ test "$code" = 404
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/widget/generator?nope=1")
 test "$code" = 400
 curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/stop" | grep -q '"stopped":true'
+curl -sf -X PATCH "http://127.0.0.1:$PORT/api/v1/generator" -H 'Content-Type: application/json' \
+  -d '{"source":"STUDIO A","subtitle":"desk@studio.example"}' | grep -q '"subtitle":"desk@studio.example"'
+curl -sf "http://127.0.0.1:$PORT/icon.png" | cmp -s - "$ROOT/web/icon.png"
+curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/source-image" -H 'Content-Type: image/png' \
+  --data-binary @"$ROOT/tests/fixtures/transparent.png" | grep -q '"frames":1'
+curl -sf "http://127.0.0.1:$PORT/api/v1/generator/source-image" | cmp -s - "$ROOT/tests/fixtures/transparent.png"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT/api/v1/generator/source-image" \
+  -H 'Content-Type: text/plain' --data 'not an image')
+test "$code" = 415
 curl -sf "http://127.0.0.1:$NPORT/x-nmos/node/v1.3/self" | grep -q '"description":"mxl-avsync"'
 kill -TERM "$pid"
 wait "$pid" || code=$?

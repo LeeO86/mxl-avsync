@@ -2,7 +2,7 @@
 
 AV sync and latency measurement for MXL. A generator writes a visible and audible test signal (timing marker, Gray-coded frame strip, QR code, chirps), live into MXL flows or as test files. An analyzer finds the markers and chirps at any point of a chain and reports the AV offset with a pass/warn/fail grade, and — with the platform's PTP/TAI clock — the audio and video latency. A phone app for measuring at a real monitor comes last.
 
-**Status: 1.0 implementation of the measuring core, the file tools and the control plane.** Live MXL grains and the ST 2110 loop still need a Linux host with libmxl. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
+**Status: stage 1 control plane, plus stage 2 file paths and the stage 3 phone core.** Live MXL, SRT, the fabrics agent, SIP and a real phone still need a Linux host. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md). `mxl-avsync paths` prints the split.
 
 ## Build
 
@@ -12,6 +12,8 @@ cmake --build build
 ./build/avsync-core-tests
 ./tests/integration/api.sh
 ./tests/integration/file.sh
+./tests/integration/stage2.sh
+node --test mobile-app/src/display.test.mjs
 ```
 
 Needs CMake, Ninja, a C++20 compiler and the FFmpeg development libraries (libavformat, libavcodec, libavutil, libswscale, libswresample).

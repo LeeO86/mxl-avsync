@@ -156,6 +156,20 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 - H.264 + AAC is not exact (about −19 ms on a 3 s 720p50 clip) and is only offered with `--allow-container-shift`.
 - `serve`: `/livez` 200, `/readyz` 503 without flows, metrics families present at 0, widget CSP and no `X-Frame-Options`, unknown widget 404, bad parameter 400, invalid config 78, SIGTERM 143.
 
+## Stages 2 and 3 (2026-10-24)
+
+Implemented on top of the stage 1 branch. `mxl-avsync paths` lists what runs here and what still needs the host.
+
+- Fiducial search (`locate_picture`, `read_located_marker`) and `analyze --locate`.
+- File-mode H.264 at 1/4/10 Mbit/s and G.711 PCMU/PCMA at 8 kHz (`tests/integration/stage2.sh`).
+- Cross-node merge view: CLI `merge` and `POST /api/v1/merge`, using arrival time when both sides are `tai-ptp`.
+- Phone core: rolling-shutter row time, 90-day calibration, `PhoneSession`. Expo UI, display rules, and the LED/piezo firmware are in `mobile-app/`.
+
+6. **Live SRT, the fabrics agent, and live SIP are not processes in this repo.** The file-mode distortion (H.264, G.711) and the merge view are implemented. The gateway, the agent, and a SIP function are host gaps.
+7. **The phone UI is not executed on a device here.** Capture sources for iOS (host clock) and Android (`REALTIME` sensor timestamps) are in `mobile-app/modules/avsync/`. They are not compiled by CMake.
+
+The on-screen sync scale is a moving square, not the configured offset. Each step is one frame. At 1080p50 and 2/s that is ±240 ms, one tick per frame, crossed once per event: red while early, white at 0, green while late. The analyzer still reads only the marker block and the Gray strip. Under the centre square, a PNG or GIF sits immediately left of the source name, with `AVSYNC_SUBTITLE` on the next line (`--subtitle`, `PATCH /api/v1/generator`). `web/icon.png` is the app icon on the test signal, the web GUI, and the phone app.
+
 ## Next step
 
-On the Linux host: build libmxl at the pin, link the live readers and writers (regions only, torn-read check, flow reopen), run `tests/integration/live.sh` once that script has a real domain, then the ST 2110 hour runs.
+On the Linux host: link libmxl, then the SRT gateway loop, a two-node fabrics merge, and a device build of the Expo app against the calibration rig. ST 2110 remains the stage 1 host gap.

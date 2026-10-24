@@ -31,11 +31,23 @@ Chirp shapes, 30 ms, 700–2500 Hz and threshold 0.5 are unchanged: every row ab
 | ffmpeg `adelay` +20 ms on the offset-0 file | median +20.0 ms |
 | MP4 + H.264 + AAC, 720p50, offset 0, `--allow-container-shift` | container shift is reported; measured median about −19 ms on this clip because of AAC priming and H.264 B-frames. Not the default. |
 
+## Stage 2 (this VM)
+
+| Path | Result |
+| --- | --- |
+| Fiducial search, picture offset in a larger frame and scaled 2× | sequence and marker state recovered (`avsync-core-tests`) |
+| 720p50 ProRes scaled to 640×360 and padded into 960×540, `--locate` | median ~0 ms, 2 events |
+| H.264 at 1, 4 and 10 Mbit/s, PCM audio kept | median ~0 ms at each rate |
+| G.711 PCMU and PCMA at 8 kHz, video copied | median within 0.1 ms |
+| Merge of two `tai-ptp` results 40 ms apart on arrival time | end-to-end 40.0 ms |
+
 ## Not measured here
 
 | Path | Why |
 | --- | --- |
 | MXL generator → analyzer on one node | this binary does not link libmxl; `/readyz` stays 503 until a build with libmxl creates the flows |
 | ST 2110 loop, 1 h at 1080p50 and 1080i25 | needs the Linux host, PTP, and mxl-st2110-gateway |
-| SRT, cross-node fabrics, live G.711 | stage 2 |
-| Phone at a monitor | stage 3, after 1.0 |
+| SRT live through mxl-srt-gateway | the H.264 file rows above are the picture; the gateway process is not on this VM |
+| Cross-node fabrics agent | the merge view runs on saved results; the agent and PTP are not here |
+| G.711 live through SIP | no SIP function in this tree; file-mode PCMU/PCMA is measured |
+| Phone on a real device | `PhoneSession` and the Expo UI are in the tree; iOS/Android SDKs and the LED/piezo rig are not |

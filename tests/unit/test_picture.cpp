@@ -1,0 +1,160 @@
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "doctest.h"
+
+#include "picture.hpp"
+
+#include <cmath>
+#include <string>
+#include <vector>
+
+using namespace avsync;
+
+namespace {
+
+std::string fixture(const char* name)
+{
+    return std::string(AVSYNC_FIXTURE_DIR) + "/" + name;
+}
+
+int square_x(int frame, int period, double period_ms, const FrameGeometry& geometry)
+{
+    const SyncPlace place = sync_place(frame, period, period_ms);
+    const int span = std::max(1, geometry.sweep_x1 - geometry.sweep_x0);
+    const double along = (place.position_ms + place.scale_ms) / (2.0 * place.scale_ms);
+    return geometry.sweep_x0 + static_cast<int>(std::lround(along * (span - 1)));
+}
+
+} // namespace
+
+TEST_CASE("source stills keep transparency and gif frames follow time")
+{
+    std::string error;
+    SourceClip still;
+    CHECK(still.load(fixture("transparent.png"), error));
+    CHECK(still.frames.size() == 1);
+    bool clear = false;
+    bool solid = false;
+    const auto& rgba = still.frames[0].rgba;
+    for (size_t i = 3; i < rgba.size(); i += 4) {
+        if (rgba[i] == 0) {
+            clear = true;
+        }
+        if (rgba[i] == 255) {
+            solid = true;
+        }
+    }
+    CHECK(clear);
+    CHECK(solid);
+
+    SourceClip gif;
+    CHECK(gif.load(fixture("blink.gif"), error));
+    CHECK(gif.frames.size() >= 2);
+    const SourceStill* first = gif.at(0);
+    const SourceStill* later = gif.at(gif.loop_ms * 0.75);
+    REQUIRE(first != nullptr);
+    REQUIRE(later != nullptr);
+    CHECK(first->rgba != later->rgba);
+}
+
+TEST_CASE("large qr stays decodable and the sync square moves")
+{
+    QrPayload payload;
+    payload.test_id = "TEST-IDENT";
+    payload.k = 4;
+    payload.tk = 1000;
+    payload.format = "1080p50";
+    const std::string json = qr_payload_json(payload);
+    std::string error;
+    SourceClip clip;
+    REQUIRE(clip.load(fixture("transparent.png"), error));
+
+    auto draw = [&](int frame_in_period) {
+        Yuv422p10 frame;
+        frame.resize(1920, 1080);
+        PictureInfo info;
+        info.qr_json = json;
+        info.source = "STUDIO A";
+        info.title = "AV sync";
+        info.format_line = "1080p50";
+        info.offset_line = "offset 0 ms";
+        info.period_ms = 500;
+        info.counter = "frame as written by the generator 0000050";
+        info.time_line = "t   1000.0 ms";
+        info.source_image = clip.at(0);
+        render_picture(frame, info, 4, frame_in_period, 25, true);
+        return frame;
+    };
+    const Yuv422p10 zero = draw(0);
+    const Yuv422p10 late = draw(12);
+    const Yuv422p10 early = draw(13);
+    const auto text = decode_qr_text(zero.y.data(), zero.width, zero.height, zero.width);
+    CHECK(text.has_value());
+    if (text) {
+        CHECK(*text == json);
+    }
+    const MarkerReading reading = read_marker(zero.y.data(), zero.width, zero.height, zero.width);
+    CHECK(reading.strip_ok);
+    CHECK(reading.seq_low24 == 4);
+    CHECK(reading.state == MarkerReading::State::White);
+
+    const FrameGeometry geometry = frame_geometry(1920, 1080);
+    const int at_zero = square_x(0, 25, 500, geometry);
+    const int at_late = square_x(12, 25, 500, geometry);
+    const int at_early = square_x(13, 25, 500, geometry);
+    CHECK(at_late > at_zero);
+    CHECK(at_early < at_zero);
+    CHECK(at_late - at_early > 400);
+    const auto sample = [&](const Yuv422p10& frame, int x) {
+        return frame.y[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)];
+    };
+    CHECK(sample(zero, at_zero) == kYWhite);
+    CHECK(sample(late, at_late) == static_cast<uint16_t>(145 * 4));
+    CHECK(sample(early, at_early) == static_cast<uint16_t>(81 * 4));
+    CHECK(zero.cb[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(zero.width / 2) + static_cast<size_t>(at_zero / 2)] == kYNeutralChroma);
+    CHECK(zero.y[static_cast<size_t>(geometry.sweep_y - 18) * static_cast<size_t>(zero.width) + static_cast<size_t>(at_zero)] == kYWhite);
+
+    // A tick every 20 ms across ±250, on a row the centre square does not cover.
+    const int tick_row = geometry.sweep_y - 8;
+    int tick_runs = 0;
+    bool in_tick = false;
+    for (int x = geometry.sweep_x0; x < geometry.sweep_x1; ++x) {
+        const bool on = zero.y[static_cast<size_t>(tick_row) * static_cast<size_t>(zero.width) + static_cast<size_t>(x)] == kYWhite;
+        if (on && !in_tick) {
+            ++tick_runs;
+        }
+        in_tick = on;
+    }
+    CHECK(tick_runs >= 20);
+
+    // Label boxes sit on the black pad above the glyphs and must not touch.
+    std::vector<int> boxes;
+    int best_runs = 0;
+    for (int row = geometry.sweep_y - 70; row < geometry.sweep_y - 30; ++row) {
+        std::vector<int> found;
+        bool in_box = false;
+        int box_start = 0;
+        for (int x = geometry.sweep_x0; x <= geometry.sweep_x1; ++x) {
+            const bool on = x < geometry.sweep_x1
+                && zero.y[static_cast<size_t>(row) * static_cast<size_t>(zero.width) + static_cast<size_t>(x)] == kYBlack;
+            if (on && !in_box) {
+                box_start = x;
+                in_box = true;
+            } else if (!on && in_box) {
+                if (x - box_start > 8) {
+                    found.push_back(box_start);
+                    found.push_back(x);
+                }
+                in_box = false;
+            }
+        }
+        const int runs = static_cast<int>(found.size() / 2);
+        if (runs > best_runs) {
+            best_runs = runs;
+            boxes = std::move(found);
+        }
+    }
+    CHECK(best_runs >= 7);
+    for (size_t i = 2; i + 1 < boxes.size(); i += 2) {
+        CHECK(boxes[i] >= boxes[i - 1] + 4);
+    }
+}
