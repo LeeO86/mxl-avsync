@@ -2,7 +2,25 @@
 
 AV sync and latency measurement for MXL. A generator writes a visible and audible test signal (timing marker, Gray-coded frame strip, QR code, chirps), live into MXL flows or as test files. An analyzer finds the markers and chirps at any point of a chain and reports the AV offset with a pass/warn/fail grade, and — with the platform's PTP/TAI clock — the audio and video latency. A phone app for measuring at a real monitor comes last.
 
-**Status: design (decisions taken 2026-10-23).** There is no code yet. Read [SPECIFICATION.md](SPECIFICATION.md) and [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). The original German draft is in [docs/draft-2026-10-23-de.md](docs/draft-2026-10-23-de.md).
+**Status: 1.0 implementation of the measuring core, the file tools and the control plane.** Live MXL grains and the ST 2110 loop still need a Linux host with libmxl. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
+
+## Build
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/avsync-core-tests
+./tests/integration/api.sh
+./tests/integration/file.sh
+```
+
+Needs CMake, Ninja, a C++20 compiler and the FFmpeg development libraries (libavformat, libavcodec, libavutil, libswscale, libswresample).
+
+```bash
+./build/mxl-avsync generate --format 1080p50 --duration 60 --offset 0 --out test.mov
+./build/mxl-avsync analyze test.mov --manifest test.mov.manifest.json
+AVSYNC_ROLE=generator AVSYNC_STATE_DIR=/tmp/avsync ./build/mxl-avsync serve
+```
 
 ## At a glance
 

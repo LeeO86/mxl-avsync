@@ -2,9 +2,9 @@
 
 This plan comes before any code. It is updated as the work goes on: every decision and every deviation from `SPECIFICATION.md` is recorded here, as in the sibling repos.
 
-## Status (2026-10-23)
+## Status (2026-10-24)
 
-Design. The maintainer's decisions are in SPECIFICATION §18; the open questions in §18.1 do not block M0–M2.
+Core, file tools and the serve control plane are implemented and tested on the cloud VM. Live MXL I/O is not linked: `/readyz` is 503 until a build with libmxl creates flows. The ST 2110 hour runs and the phone app are unchanged host / later work. Decisions of §18 still hold. Deviations are numbered below.
 
 ## Pins
 
@@ -143,4 +143,19 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 
 ## Deviations
 
-None yet.
+1. **Text is font8x8, not Blend2D.** The timing picture, TEST SIGNAL legend and counters are drawn with the public-domain 8x8 font. Layout, marker, strip, fiducials and QR are as specified. 1080p draw cost on this VM is 0.16 ms/frame (`docs/performance.md`). Blend2D can replace `draw_text` without touching detection.
+2. **QR decode is quirc (ISC), not zxing-cpp.** Encode is still Nayuki, error correction M. quirc reads the codes this generator writes. zxing can replace `decode_qr_text`.
+3. **NMOS is an in-tree IS-04 v1.3 / IS-05 v1.1 node, not nmos-cpp.** It exposes the node, device, flows, senders and receivers, the test-signal tag, group hints, and `mxl_domain_id` / `mxl_flow_id` on `urn:x-nmos:transport:mxl`. It does not run the AMWA test suite and it never sends IS-05 to another device. nmos-cpp at `fe303849` remains the pin if a later build swaps the module.
+4. **libmxl is not linked in the default binary.** The pin is recorded (`MXL_REF=218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`). Ubuntu 24.04's fmt/spdlog packages are older than the MXL v1.1 build, so this VM did not produce a live writer. File round trips and the control API are what this environment can prove.
+5. **Interlaced file pictures are not a separate mux path yet.** The event plan for 1080i25 is tested (events on first fields, even period). The file generator's exercised rasters are progressive.
+
+## What was measured
+
+- Clean PCM p99 timing error ~0 ms; SNR 10 dB and G.711 detection 100 %. Threshold stays 0.5. Chirp shapes stay as specified. Audio uncertainty at correlation ≥ 0.95 is 0.10 ms so the band-pass row (p99 0.054 ms) is covered. Details: `docs/test-matrix.md`.
+- MOV + ProRes + PCM: offsets 0, +35, −35 and a sweep, deviation within 1 ms, container checks pass (video 1/50, audio 1/48000). An ffmpeg `adelay` of 20 ms reads back as +20.0 ms.
+- H.264 + AAC is not exact (about −19 ms on a 3 s 720p50 clip) and is only offered with `--allow-container-shift`.
+- `serve`: `/livez` 200, `/readyz` 503 without flows, metrics families present at 0, widget CSP and no `X-Frame-Options`, unknown widget 404, bad parameter 400, invalid config 78, SIGTERM 143.
+
+## Next step
+
+On the Linux host: build libmxl at the pin, link the live readers and writers (regions only, torn-read check, flow reopen), run `tests/integration/live.sh` once that script has a real domain, then the ST 2110 hour runs.

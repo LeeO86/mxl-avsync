@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+  pull_request:
+env:
+  MXL_REF: 218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config g++ \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+            python3
+      - name: build
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build -j"$(nproc)"
+      - name: unit
+        run: ./build/avsync-core-tests
+      - name: api
+        run: ./tests/integration/api.sh
+      - name: file
+        run: ./tests/integration/file.sh

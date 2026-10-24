@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>mxl-avsync</title>
+<script src="/vendor/vue.global.prod.js"></script>
+<style>
+  :root { color-scheme: dark; --bg:#121417; --panel:#1c2128; --ink:#e7ecf1; --muted:#9aa7b5; --line:#2c3540;
+    --pass:#1f8a4c; --warn:#d9822b; --fail:#c4392a; --invalid:#6b7280; }
+  body { margin:0; font:15px/1.4 ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:16px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
+  h1 { font-size:16px; margin:0; letter-spacing:.04em; }
+  .pill { border-radius:999px; padding:2px 10px; background:#243040; color:var(--muted); font-size:12px; }
+  nav { display:flex; gap:8px; padding:10px 20px; }
+  nav a, button.tab { color:var(--ink); background:transparent; border:1px solid transparent; border-radius:8px; padding:6px 10px; text-decoration:none; cursor:pointer; }
+  nav a.on, button.tab.on { border-color:var(--line); background:var(--panel); }
+  main { padding:8px 20px 32px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:12px; }
+  .banner { background:var(--fail); color:white; font-weight:700; padding:10px 14px; border-radius:8px; }
+  .offset { font-size:64px; font-variant-numeric:tabular-nums; }
+  label { display:block; margin:8px 0; color:var(--muted); }
+  input, select { background:#0e1114; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  button { background:#2a3644; color:var(--ink); border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); font-size:13px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>mxl-avsync</h1>
+    <span class="pill">{{ info.role || '…' }}</span>
+    <span class="pill">{{ info.label || '' }}</span>
+    <span class="pill">{{ info.version || '' }}</span>
+    <span class="pill">{{ nmos }}</span>
+  </header>
+  <nav>
+    <button class="tab" :class="{on:tab==t}" v-for="t in tabs" :key="t" @click="tab=t">{{ t }}</button>
+  </nav>
+  <main>
+    <div v-if="role=='generator' && audioOn && !stopped" class="banner">TEST SIGNAL ACTIVE</div>
+    <section v-if="tab=='Signal' || tab=='Measurement'">
+      <div v-if="role=='analyzer'" class="offset" :style="{color:gradeColor}">{{ sentence }}</div>
+      <p v-if="role=='analyzer'">{{ grade }} · {{ measurement.reason || measurement.input_state || 'NO EVENTS' }}</p>
+      <div v-if="role=='generator'">
+        <label>Set offset (ms, + audio late) <input type="number" v-model.number="offset" min="-500" max="500"/></label>
+        <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
+        <label>Title <input v-model="title"/></label>
+        <button @click="saveGenerator">Apply</button>
+        <button @click="mute">{{ audioOn ? 'Mute' : 'Unmute' }}</button>
+        <button @click="toggleRun">{{ stopped ? 'Start' : 'Stop' }}</button>
+      </div>
+    </section>
+    <section v-if="tab=='Input' || tab=='Status' || tab=='NMOS'">
+      <pre>{{ JSON.stringify(status, null, 2) }}</pre>
+    </section>
+    <section v-if="tab=='Events'">
+      <table><tr><th>event</th><th>offset</th><th>grade</th></tr>
+        <tr v-for="ev in events" :key="ev.event_id"><td>{{ ev.event_id }}</td><td>{{ ev.av_offset_ms }}</td><td>{{ ev.grade }}</td></tr>
+      </table>
+    </section>
+    <section v-if="tab=='Settings'">
+      <label>Pass min <input type="number" v-model.number="grading.pass_min_ms"/></label>
+      <label>Pass max <input type="number" v-model.number="grading.pass_max_ms"/></label>
+      <label>Warn min <input type="number" v-model.number="grading.warn_min_ms"/></label>
+      <label>Warn max <input type="number" v-model.number="grading.warn_max_ms"/></label>
+      <button @click="saveGrading">Save windows</button>
+      <p>Env-set keys are read-only and skipped on import.</p>
+    </section>
+  </main>
+</div>
+<script>
+const { createApp } = Vue;
+createApp({
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', audioOn:true, stopped:false, nmos:'nmos' }; },
+  computed: {
+    role() { return this.info.role || ''; },
+    tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
+    grade() { return (this.measurement.grade || 'invalid').toUpperCase(); },
+    gradeColor() { return {pass:'#1f8a4c', warn:'#d9822b', fail:'#c4392a', invalid:'#6b7280'}[this.measurement.grade] || '#6b7280'; },
+    sentence() { return this.measurement.sentence || 'no measurement'; }
+  },
+  async mounted() {
+    this.info = await (await fetch('/api/v1/info')).json();
+    this.tab = this.tabs[0];
+    await this.refresh();
+    this.timer = setInterval(() => this.refresh(), 1000);
+  },
+  methods: {
+    async refresh() {
+      this.status = await (await fetch('/api/v1/status')).json();
+      this.nmos = this.status.nmos_registered ? 'registered' : 'nmos';
+      if (this.role === 'generator') {
+        const g = await (await fetch('/api/v1/generator')).json();
+        this.offset = g.offset_ms; this.level = g.level_dbfs; this.title = g.title || '';
+        this.audioOn = !g.muted; this.stopped = !!g.stopped;
+      } else {
+        this.measurement = await (await fetch('/api/v1/measurement')).json();
+        const ev = await (await fetch('/api/v1/events?limit=20')).json();
+        this.events = ev.events || [];
+        this.grading = await (await fetch('/api/v1/grading')).json();
+      }
+    },
+    async saveGenerator() {
+      await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title})});
+    },
+    async mute() { await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({muted:this.audioOn})}); await this.refresh(); },
+    async toggleRun() { await fetch(this.stopped ? '/api/v1/generator/start' : '/api/v1/generator/stop', {method:'POST'}); await this.refresh(); },
+    async saveGrading() { await fetch('/api/v1/grading', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(this.grading)}); }
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

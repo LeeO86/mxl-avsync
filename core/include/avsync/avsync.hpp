@@ -1,0 +1,458 @@
+#pragma once
+
+// avsync-core public API. No MXL, NMOS, FFmpeg or GUI.
+// Time: positive av_offset_ms means audio is late (SPECIFICATION §3.2).
+
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace avsync {
+
+inline constexpr int kYBlack = 64;
+inline constexpr int kYWhite = 940;
+inline constexpr int kYBackground = 502;
+inline constexpr int kYNeutralChroma = 512;
+
+inline constexpr char kCoreVersion[] = "1.0.0";
+inline constexpr char kAppVersion[] = "1.0.0";
+inline constexpr char kMxlRevision[] = "218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7";
+inline constexpr char kQrSchema[] = "mxl-avsync/1";
+inline constexpr char kManifestSchema[] = "mxl-avsync-manifest/1";
+inline constexpr char kResultSchema[] = "mxl-avsync-result/1";
+inline constexpr char kEventLogSchema[] = "mxl-avsync-event-log/1";
+
+struct Rate {
+    int64_t num = 50;
+    int64_t den = 1;
+};
+
+// Same mapping as the MXL C API (index 0 at the SMPTE ST 2059 epoch).
+int64_t index_to_ns(Rate rate, uint64_t index);
+uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns);
+
+struct VideoFormat {
+    std::string token;
+    int width = 1920;
+    int height = 1080;
+    Rate frame{};
+    bool interlaced = false; // top field first when true
+
+    Rate grain_rate() const;
+    int grain_height() const { return interlaced ? height / 2 : height; }
+};
+
+std::optional<VideoFormat> parse_video_format(std::string_view token);
+std::string format_token(const VideoFormat& fmt);
+
+struct Period {
+    int grains = 25;
+    double period_ms = 500;
+    double true_rate_hz = 2;
+};
+
+Period plan_period(const VideoFormat& video, int event_rate);
+
+struct PlanConfig {
+    VideoFormat video{};
+    int event_rate = 2;
+    int sample_rate = 48000;
+    double offset_ms = 0;
+    std::vector<double> sweep;
+    double first_event_ms = 1000;
+    double duration_ms = 60000;
+    bool live = false;
+    int chirp_ms = 30;
+    double chirp_low_hz = 700;
+    double chirp_high_hz = 2500;
+    double chirp_level_dbfs = -12;
+};
+
+struct PlannedEvent {
+    std::string event_id;
+    uint64_t seq = 0;
+    int chirp_id = 0;
+    int marker_phase = 0;
+    uint64_t video_grain = 0;
+    double video_timeline_ms = 0;
+    int64_t video_tai_ns = 0;
+    double audio_timeline_ms = 0;
+    int64_t audio_tai_ns = 0;
+    double audio_centre_sample = 0; // may be fractional in LIVE
+    int64_t audio_sample = 0;       // nearest sample (FILE)
+    double expected_av_offset_ms = 0;
+    double rounding_residual_us = 0;
+    int frame_in_period = 0;
+};
+
+struct EventPlan {
+    PlanConfig config;
+    Period period;
+    std::vector<PlannedEvent> events;
+    std::string canonical; // deterministic bytes for the same config
+};
+
+EventPlan make_file_plan(const PlanConfig& config);
+PlannedEvent live_event(const PlanConfig& config, uint64_t seq);
+std::string event_id_for(uint64_t seq);
+
+// ---- chirps (§6.1) -------------------------------------------------------
+
+struct ChirpSpec {
+    int sample_rate = 48000;
+    double duration_ms = 30;
+    double low_hz = 700;
+    double high_hz = 2500;
+    double level_dbfs = -12;
+};
+
+struct ChirpBand {
+    double f0 = 0;
+    double f1 = 0;
+};
+
+ChirpBand chirp_band(int chirp_id, double low_hz, double high_hz);
+int chirp_length(const ChirpSpec& spec);
+
+// Pure function of the absolute sample index. Centre may be fractional.
+float chirp_sample(const ChirpSpec& spec, int chirp_id, double centre_sample, double sample_index);
+void synthesise_block(const ChirpSpec& spec, const std::vector<PlannedEvent>& events, uint64_t start, float* dst, size_t count);
+
+struct ChirpCheck {
+    int length = 0;
+    double peak = 0;
+    double peak_dbfs = 0;
+    bool clipped = false;
+    double centre_time_ms = 0;
+    double energy_low = 0;
+    double energy_high = 0;
+};
+
+ChirpCheck inspect_chirp(const ChirpSpec& spec, int chirp_id);
+
+// ---- audio detection (§6.2) ----------------------------------------------
+
+struct AudioHit {
+    double time_ms = 0;
+    double sample_pos = 0; // absolute sample index of the centre, fractional
+    int chirp_id = 0;
+    double correlation = 0;
+    double level_dbfs = -120;
+    bool clipped = false;
+    std::string quality; // good, degraded, invalid
+    bool duplicate = false;
+    bool ambiguous = false;
+};
+
+struct AudioDetectConfig {
+    ChirpSpec chirp{};
+    double threshold = 0.5;
+    double sidelobe_ratio = 1.4;
+    double ambiguity_ratio = 1.12;
+    double period_ms = 500;
+    double timeline_origin_ms = 0; // time of sample 0
+};
+
+class AudioDetector {
+public:
+    explicit AudioDetector(AudioDetectConfig config);
+    // samples are one channel, contiguous, starting at absolute sample `origin`.
+    std::vector<AudioHit> detect(const float* samples, size_t count, uint64_t origin_sample) const;
+    const AudioDetectConfig& config() const { return config_; }
+
+private:
+    AudioDetectConfig config_;
+    int length_ = 0;
+    double ref_norm_[4]{};
+    std::vector<float> refs_[4];
+};
+
+// ---- picture geometry, marker draw and detect (§5) -----------------------
+
+struct FrameGeometry {
+    int width = 1920;
+    int height = 1080;
+    int marker_x = 0;
+    int marker_y = 0;
+    int marker_side = 0;
+    int strip_x = 0;
+    int strip_y = 0;
+    int strip_w = 0;
+    int strip_h = 0;
+    int qr_x = 0;
+    int qr_y = 0;
+    int qr_size = 0;
+    int sweep_x0 = 0;
+    int sweep_x1 = 0;
+    int sweep_y = 0;
+    int fid_size = 0;
+};
+
+FrameGeometry frame_geometry(int width, int height);
+
+struct LumaView {
+    uint16_t* data = nullptr;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
+};
+
+void fill_luma(LumaView view, uint16_t y);
+void draw_static_layer(LumaView view);
+void draw_timing(LumaView view, uint64_t seq, int frame_in_period, int period_frames, bool marker_white);
+void draw_text(LumaView view, int x, int y, std::string_view text, int scale, uint16_t y_value);
+
+struct MarkerReading {
+    enum class State { Black, White, Invalid };
+    State state = State::Invalid;
+    bool strip_ok = false;
+    uint32_t seq_low24 = 0;
+    int frame_pos_mod16 = 0;
+    double contrast = 0;
+    double noise = 0;
+    bool geometry_ok = false;
+    std::string quality; // good, degraded, invalid
+};
+
+MarkerReading read_marker(const uint16_t* luma, int width, int height, int stride);
+
+struct VideoObservation {
+    bool event = false;
+    uint64_t seq = 0;
+    int64_t grain_index = 0;
+    double time_ms = 0;
+    int64_t tai_ns = 0;
+    std::string quality;
+    std::vector<std::string> flags;
+    double contrast = 0;
+    bool marker_white = false;
+    int drops_total = 0;
+    int duplicates_total = 0;
+    bool strip_ok = false;
+    bool have_arrival = false;
+    double arrival_ms = 0;
+};
+
+class MarkerTracker {
+public:
+    explicit MarkerTracker(VideoFormat format, int event_rate);
+    // time_ms is the grain's index time on the timeline in use (file ms or TAI ms).
+    VideoObservation push(const uint16_t* luma, int stride, int64_t grain_index, double time_ms, int64_t tai_ns = 0);
+    int drops() const { return drops_; }
+    int duplicates() const { return duplicates_; }
+    const Period& period() const { return period_; }
+
+private:
+    VideoFormat format_;
+    Period period_;
+    bool have_prev_ = false;
+    MarkerReading::State prev_state_ = MarkerReading::State::Invalid;
+    int64_t last_unwrapped_pos_ = -1;
+    int last_low_ = 0;
+    uint64_t last_seq_ = 0;
+    int drops_ = 0;
+    int duplicates_ = 0;
+    int64_t last_event_grain_ = -100000;
+};
+
+uint32_t binary_to_gray(uint32_t value);
+uint32_t gray_to_binary(uint32_t gray);
+
+// v210 pack of a limited-range 4:2:2 picture. chroma planes are optional (neutral if null).
+size_t v210_line_bytes(int width);
+void pack_v210(const uint16_t* y, const uint16_t* cb, const uint16_t* cr, int width, int height, int y_stride,
+    uint8_t* dst);
+void unpack_v210_luma(const uint8_t* src, int width, int height, uint16_t* y, int y_stride);
+
+// ---- QR payload (§5.6) ---------------------------------------------------
+
+struct QrPayload {
+    std::string schema = kQrSchema;
+    std::string test_id;
+    std::string mode = "FILE";
+    uint64_t k = 0;
+    int64_t tk = 0;
+    bool sweep = false;
+    double offset_ms = 0;
+    int rate = 2;
+    std::string format = "1080p50";
+};
+
+std::string qr_payload_json(const QrPayload& payload);
+std::optional<QrPayload> parse_qr_payload(std::string_view json);
+
+// ---- pairing, grading, statistics, uncertainty (§4, §8) ------------------
+
+struct ReferenceInfo {
+    std::string type = "none"; // tai-ptp, file, none
+    std::string domain;
+    std::string sync_state = "unknown";
+    std::string accuracy = "unknown"; // decimal ns, or "unknown"
+};
+
+struct AudioObservation {
+    int chirp_id = 0;
+    double time_ms = 0;
+    int64_t tai_ns = 0;
+    double arrival_ms = 0;
+    bool have_arrival = false;
+    double correlation = 0;
+    double level_dbfs = -120;
+    bool clipped = false;
+    std::string quality;
+    bool duplicate = false;
+    bool ambiguous = false;
+};
+
+struct Measurement {
+    std::string test_id;
+    std::string event_id;
+    uint64_t seq = 0;
+    std::string mode = "FILE";
+    bool have_video = false;
+    bool have_audio = false;
+    double video_time_ms = 0;
+    double audio_time_ms = 0;
+    int64_t video_tai_ns = 0;
+    int64_t audio_tai_ns = 0;
+    double video_arrival_ms = 0;
+    double audio_arrival_ms = 0;
+    bool have_arrival = false;
+    int64_t set_video_ns = 0; // T_k when known (LIVE)
+    bool have_set_time = false;
+    std::optional<double> av_offset_ms;
+    double expected_av_offset_ms = 0;
+    std::optional<double> deviation_ms;
+    std::optional<double> av_offset_arrival_ms;
+    std::optional<double> video_latency_ms;
+    std::optional<double> audio_latency_ms;
+    std::optional<double> video_index_shift_ms;
+    std::optional<double> audio_index_shift_ms;
+    std::string grade = "invalid";
+    std::string graded_on = "offset";
+    std::optional<double> uncertainty_ms;
+    std::string uncertainty_status = "unknown";
+    std::string latency_uncertainty_status = "unknown";
+    std::string video_quality = "invalid";
+    std::string audio_quality = "invalid";
+    std::optional<double> correlation;
+    std::optional<double> audio_level_dbfs;
+    bool clipped = false;
+    std::vector<std::string> flags;
+    std::string reason;
+    ReferenceInfo reference;
+};
+
+struct GradeWindows {
+    double pass_min_ms = -5;
+    double pass_max_ms = 15;
+    double warn_min_ms = -40;
+    double warn_max_ms = 60;
+};
+
+bool windows_valid(const GradeWindows& w);
+std::string grade_value(double value_ms, const GradeWindows& windows);
+
+struct OffsetWords {
+    std::string number;   // "+35.2 ms"
+    std::string sentence; // "audio 35 ms after video"
+    std::string line;     // "+35.2 ms — audio 35 ms after video"
+};
+
+OffsetWords describe_offset(double ms);
+
+struct SeriesStats {
+    int valid = 0;
+    int discarded = 0;
+    std::map<std::string, int> reasons;
+    std::optional<double> min, max, median, mean, stddev;
+    std::optional<double> p5, p95, p99;
+    std::string p5_status = "insufficient_samples";
+    std::string p95_status = "insufficient_samples";
+    std::string p99_status = "insufficient_samples";
+    std::vector<double> series;
+    std::vector<uint64_t> outlier_seqs;
+    std::vector<uint64_t> dropout_seqs;
+    std::optional<double> min_wo, max_wo, median_wo, mean_wo, stddev_wo;
+};
+
+struct StatsBundle {
+    SeriesStats offset;
+    SeriesStats deviation;
+    SeriesStats video_latency;
+    SeriesStats audio_latency;
+};
+
+StatsBundle compute_stats(const std::vector<Measurement>& events);
+
+struct UncertaintyInput {
+    double correlation = 0;
+    bool have_correlation = false;
+    bool frame_rate_converted = false;
+    bool drop_or_dup_near = false;
+    double frame_ms = 20;
+    bool have_reference = false;
+    std::string sync_state = "unknown";
+    double wakeup_ms = 1;
+    double batch_ms = 0;
+    bool live = false;
+};
+
+struct Uncertainty {
+    std::optional<double> offset_ms;
+    std::string offset_status = "unknown";
+    std::string latency_status = "unknown";
+};
+
+Uncertainty estimate_uncertainty(const UncertaintyInput& in);
+
+// Audio timing half-width (ms) from the M0 correlation table. Updated from measured p99.
+double audio_uncertainty_ms(double correlation);
+
+class Pairer {
+public:
+    Pairer(double period_ms, GradeWindows windows, ReferenceInfo reference, std::string mode, std::string test_id);
+    void set_expected_offset(double ms) { default_offset_ms_ = ms; }
+    void observe_video(const VideoObservation& video, double expected_offset_ms);
+    void observe_audio(const AudioObservation& audio);
+    // Close events whose audio window has ended (now_ms on the same timeline).
+    std::vector<Measurement> poll(double now_ms);
+    std::vector<Measurement> finish();
+    const std::vector<Measurement>& results() const { return done_; }
+
+private:
+    struct PendingVideo {
+        VideoObservation video;
+        double expected_offset_ms = 0;
+        bool resolved = false;
+    };
+    Measurement make_invalid(const PendingVideo& pending, const std::string& reason, const std::vector<std::string>& flags);
+    Measurement pair_one(const PendingVideo& pending, const AudioObservation* audio, const std::string& reason);
+    double period_ms_;
+    GradeWindows windows_;
+    ReferenceInfo reference_;
+    std::string mode_;
+    std::string test_id_;
+    double default_offset_ms_ = 0;
+    std::vector<PendingVideo> videos_;
+    std::vector<AudioObservation> audios_;
+    std::vector<Measurement> done_;
+};
+
+std::string current_grade(const std::vector<Measurement>& events, int last_n, const GradeWindows& windows, double now_ms,
+    double stale_s);
+
+// G.711 table codec used by the robustness tests and the file-mode transcode path.
+std::vector<uint8_t> encode_ulaw(const float* samples, size_t count);
+std::vector<uint8_t> encode_alaw(const float* samples, size_t count);
+void decode_ulaw(const uint8_t* bytes, size_t count, float* dst);
+void decode_alaw(const uint8_t* bytes, size_t count, float* dst);
+
+// Linear resampler used by unit tests (the file tools use libswresample).
+std::vector<float> resample_linear(const float* samples, size_t count, int from_rate, int to_rate);
+
+} // namespace avsync

@@ -1,0 +1,68 @@
+# Sketch of the two catalog roles. The platform chart (mxl-common.type.avsync) owns the real manifests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avsync-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: avsync-generator}
+  template:
+    metadata:
+      labels: {app: avsync-generator}
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: mxl-avsync
+          image: ghcr.io/leeo86/mxl-avsync:latest
+          ports:
+            - {name: http, containerPort: 8180}
+            - {name: nmos, containerPort: 3332}
+          env:
+            - {name: AVSYNC_ROLE, value: generator}
+            - {name: AVSYNC_STATE_DIR, value: /config}
+            - {name: MXL_CLEANUP_ON_EXIT, value: "true"}
+            - {name: WEB_PORT, value: "8180"}
+            - {name: NMOS_PORT, value: "3332"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+      volumes:
+        - name: config
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avsync-analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: avsync-analyzer}
+  template:
+    metadata:
+      labels: {app: avsync-analyzer}
+    spec:
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: mxl-avsync
+          image: ghcr.io/leeo86/mxl-avsync:latest
+          ports:
+            - {name: http, containerPort: 8180}
+            - {name: nmos, containerPort: 3332}
+          env:
+            - {name: AVSYNC_ROLE, value: analyzer}
+            - {name: AVSYNC_STATE_DIR, value: /config}
+            - {name: MXL_CLEANUP_ON_EXIT, value: "true"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+      volumes:
+        - name: config
+          emptyDir: {}
