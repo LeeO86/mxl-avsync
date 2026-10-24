@@ -72,14 +72,25 @@ add_test(NAME core COMMAND avsync-core-tests)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
 if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
-    add_library(quirc STATIC
-        third_party/quirc/quirc.c
-        third_party/quirc/decode.c
-        third_party/quirc/identify.c
-        third_party/quirc/version_db.c
+    # Readers only. Writers would pull in the bundled zint encoder, which this repo does not use.
+    set(BUILD_SHARED_LIBS OFF)
+    set(ZXING_READERS ON CACHE BOOL "" FORCE)
+    set(ZXING_WRITERS OFF CACHE STRING "" FORCE)
+    set(ZXING_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ZXING_BLACKBOX_TESTS OFF CACHE BOOL "" FORCE)
+    set(ZXING_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(ZXING_PYTHON_MODULE OFF CACHE BOOL "" FORCE)
+    set(ZXING_C_API OFF CACHE BOOL "" FORCE)
+    set(ZXING_DEPENDENCIES LOCAL CACHE STRING "" FORCE)
+    FetchContent_Declare(zxing_src
+        URL https://github.com/zxing-cpp/zxing-cpp/archive/refs/tags/v2.3.0.tar.gz
+        URL_HASH SHA256=64e4139103fdbc57752698ee15b5f0b0f7af9a0331ecbdc492047e0772c417ba
     )
-    target_include_directories(quirc PUBLIC third_party/quirc)
-    target_link_libraries(quirc PUBLIC m)
+    FetchContent_GetProperties(zxing_src)
+    if(NOT zxing_src_POPULATED)
+        FetchContent_Populate(zxing_src)
+    endif()
+    add_subdirectory(${zxing_src_SOURCE_DIR} ${CMAKE_BINARY_DIR}/zxing EXCLUDE_FROM_ALL)
     add_library(avsync-file STATIC
         generator/picture.cpp
         generator/source_image.cpp
@@ -87,9 +98,9 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         app/report.cpp
         app/file_tool.cpp
     )
-    target_include_directories(avsync-file PUBLIC generator app core/include third_party third_party/nayuki third_party/quirc)
+    target_include_directories(avsync-file PUBLIC generator app core/include third_party third_party/nayuki)
     target_compile_definitions(avsync-file PUBLIC AVSYNC_ICON_PATH="${CMAKE_SOURCE_DIR}/web/icon.png")
-    target_link_libraries(avsync-file PUBLIC avsync-core quirc PkgConfig::FFMPEG)
+    target_link_libraries(avsync-file PUBLIC avsync-core ZXing::ZXing PkgConfig::FFMPEG)
     add_executable(avsync-picture-tests tests/unit/test_picture.cpp)
     target_include_directories(avsync-picture-tests PRIVATE third_party/doctest)
     target_compile_definitions(avsync-picture-tests PRIVATE AVSYNC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")

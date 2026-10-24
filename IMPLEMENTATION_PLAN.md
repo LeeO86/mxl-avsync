@@ -4,7 +4,7 @@ This plan comes before any code. It is updated as the work goes on: every decisi
 
 ## Status (2026-10-24)
 
-Core, file tools, the serve control plane, the live MXL reader and writer, and the PTP status reader are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
+Core, file tools, the serve control plane, the live MXL reader and writer, the PTP status reader, and QR decode with zxing-cpp 2.3.0 are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
 
 ## Pins
 
@@ -14,7 +14,8 @@ Core, file tools, the serve control plane, the live MXL reader and writer, and t
 | nmos-cpp | `fe303849527394b03bdedc8f161f377fe458bb62` (the siblings' commit) |
 | Blend2D, DejaVu Sans | the versions mxl-multiviewer uses |
 | FFmpeg | Ubuntu 24.04 system libraries (file mode, transcode tests) |
-| zxing-cpp, Nayuki QR, pocketfft, doctest | vendored, versions recorded in M0 |
+| zxing-cpp | 2.3.0, readers only, fetched at configure time. Encode stays Nayuki |
+| Nayuki QR, pocketfft, doctest | vendored |
 
 ## Rules for every milestone
 
@@ -144,7 +145,7 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 ## Deviations
 
 1. **Text is Blend2D 0.21.2 with DejaVu Sans 2.37**, the same pin mxl-multiviewer uses. Blend2D and the asmjit in its release tarball are fetched at configure time and linked statically. The font file is `third_party/dejavu/DejaVuSans.ttf`, embedded by `cmake/EmbedBytes.cmake`. `draw_text` still writes white luma into the black boxes. Marker, strip, fiducials and QR are unchanged.
-2. **QR decode is quirc (ISC), not zxing-cpp.** Encode is still Nayuki, error correction M. quirc reads the codes this generator writes. zxing can replace `decode_qr_text`.
+2. **QR decode is zxing-cpp 2.3.0, the decoder named in the spec.** The earlier quirc deviation is closed. Encode is still Nayuki, error correction M. `avsync-core` does not link zxing. Writers are off, so the bundled zint encoder is not built.
 3. **The NMOS node is nmos-cpp `fe303849` when `AVSYNC_WITH_NMOS` is on.** Ids stay `mxl-avsync/<seed>/...` from `util/uuid.cpp`. DNS-SD is off unless `NMOS_DNS_SD=true`. MXL connection resources are IS-05 v1.2, which is the version this pin implements for `urn:x-nmos:transport:mxl`. The process does not send IS-05 to another device. A build without nmos-cpp keeps the small in-tree node.
 4. **libmxl is linked only into `mxl-avsync`, through `mxlio/`.** `avsync-core` stays free of it. The pin is `MXL_REF=218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`, built with vcpkg the way mxl-scopes builds it (`-DMXL_ENABLE_FABRICS_OFI=OFF`). A build without that package still runs the file tools and leaves `/readyz` at 503.
 5. **Interlaced file pictures are not a separate mux path yet.** The event plan for 1080i25 is tested (events on first fields, even period). The file generator's exercised rasters are progressive.
@@ -275,6 +276,31 @@ ptp.sh ok
 
 The event line is seq, offset, grade, `sync_state`, `accuracy_ns`. That event had no `video_latency_ms` and no `audio_latency_ms`.
 
+## QR decode (2026-10-24)
+
+`decode_qr_text` uses zxing-cpp 2.3.0 (readers only). Encode is still Nayuki. The picture test draws a 1080p frame and reads the QR payload back.
+
+Command:
+
+```
+cmake -S . -B /tmp/avsync-qr -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/avsync-qr --target avsync-picture-tests -j
+/tmp/avsync-qr/avsync-picture-tests
+```
+
+Output:
+
+```
+[doctest] doctest version is "2.4.11"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  2 |  2 passed | 0 failed | 0 skipped
+[doctest] assertions: 31 | 31 passed | 0 failed |
+[doctest] Status: SUCCESS!
+```
+
+The case "large qr stays decodable and the sync square moves" compares the decoded text with the Nayuki payload for test id `TEST-IDENT`, event 4, `tk` 1000, format `1080p50`.
+
 ## Next step
 
-QR: the spec names zxing-cpp and the plan still records quirc. Pick one.
+Packaging and ops: metrics present at 0 from the start, a multi-stage image like mxl-scopes, and the container release workflow. Do not add a separate interlaced file mux.

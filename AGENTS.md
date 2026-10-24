@@ -7,4 +7,4 @@
 - Config precedence is environment > `AVSYNC_CONFIG_FILE` (else `<AVSYNC_STATE_DIR>/config.json`) > defaults. Invalid config exits 78; a port failure exits 75; SIGTERM exits 143.
 - Metrics prefix `mxl_avsync_`. Ports 8180 (web) and 3332 (NMOS).
 - The picture says TEST SIGNAL. The process never sends IS-05 to another device.
-- Text is Blend2D 0.21.2 with DejaVu Sans, the same way mxl-multiviewer fetches Blend2D and embeds the font. QR decode is quirc, not zxing-cpp. The NMOS node is nmos-cpp when `AVSYNC_WITH_NMOS` is on, with ids from `util/uuid.cpp`. DNS-SD stays off unless `NMOS_DNS_SD=true`. Those deviations are recorded in the plan.
+- Text is Blend2D 0.21.2 with DejaVu Sans, the same way mxl-multiviewer fetches Blend2D and embeds the font. QR decode is zxing-cpp 2.3.0, as the spec says. Encode stays Nayuki. The NMOS node is nmos-cpp when `AVSYNC_WITH_NMOS` is on, with ids from `util/uuid.cpp`. DNS-SD stays off unless `NMOS_DNS_SD=true`. Those deviations are recorded in the plan.
