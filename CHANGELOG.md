@@ -5,12 +5,12 @@
 - Event model, chirp synthesis and matched-filter detection, marker and Gray strip, pairing, grading and statistics in `avsync-core`.
 - `mxl-avsync generate`, `analyze`, `validate` and `merge`. Default file is MOV + ProRes 422 HQ + PCM 24-bit. Container time bases are checked.
 - `mxl-avsync serve` with REST, widgets, `/livez`, `/readyz`, `/metrics` and an IS-04/IS-05 node for `AVSYNC_ROLE=generator|analyzer`.
-- Clean PCM timing error is ~0 ms (target ≤ 0.1 ms). SNR 10 dB and G.711 detection are 100 % on the unit rows in `docs/test-matrix.md`.
-- Live MXL grains and the ST 2110 loop are not in this binary. See the implementation plan.
+- Clean PCM timing error is ~0 ms (target ≤ 0.1 ms). SNR 10 dB and the G.711 table-codec test aid are 100 % detection on the unit rows in `docs/test-matrix.md`.
+- Live MXL grains are not in this binary. The ST 2110 hour run is not a feature of this repo; it goes through mxl-st2110-gateway. See the implementation plan.
 
 ## 1.1 / 2.0
 
 - Fiducial search for a scaled or cropped picture, `analyze --locate`.
-- File-mode H.264 bitrate rows and G.711 PCMU/PCMA at 8 kHz.
+- File-mode H.264 bitrate rows and G.711 PCMU/PCMA at 8 kHz, as test aids only (FFmpeg). Not live SRT or SIP inputs.
 - Cross-node merge view (`merge`, `POST /api/v1/merge`).
 - Phone measurement core (rolling shutter, calibration) and the Expo app sources under `mobile-app/`.

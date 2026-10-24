@@ -2,7 +2,7 @@
 
 AV sync and latency measurement for MXL. A generator writes a visible and audible test signal (timing marker, Gray-coded frame strip, QR code, chirps), live into MXL flows or as test files. An analyzer finds the markers and chirps at any point of a chain and reports the AV offset with a pass/warn/fail grade, and — with the platform's PTP/TAI clock — the audio and video latency. A phone app for measuring at a real monitor comes last.
 
-**Status: stage 1 control plane, plus stage 2 file paths and the stage 3 phone core.** Live MXL, SRT, the fabrics agent, SIP and a real phone still need a Linux host. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md). `mxl-avsync paths` prints the split.
+**Status: measuring core, file tools, control plane, and the phone core.** Live MXL is not linked yet. This repo does not implement ST 2110, SRT, or SIP; those flows come from the sibling gateways. File-mode H.264 and G.711 are test aids. A real phone still needs a device. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
 
 ## Build
 
@@ -33,7 +33,7 @@ AVSYNC_ROLE=generator AVSYNC_STATE_DIR=/tmp/avsync ./build/mxl-avsync serve
 - Media function: one image, `AVSYNC_ROLE=generator` or `analyzer`; one measuring point (video + audio) per analyzer.
 - Analyzer outputs: REST, WebSocket, `/metrics`, the `avsync` widget, a result video flow for the multiviewer, Grafana alert rules.
 - NMOS IS-04/IS-05 with BCP-007-03; `/livez`, `/readyz`, `/metrics`.
-- Paths in 1.0: file round trips (incl. transcodes), MXL, the ST 2110 loop. SRT/H.264, cross-node and G.711 live in 1.1. Phone app (Expo, iOS and Android) in 2.0.
+- Paths in this repo: file round trips, file-mode H.264 and G.711 as test aids, and MXL flows. The ST 2110 hour run goes through mxl-st2110-gateway. SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. Stage 2 uses those gateways and tests the matrix; there is no transport code here. Phone app (Expo, iOS and Android) in 2.0.
 
 ## Ports
 
