@@ -506,6 +506,7 @@ class Pairer {
 public:
     Pairer(double period_ms, GradeWindows windows, ReferenceInfo reference, std::string mode, std::string test_id);
     void set_expected_offset(double ms) { default_offset_ms_ = ms; }
+    void set_reference(ReferenceInfo reference) { reference_ = std::move(reference); }
     void observe_video(const VideoObservation& video, double expected_offset_ms);
     void observe_audio(const AudioObservation& audio);
     // Close events whose audio window has ended (now_ms on the same timeline).

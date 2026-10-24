@@ -30,9 +30,15 @@ struct InputRoute {
     std::string flow_id;
 };
 
+struct ClockReading {
+    std::string sync_state = "unknown";
+    std::string accuracy_ns = "unknown";
+};
+
 struct LiveCallbacks {
     std::function<Config()> copy_config;
     std::function<bool()> stopped;
+    std::function<ClockReading()> clock_reading;
     std::function<void(const MediaStatus&)> set_status;
     std::function<void(const std::string& flow, const std::string& domain)> set_result;
     std::function<InputRoute(bool video)> input_route;

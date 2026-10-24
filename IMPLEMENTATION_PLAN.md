@@ -4,7 +4,7 @@ This plan comes before any code. It is updated as the work goes on: every decisi
 
 ## Status (2026-10-24)
 
-Core, file tools, the serve control plane, and the live MXL reader and writer are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
+Core, file tools, the serve control plane, the live MXL reader and writer, and the PTP status reader are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
 
 ## Pins
 
@@ -167,6 +167,7 @@ Stage 2 is no longer a transport milestone. It is: use the sibling gateways and 
 
 6. **No ST 2110, SRT, SIP or fabrics transport in this repo.** The hour run goes through `mxl-st2110-gateway`: generator → MXL → gateway → network → gateway → MXL → analyzer. SRT and live SIP/G.711 arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only.
 7. **The phone UI is not executed on a device here.** Capture sources for iOS (host clock) and Android (`REALTIME` sensor timestamps) are in `mobile-app/modules/avsync/`. They are not compiled by CMake.
+8. **PTP state is the HTTP document at `AVSYNC_PTP_STATUS_URL`.** The sibling trees do not include a PTP reader, so this repo keeps the URL it already had. Only `http://` is fetched. The body is `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"..."}`. Anything else, including a missing URL, leaves `sync_state` `unknown` and does not invent a latency.
 
 The on-screen sync scale is a moving square, not the configured offset. Each step is one frame. At 1080p50 and 2/s that is ±240 ms, one tick per frame, crossed once per event: red while early, white at 0, green while late. The analyzer still reads only the marker block and the Gray strip. Under the centre square, a PNG or GIF sits immediately left of the source name, with `AVSYNC_SUBTITLE` on the next line (`--subtitle`, `PATCH /api/v1/generator`). `assets/app-icon.svg` is the app icon. The phone store and adaptive icons, the web favicon, touch icon, and header mark, and the test-signal mark are rasters of that file.
 
@@ -175,7 +176,7 @@ The on-screen sync scale is a moving square, not the configured offset. Each ste
 - No transport code: not ST 2110, not SRT, not SIP, not fabrics, not WebRTC. Sibling repos move those flows onto MXL. This process only reads and writes MXL flows and files.
 - The hour run is a lab through `mxl-st2110-gateway`, not a binary or a CI job here.
 - File-mode H.264 and G.711 measure the detectors. They are not a substitute for a live gateway.
-- Latency is not reported. `sync_state` stays `unknown` until a PTP source is read. The closed-loop numbers below are index-time AV offset on one machine.
+- Latency is not reported. `AVSYNC_PTP_STATUS_URL` can set `sync_state` to `locked` or `unlocked`; an empty URL or a failed read stays `unknown`. Arrival time is not measured, so a locked clock still does not fill `video_latency_ms`. The closed-loop numbers below are index-time AV offset on one machine.
 - `mxl-avsync paths` still prints the old host-gap names (`srt-live`, `g711-sip`, `st2110-loop`, `fabrics-cross-node`). That command text is code and was left unchanged in this docs pass.
 - The phone UI has not been run on a device. Phone work does not block live MXL.
 
@@ -241,6 +242,39 @@ nmos.sh ok
 
 The node id is UUIDv5 of `mxl-avsync/nmos-gen/node`. Senders use `urn:x-nmos:transport:mxl` with empty `interface_bindings`. Activating the analyzer's video and audio receivers with the generator's domain and flow ids made `/readyz` 200 and `input_state` running. A second process on the same NMOS port exited 75. The AMWA nmos-testing suite was not run: this VM has no Docker, and a registry is not started with mDNS on the host network.
 
+## PTP state (2026-10-24)
+
+`serve` polls `AVSYNC_PTP_STATUS_URL` about once a second. `GET /api/v1/status` returns `ptp.sync_state` and `ptp.accuracy_ns`. Analyzer events copy that pair into `reference`. `mxl_avsync_reference_sync{type="tai-ptp",state="locked|unlocked|unknown"}` is 1 for the current state. `video_latency_ms` and `audio_latency_ms` stay absent: this build does not record arrival time, and index time is not used as a latency.
+
+Command:
+
+```
+BIN=/tmp/avsync-live/mxl-avsync \
+  VCPKG_LIB_DIR=/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  bash tests/integration/ptp.sh
+```
+
+Output:
+
+```
+ptp.sh work /dev/shm/avs-ptp-kMAjYi
+locked:
+{"audio_enable":true,"audio_flow":"0f194ea0-4d93-5fd2-94ab-29a1423af8ae","detail":"","grain_rows":1080,"height":1080,"input_state":"running","interlaced":false,"media_ready":true,"nmos_registered":false,"ptp":{"accuracy_ns":"80","sync_state":"locked"},"result_domain":"/dev/shm/avs-ptp-kMAjYi/ana","result_flow":"9f8fdeea-a396-5da3-b9ba-cbba87431431","role":"analyzer","stopped":false,"video_flow":"f92c7353-5c57-5238-851e-5ed47a25f0fd","width":1920}
+event:
+3585761511 0.0 pass locked 80
+empty url:
+{"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"}}
+dead url:
+{"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"}}
+https refused:
+{"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"}}
+unlocked:
+{"ptp":{"accuracy_ns":"500","sync_state":"unlocked"}}
+ptp.sh ok
+```
+
+The locked status line and the event line are the full script output for those steps. The later status documents also carried `role`, flows and `media_ready`; only the `ptp` object is repeated here. The event had no `video_latency_ms` and no `audio_latency_ms`. Offset 0.0 graded pass.
+
 ## Next step
 
-Read PTP the way the siblings do, or keep `AVSYNC_PTP_STATUS_URL` and leave `sync_state` unknown until it is read. Do not report latency without it.
+QR: the spec names zxing-cpp and the plan still records quirc. Pick one.

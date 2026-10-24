@@ -146,7 +146,7 @@ Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measur
 
 **LIVE without MXL** (the phone app, §12, and a recording made elsewhere). Only the AV offset is measured. A phone's system time (NTP, mobile network) is coarse wall-clock metadata, not a reference; it never turns an AV-offset measurement into a latency.
 
-**Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. The process cannot see the node's PTP state itself; `sync_state` is `unknown` unless `AVSYNC_PTP_STATUS_URL` points to a source the platform provides (`TODO_` open question 6).
+**Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. The process cannot see the node's PTP lock itself. `sync_state` is `unknown` unless `AVSYNC_PTP_STATUS_URL` is an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. A missing URL, any other scheme, or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
 
 ### 3.4 Resolution
 
@@ -909,7 +909,7 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 3. **Chirp level.** −12 dBFS peak is clearly audible in a control room. *Recommendation:* −12, with mute in the widget; lower it if operators complain.
 4. **Result raster.** 960×540 at 25 Hz is 0.7 MB per grain. *Recommendation:* yes; 1920×1080 only on request.
 5. **Event log retention.** 7 days or 100 MB on `/config`. *Recommendation:* as written; the platform's state save does not archive it (only `config.json`, `routes.json`).
-6. **PTP state.** The process cannot see the node's PTP lock. Can the platform expose it (a node exporter metric the analyzer reads, or a file)? *Recommendation:* the platform decides; until then `sync_state: unknown` and latencies carry `uncertainty_status: "unknown"` when the reference is in doubt.
+6. **PTP state.** The process cannot see the node's PTP lock. The platform exposes it by serving the JSON in §3.3 at `AVSYNC_PTP_STATUS_URL`. Until that URL is set, `sync_state` is `unknown` and latency is not reported.
 7. **Calibration rig** for the phone: who builds it and from what parts. Decided at M-P1.
 8. **Tolerances per use** beyond the default windows (draft question 9): per-production overrides through the analyzer's values. *Recommendation:* add `passMinMs` … to the catalog values once a production needs it.
 

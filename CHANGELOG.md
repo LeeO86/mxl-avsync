@@ -9,6 +9,7 @@
 - Live MXL video (`video/v210`) and audio (`audio/float32`) reader and writer in `mxlio/`, linked only into `mxl-avsync`. Interlaced flows are fields. `/readyz` is 200 when those flows are open. Closed loop on one host: set offsets 35, 0 and −35 ms came back as 35.0, 0.0 and −35.0 ms.
 - Result picture flow `uuid_v5("mxl-avsync/<seed>/flow/result/<format>")` (default 960×540). About 1 fps JPEG previews at `/api/v1/preview/input.jpg` and `/api/v1/preview/generated.jpg` (404 `no frame yet` until a frame exists). No preview stream.
 - NMOS node is nmos-cpp `fe303849` when enabled. Ids stay `mxl-avsync/<seed>/...`. DNS-SD is off by default. IS-05 activation opens the analyzer's readers. A taken NMOS port exits 75. The ST 2110 hour run is not a feature of this repo; it goes through mxl-st2110-gateway.
+- `AVSYNC_PTP_STATUS_URL` is polled for `{"sync_state","accuracy_ns"}`. Only `http://` is accepted. A missing URL or a failed read leaves `sync_state` `unknown`. Latency is still omitted until an arrival time is measured on a locked clock.
 
 ## 1.1 / 2.0
 

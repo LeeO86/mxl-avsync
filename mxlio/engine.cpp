@@ -413,6 +413,23 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         have_cursor = false;
         stall_since = 0;
     };
+    auto current_reference = [&](const std::string& domain) {
+        ReferenceInfo reference;
+        reference.type = "tai-ptp";
+        reference.domain = domain;
+        reference.sync_state = "unknown";
+        reference.accuracy = "unknown";
+        if (callbacks.clock_reading) {
+            const ClockReading clock = callbacks.clock_reading();
+            if (clock.sync_state == "locked" || clock.sync_state == "unlocked" || clock.sync_state == "unknown") {
+                reference.sync_state = clock.sync_state;
+            }
+            if (!clock.accuracy_ns.empty()) {
+                reference.accuracy = clock.accuracy_ns;
+            }
+        }
+        return reference;
+    };
 
     while (!stop.load()) {
         const Config config = callbacks.copy_config();
@@ -557,10 +574,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         tracked.frame = video.interlaced ? Rate{std::max<int64_t>(1, pace.num), pace.den * 2} : pace;
         if (tracker_flow != video.flow_id || !tracker || !pairer) {
             tracker.emplace(tracked, config.event_rate);
-            ReferenceInfo reference;
-            reference.type = "tai-ptp";
-            reference.sync_state = "unknown";
-            reference.domain = video.domain_id;
+            const ReferenceInfo reference = current_reference(video.domain_id);
             const double period_ms = plan_period(tracked, config.event_rate).period_ms;
             pairer.emplace(period_ms, GradeWindows{config.pass_min_ms, config.pass_max_ms, config.warn_min_ms, config.warn_max_ms}, reference, "LIVE",
                 config.test_id.empty() ? config.seed() : config.test_id);
@@ -641,6 +655,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             }
         }
         if (pairer) {
+            pairer->set_reference(current_reference(video.domain_id));
             for (const auto& event : pairer->poll(static_cast<double>(tai_now()) / 1e6)) {
                 {
                     std::lock_guard lock(caption.mu);
