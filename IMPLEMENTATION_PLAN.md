@@ -4,7 +4,7 @@ This plan comes before any code. It is updated as the work goes on: every decisi
 
 ## Status (2026-10-24)
 
-Core, file tools and the serve control plane are implemented and tested on the cloud VM. Live MXL I/O is not linked: `/readyz` is 503 until a build with libmxl creates flows. The ST 2110 hour runs and the phone app are unchanged host / later work. Decisions of §18 still hold. Deviations are numbered below.
+Core, file tools and the serve control plane are implemented and tested on the cloud VM. Live MXL I/O is not linked: `/readyz` is 503 until a build with libmxl creates flows. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
 
 ## Pins
 
@@ -33,10 +33,10 @@ Goal: the measuring core without any media library, with real numbers.
 - `avsync-core`: event plan (grain grid at 25/50/59.94p and 1080i25, offsets, sweep, determinism), sign convention, grading, statistics, uncertainty model.
 - Chirp synthesis (four shapes, sub-sample placement, sample-index purity).
 - Matched-filter detector (pocketfft, parabolic interpolation, chirp id, quality, missing/duplicate/ambiguous).
-- The robustness suite of SPECIFICATION §14.1 for audio (level, noise, AGC, band-pass, resampling, G.711 μ-law/A-law, gaps, cross-confusion) with a results table: timing error p50/p99 and detection rate per condition.
+- The robustness suite of SPECIFICATION §14.1 for audio (level, noise, AGC, band-pass, resampling, G.711 μ-law/A-law as a table-codec test aid, gaps, cross-confusion) with a results table: timing error p50/p99 and detection rate per condition.
 - Decide: chirp shapes, default threshold, the uncertainty table. Record them here.
 
-Exit: the audio detector meets ≤ 0.1 ms p99 timing error on the clean PCM path and ≥ 99 % detection at SNR 10 dB and through G.711; or this plan records what it reaches and the spec is adjusted before M1.
+Exit: the audio detector meets ≤ 0.1 ms p99 timing error on the clean PCM path and ≥ 99 % detection at SNR 10 dB and through the G.711 test aid; or this plan records what it reaches and the spec is adjusted before M1.
 
 ### M1: test picture and the file tools (draft phases 3–4: the draft's MVP)
 
@@ -45,7 +45,7 @@ Exit: the audio detector meets ≤ 0.1 ms p99 timing error on the clean PCM path
 - QR decode with zxing-cpp.
 - `mxl-avsync generate`: MOV + ProRes 422 HQ + PCM 24-bit by default, MP4/MKV/AAC/H.264 variants; manifest; the container check (SPECIFICATION §9.3).
 - `mxl-avsync analyze`, `validate`, `merge`: decode with FFmpeg keeping PTS, pairing, grading, statistics, human and JSON reports, `--fail-on`.
-- `tests/integration/file.sh`: offsets 0, +35, −35, a sweep, inserted delays, and the file-mode transcode set of SPECIFICATION §13 (H.264 bitrates, scaling, frame-rate conversion, resampling, level, AGC, G.711). Results into `docs/test-matrix.md`.
+- `tests/integration/file.sh`: offsets 0, +35, −35, a sweep, inserted delays, and the file-mode test aids of SPECIFICATION §13 (H.264 bitrates, scaling, frame-rate conversion, resampling, level, AGC, G.711). Those codecs are test aids, not live inputs. Results into `docs/test-matrix.md`.
 - Decide the container default from the round-trip results; record it here.
 - First container image (CLI only) on `main` (`nightly-dev`).
 
@@ -84,9 +84,9 @@ Exit: in the lab the MXL reference path measures 0 ms ± the M0 audio resolution
 
 Exit: an operator sees the grade in the widget on an operator screen and on a multiviewer tile; a forced +80 ms offset turns both red and fires the alert in a local Prometheus.
 
-### M5: ST 2110 path, hardening, release 1.0.0
+### M5: hardening and release 1.0.0
 
-- ST 2110 loop through mxl-st2110-gateway in the lab, 1080p50 and 1080i25, 1 h each: AV offset, index shift and latency per essence; the result into `docs/test-matrix.md`, with the gateway version.
+- No ST 2110, SRT or SIP code. The hour run is not a task of this repo: it goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). When that lab is run, the numbers can be copied into `docs/test-matrix.md` with the gateway version. SRT and SIP/G.711 live inputs are MXL flows from the sibling gateways.
 - Performance of both roles on both host classes (8-core AVX2 desktop CPU; Skylake-SP server) into `docs/performance.md`; catalog resources from it.
 - AMWA IS-04-01, IS-05-01, IS-05-02, BCP-007-03-01 (`tests/nmos/amwa.sh`).
 - Container image with OCI and MXL labels, tags, Compose demo (registry stand-in, generator, analyzer, a monitor), `deploy/k8s/` for both roles.
@@ -100,11 +100,11 @@ Exit: 1.0.0 released; a test production with one generator and two analyzers com
 
 | Release | Work |
 | --- | --- |
-| 1.1 | SRT + H.264 path (mxl-srt-gateway, several bitrates incl. low); cross-node through the fabrics agent (two analyzers, `merge` live view); G.711 live once a SIP function exists; fiducial marker search for a scaled or cropped picture (a multiviewer tile) — the same search the phone app needs |
+| 1.1 | Use the sibling gateways and test the matrix. No transport code in this repo. The ST 2110 hour run goes through `mxl-st2110-gateway`. SRT (`mxl-srt-gateway`) and SIP/G.711 arrive as MXL flows. Cross-node movement is `mxl-fabrics-agent`; this repo only merges analyzer results it already has. File-mode H.264 and G.711 stay test aids |
 | 2.0 | the phone app (M-P0 to M-P2 below) |
 | later | per-channel sequences (channel-swap test), lip-sync on programme material, IS-07 events |
 
-### M-P0: phone platform spike (after 1.1's fiducial search)
+### M-P0: phone platform spike (after 1.0; fiducial search is already in the tree)
 
 - Expo dev build with one native module per platform; `avsync-core` compiled in (iOS Objective-C++, Android NDK/JNI).
 - Measure on at least two iOS and three Android models: can video frames and audio input be timestamped on one clock (iOS host time; Android `REALTIME` sensor timestamps and AAudio/Oboe), at what frame rate, with what jitter.
@@ -151,25 +151,34 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 
 ## What was measured
 
-- Clean PCM p99 timing error ~0 ms; SNR 10 dB and G.711 detection 100 %. Threshold stays 0.5. Chirp shapes stay as specified. Audio uncertainty at correlation ≥ 0.95 is 0.10 ms so the band-pass row (p99 0.054 ms) is covered. Details: `docs/test-matrix.md`.
+- Clean PCM p99 timing error ~0 ms; SNR 10 dB and the G.711 table-codec test aid detection 100 %. Threshold stays 0.5. Chirp shapes stay as specified. Audio uncertainty at correlation ≥ 0.95 is 0.10 ms so the band-pass row (p99 0.054 ms) is covered. Details: `docs/test-matrix.md`.
 - MOV + ProRes + PCM: offsets 0, +35, −35 and a sweep, deviation within 1 ms, container checks pass (video 1/50, audio 1/48000). An ffmpeg `adelay` of 20 ms reads back as +20.0 ms.
 - H.264 + AAC is not exact (about −19 ms on a 3 s 720p50 clip) and is only offered with `--allow-container-shift`.
 - `serve`: `/livez` 200, `/readyz` 503 without flows, metrics families present at 0, widget CSP and no `X-Frame-Options`, unknown widget 404, bad parameter 400, invalid config 78, SIGTERM 143.
 
 ## Stages 2 and 3 (2026-10-24)
 
-Implemented on top of the stage 1 branch. `mxl-avsync paths` lists what runs here and what still needs the host.
+Stage 2 is no longer a transport milestone. It is: use the sibling gateways and test the matrix. Nothing in this repo speaks ST 2110, SRT, SIP or fabrics. What is already in the tree:
 
 - Fiducial search (`locate_picture`, `read_located_marker`) and `analyze --locate`.
-- File-mode H.264 at 1/4/10 Mbit/s and G.711 PCMU/PCMA at 8 kHz (`tests/integration/stage2.sh`).
-- Cross-node merge view: CLI `merge` and `POST /api/v1/merge`, using arrival time when both sides are `tai-ptp`.
+- File-mode H.264 at 1/4/10 Mbit/s and G.711 PCMU/PCMA at 8 kHz (`tests/integration/stage2.sh`). These are test aids (FFmpeg), not live inputs.
+- Merge of two analyzer results: CLI `merge` and `POST /api/v1/merge`, using arrival time when both sides are `tai-ptp`. The fabrics agent is not in this repo.
 - Phone core: rolling-shutter row time, 90-day calibration, `PhoneSession`. Expo UI, display rules, and the LED/piezo firmware are in `mobile-app/`.
 
-6. **Live SRT, the fabrics agent, and live SIP are not processes in this repo.** The file-mode distortion (H.264, G.711) and the merge view are implemented. The gateway, the agent, and a SIP function are host gaps.
+6. **No ST 2110, SRT, SIP or fabrics transport in this repo.** The hour run goes through `mxl-st2110-gateway`: generator → MXL → gateway → network → gateway → MXL → analyzer. SRT and live SIP/G.711 arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only.
 7. **The phone UI is not executed on a device here.** Capture sources for iOS (host clock) and Android (`REALTIME` sensor timestamps) are in `mobile-app/modules/avsync/`. They are not compiled by CMake.
 
 The on-screen sync scale is a moving square, not the configured offset. Each step is one frame. At 1080p50 and 2/s that is ±240 ms, one tick per frame, crossed once per event: red while early, white at 0, green while late. The analyzer still reads only the marker block and the Gray strip. Under the centre square, a PNG or GIF sits immediately left of the source name, with `AVSYNC_SUBTITLE` on the next line (`--subtitle`, `PATCH /api/v1/generator`). `assets/app-icon.svg` is the app icon. The phone store and adaptive icons, the web favicon, touch icon, and header mark, and the test-signal mark are rasters of that file.
 
+## Limits
+
+- No transport code: not ST 2110, not SRT, not SIP, not fabrics, not WebRTC. Sibling repos move those flows onto MXL. This process only reads and writes MXL flows and files.
+- The hour run is a lab through `mxl-st2110-gateway`, not a binary or a CI job here.
+- File-mode H.264 and G.711 measure the detectors. They are not a substitute for a live gateway.
+- libmxl is not linked. `/readyz` stays 503 until a later build creates flows.
+- `mxl-avsync paths` still prints the old host-gap names (`srt-live`, `g711-sip`, `st2110-loop`, `fabrics-cross-node`). That command text is code and was left unchanged in this docs pass.
+- The phone UI has not been run on a device. Phone work does not block live MXL.
+
 ## Next step
 
-On the Linux host: link libmxl, then the SRT gateway loop, a two-node fabrics merge, and a device build of the Expo app against the calibration rig. ST 2110 remains the stage 1 host gap.
+Link libmxl and add the live MXL video and audio reader and writer in this repo. Do not add gateway, SRT, SIP or fabrics code. The hour run, SRT and SIP stay on the sibling gateways. A device build of the phone app stays later and does not block that work.

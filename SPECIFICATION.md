@@ -3,7 +3,7 @@
 Status: Draft v0.2 (design only; no code exists yet)
 Repository: `LeeO86/mxl-avsync`
 Origin: the German product draft "MXL/DMF AV-Sync- und End-to-End-Latenz-Messsystem" v1.0 (2026-10-23), kept unchanged in [`docs/draft-2026-10-23-de.md`](docs/draft-2026-10-23-de.md). This document reworks it into the form of the sibling specifications and takes the maintainer's decisions of 2026-10-23 (§18).
-Aligns with: the media function guideline G1–G14 and the later platform conventions (preview contract, widgets, release notes) as written out in `LeeO86/mxl-audio-mixer` SPECIFICATION Appendices A and B, and the sibling repos `LeeO86/mxl-scopes` (closest sibling: one input per instance, result picture as an MXL flow), `mxl-test-player` (pattern writer, file playback), `mxl-multiviewer` (interlaced convention, Blend2D text), `mxl-st2110-gateway` (the ST 2110 path of §13), `mxl-audio-mixer` (spec structure, real-time audio lessons).
+Aligns with: the media function guideline G1–G14 and the later platform conventions (preview contract, widgets, release notes) as written out in `LeeO86/mxl-audio-mixer` SPECIFICATION Appendices A and B, and the sibling repos `LeeO86/mxl-scopes` (closest sibling: one input per instance, result picture as an MXL flow), `mxl-test-player` (pattern writer, file playback), `mxl-multiviewer` (interlaced convention, Blend2D text), `mxl-st2110-gateway` (the ST 2110 hour run of §13 goes through it; this repo does not speak ST 2110), `mxl-srt-gateway` (SRT arrives here as an MXL flow), `mxl-audio-mixer` (spec structure, real-time audio lessons).
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119.
 
@@ -33,12 +33,12 @@ Design principles:
 
 | Stage | Release | Content |
 | --- | --- | --- |
-| 1 | 1.0 (this spec, normative) | Event model and schemas. Test pattern and chirps. File generator and file analyzer (CLI). Live generator and live analyzer on MXL with TAI latency. Grading (pass/warn/fail), statistics, metrics, REST, web UI, the `avsync` widget, the result video flow, Grafana dashboard and alert rules. Paths: MXL reference path and the ST 2110 loop (§13) |
-| 2 | 1.1 (informative) | SRT with H.264 at several bitrates (mxl-srt-gateway). Cross-node through the fabrics agent. G.711 PCMU/PCMA (file mode first; live once a SIP function exists). Marker search in a scaled or cropped picture (a multiviewer tile) |
+| 1 | 1.0 (this spec, normative) | Event model and schemas. Test pattern and chirps. File generator and file analyzer (CLI). Live generator and live analyzer on MXL with TAI latency. Grading (pass/warn/fail), statistics, metrics, REST, web UI, the `avsync` widget, the result video flow, Grafana dashboard and alert rules. Paths in this repo: the MXL reference path and file round trips. File-mode H.264 and G.711 are test aids only (§13) |
+| 2 | 1.1 (informative) | Use the sibling gateways and test the matrix. No transport code in this repo. The ST 2110 hour run goes through `mxl-st2110-gateway`. SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways |
 | 3 | 2.0 (informative) | The phone app (Expo, iOS and Android) with capture calibration (§12) |
 | 4 | later (informative) | Several chirp sequences per channel (channel-swap test). Lip-sync on real programme (no test signal). IS-07 events |
 
-Out of scope for every stage: changing production routes, compressed MXL outputs, GStreamer in the media path, authentication, loudness measurement.
+Out of scope for every stage: changing production routes, compressed MXL outputs, GStreamer in the media path, authentication, loudness measurement, and any transport. This repo reads and writes MXL flows and files. ST 2110, SRT, SIP, fabrics and WebRTC belong to the sibling gateways.
 
 ---
 
@@ -51,9 +51,9 @@ Out of scope for every stage: changing production routes, compressed MXL outputs
  │ mxl-avsync  AVSYNC_ROLE=generator          │ mxl-avsync  AVSYNC_ROLE=analyzer  │
  │                               │            │                                  │
  │ event clock (TAI)             │  MXL       │ video reader ─┐                  │
- │  ├ video writer: pattern ─────┼──flows ──► │ audio reader ─┤ (any chain:      │
- │  │  (Blend2D, QR, markers)    │  (or any   │               │  2110 loop, …)   │
- │  └ audio writer: chirps ──────┼──chain) ─► │ detectors (avsync-core)           │
+ │  ├ video writer: pattern ─────┼──flows ──► │ audio reader ─┤ (MXL flows;      │
+ │  │  (Blend2D, QR, markers)    │            │               │  via gateways)   │
+ │  └ audio writer: chirps ──────┼──────────► │ detectors (avsync-core)           │
  │ nmos-cpp · REST · /metrics    │            │ pairing → grading → statistics    │
  └───────────────────────────────┘            │ result writer ─► "Result Video"   │
                                               │ nmos-cpp · REST · WS · widget ·   │
@@ -138,7 +138,7 @@ The UI always shows the sign and a sentence: `+35 ms — audio 35 ms after video
 From these:
 
 - `av_offset_ms` uses **index times**. MXL readers (multiviewer, monitor, encoders) align audio and video by index, so the index offset is what a downstream viewer sees. This value is graded (§8.3).
-- `video_index_shift_ms = t_idx(video) − T_k`, `audio_index_shift_ms` alike: how much the chain re-stamped the content (0 when every stage keeps the origin time, as the ST 2110 gateway does with RTP timestamps; `TODO_` confirm per gateway version in M5).
+- `video_index_shift_ms = t_idx(video) − T_k`, `audio_index_shift_ms` alike: how much the chain re-stamped the content (0 when every stage keeps the origin time). `mxl-st2110-gateway` keeps that origin with RTP timestamps; checking a gateway version is that repo's job, not a milestone here.
 - `video_latency_ms = t_arr(video) − T_k`, `audio_latency_ms` alike: the real latency through the chain up to this point.
 - `av_offset_arrival_ms = t_arr(audio) − t_arr(video)`: informative, for functions that read "the newest available" rather than by index.
 
@@ -219,7 +219,7 @@ Events are paired by identity, not by nearest neighbour:
 4. **Timing marker**: a large block (40 % × 40 % of the height, centred) that toggles between black (Y 64) and white (Y 940) at every event. Its edge is the video event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
-7. **Fiducials**: four corner patterns (nested squares) for the later marker search in a scaled or cropped picture (stage 2, the phone app). In 1.0 the analyzer assumes the full raster and uses them only to check the geometry.
+7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). In 1.0 the analyzer assumes the full raster and uses them only to check the geometry.
 8. **TEST SIGNAL** text at the top and bottom, always on, not configurable.
 
 ### 5.2 Event timing in the picture
@@ -278,7 +278,7 @@ The long field names of the draft (`schema`, `test_id`, …) are used in the man
 
 ### 6.1 Signal
 
-- Four chirp shapes, all band-limited, Hann-windowed (10 % fades), duration `AVSYNC_CHIRP_MS` (default 30 ms), band `AVSYNC_CHIRP_LOW_HZ`–`AVSYNC_CHIRP_HIGH_HZ` (default 700–2500 Hz, inside the G.711 telephone band):
+- Four chirp shapes, all band-limited, Hann-windowed (10 % fades), duration `AVSYNC_CHIRP_MS` (default 30 ms), band `AVSYNC_CHIRP_LOW_HZ`–`AVSYNC_CHIRP_HIGH_HZ` (default 700–2500 Hz, inside the G.711 telephone band, so the file-mode G.711 test aid can still carry them):
   - `0` linear up-chirp, `1` linear down-chirp, `2` up-chirp in the lower 60 % of the band, `3` down-chirp in the upper 60 % of the band.
   The four are chosen for low cross-correlation; M0 measures it and MAY change the shapes before 1.0.
 - The chirp's reference point is its centre. Event `k` uses chirp `k mod 4`.
@@ -288,7 +288,7 @@ The long field names of the draft (`schema`, `test_id`, …) are used in the man
 - All channels carry the same signal by default. `AVSYNC_AUDIO_CHANNELS` (1–16, default 2). A per-channel sequence for a channel-swap test is stage 4.
 - MXL: `audio/float32`, 48 kHz. FILE: PCM 24-bit 48 kHz by default, other rates by resampling in the generator (44.1 kHz and 96 kHz in the tests).
 
-These are starting values, not proven optima. M0 tests them against level change, noise, AGC, filtering, resampling and G.711 (§14.1) and records the result in the plan.
+These are starting values, not proven optima. M0 tests them against level change, noise, AGC, filtering, resampling and a G.711 table codec (§14.1) and records the result in the plan. That G.711 path is a test aid, not a live SIP input.
 
 ### 6.2 Detection
 
@@ -405,7 +405,7 @@ If a part is unknown the result says `uncertainty_status: "unknown"` rather than
 
 ### 8.5 Several measuring points
 
-End-to-end latency between two analyzers is `t_arr(destination) − t_arr(source)` for the same `event_id`, valid only when both report `reference.type = "tai-ptp"`. In 1.0 each analyzer already reports latency against the generator's `T_k`, which covers the generator-to-point case. Merging two analyzers' event logs (`mxl-avsync merge a.json b.json`) is a CLI command in 1.0; a live merge view is stage 2.
+End-to-end latency between two analyzers is `t_arr(destination) − t_arr(source)` for the same `event_id`, valid only when both report `reference.type = "tai-ptp"`. In 1.0 each analyzer already reports latency against the generator's `T_k`, which covers the generator-to-point case. Merging two analyzers' event logs (`mxl-avsync merge a.json b.json`, and the same merge of saved results over REST) is a measurement in this repo. Moving the flows between nodes is `mxl-fabrics-agent`, not code here.
 
 ---
 
@@ -604,20 +604,18 @@ The camera and microphone have different capture latencies (OS buffers, exposure
 
 ## 13. Signal paths and test matrix
 
-Each path listed as supported has test results and known limits in `docs/test-matrix.md`.
+Each path this repo supports has test results and known limits in `docs/test-matrix.md`. This repo does not implement a transport. File-mode H.264 and G.711 PCMU/PCMA are test aids only: FFmpeg filters in CI, so the detectors can be tried on a compressed picture and on telephone-band audio. They are not live inputs and they do not stand in for a gateway.
+
+The ST 2110 hour run is not code here. It goes through `mxl-st2110-gateway`: avsync generator → MXL → gateway → network → gateway → MXL → avsync analyzer, 1080p50 and 1080i25, one hour, with index shift and latency reported when that lab is run. SRT arrives as an MXL flow from `mxl-srt-gateway`. SIP/G.711 live audio arrives as an MXL flow from the sibling gateway that speaks SIP. Cross-node movement is `mxl-fabrics-agent`. Stage 2 is: use those sibling gateways and test the matrix. No transport code is added to this repo.
 
 | Path | Stage | How it is tested |
 | --- | --- | --- |
 | PCM reference (file round trip) | 1 | CI: generate → analyze; 0, +35, −35 ms and a sweep; inserted delays |
 | MXL reference (generator → analyzer, one node) | 1 | CI with real MXL in a temp root; lab |
-| Transcoding in file mode: H.264 (several bitrates incl. 1 Mbit/s), scaling 1080→720→540, frame-rate conversion 50→25 and 50→59.94, resampling 48→44.1 kHz, level −20 dB, AGC (a simulated compressor), G.711 PCMU and PCMA | 1 | CI with FFmpeg filters; the results are the first entries of the matrix |
-| **ST 2110 loop** (MXL → mxl-st2110-gateway → 2110 → gateway → MXL) | 1 | lab: 1080p50 and 1080i25, 1 h; index shift and latency reported |
+| File-mode test aids: H.264 (several bitrates incl. 1 Mbit/s), scaling 1080→720→540, frame-rate conversion 50→25 and 50→59.94, resampling 48→44.1 kHz, level −20 dB, AGC (a simulated compressor), G.711 PCMU and PCMA | 1 | CI with FFmpeg filters. Test aids only, not live SRT or SIP |
 | Controlled delay (analyzer's test tool shifts audio or video by n ms) | 1 | CI and lab |
 | Frame drops and duplicates (test tool) | 1 | CI |
-| SRT with H.264 (mxl-srt-gateway) at several bitrates | 2 | lab |
-| Cross-node through the fabrics agent | 2 | lab, two nodes, PTP |
-| G.711 live through a SIP function | 2 | once such a function exists |
-| Multiviewer tile (scaled, cropped) | 2 | lab, marker search with fiducials |
+| Multiviewer tile (scaled, cropped) | — | fiducial search in this tree (`analyze --locate`); a lab tile is not a transport |
 | Phone at a monitor | 3 | real devices with the calibration rig |
 
 ---
@@ -628,7 +626,7 @@ Each path listed as supported has test results and known limits in `docs/test-ma
 
 - Event plan: ids, times on the grain grid at 25/50/59.94p and 1080i25, the expected offset and its rounding, a sweep, determinism (same config → same plan bytes).
 - Chirps: duration, band (spectrum), level, no clipping, start and centre time, sample-index purity (a block split anywhere gives the same samples).
-- Chirp detection, with a measured timing error and detection rate for each condition: clean; level −40…0 dBFS; white noise at SNR 20, 10, 0 dB; a compressor/AGC; band-pass 300–3400 Hz; resampling to 44.1 and back; G.711 μ-law and A-law (table codec in the test); a 10 ms gap; two chirps close together; chirp-id cross-confusion. The results become the uncertainty table of §8.4 and the default threshold.
+- Chirp detection, with a measured timing error and detection rate for each condition: clean; level −40…0 dBFS; white noise at SNR 20, 10, 0 dB; a compressor/AGC; band-pass 300–3400 Hz; resampling to 44.1 and back; G.711 μ-law and A-law (a table-codec test aid, not a live SIP input); a 10 ms gap; two chirps close together; chirp-id cross-confusion. The results become the uncertainty table of §8.4 and the default threshold.
 - Marker detection on synthetic frames: clean, H.264-like blocking (quantised DCT), 4:1 downscale, blur, noise, a half-transition frame (`invalid`), wrong geometry; Gray code and parity; drops and duplicates.
 - QR payload against the schema; size ≤ 200 bytes.
 - Sign convention: audio late → positive; audio early → negative (also in every UI and metric test).
@@ -646,7 +644,7 @@ Each path listed as supported has test results and known limits in `docs/test-ma
 ### 14.3 Lab (hardware, not CI)
 
 - MXL reference path 1 h at 1080p50 and 1080i25: offset 0 ± audio resolution, 0 invalid events, latency stable; CPU of both roles.
-- ST 2110 loop 1 h (§13).
+- The ST 2110 hour run is not a lab of this repo. It goes through `mxl-st2110-gateway` as in §13.
 - Result flow on a multiviewer tile; the widget on an operator screen.
 - Alerts fire in Grafana on a forced +80 ms offset and on a stopped generator.
 - Production up and down on the platform with one generator and two analyzers.
@@ -665,7 +663,7 @@ Each path listed as supported has test results and known limits in `docs/test-ma
 | QR encode | Nayuki QR Code generator (MIT, one file, vendored) | small, no dependencies, also in the phone build |
 | QR decode | zxing-cpp (Apache-2.0) | robust on blurred and scaled codes; also builds for iOS and Android |
 | FFT / correlation | pocketfft (BSD-3, header only, vendored) | no dependencies, double and float |
-| Marker detection | own code in `avsync-core` (block means, Gray decode) | trivial maths; no OpenCV needed in 1.0. Fiducial search (stage 2) MAY add a small dependency then |
+| Marker detection | own code in `avsync-core` (block means, Gray decode) | trivial maths; no OpenCV needed in 1.0. Fiducial search for a scaled picture MAY add a small dependency |
 | Text and drawing | Blend2D with DejaVu Sans compiled in (versions of mxl-multiviewer) | the family's choice |
 | CLI | own argument parser on top of the config layer (same keys) | one source of truth for settings |
 | Schemas | JSON Schema draft 2020-12 in `schemas/`, validated in tests (nlohmann/json + json-schema-validator, MIT) | the draft's versioned JSON requirement |
@@ -889,7 +887,7 @@ Generators belong in test productions (§11). A typical test production: `avsync
 | --- | --- | --- |
 | 1 | Name | `mxl-avsync` (repo, image `ghcr.io/leeo86/mxl-avsync`, metrics `mxl_avsync_`) |
 | 2 | Language | C++20 like the siblings; dependency-free core reused by the phone app |
-| 3 | Real paths in 1.0 | ST 2110 loop through mxl-st2110-gateway (besides the MXL and file reference paths). SRT/H.264, cross-node fabrics and G.711 live are stage 2 |
+| 3 | Real paths | MXL flows and files in this repo. The ST 2110 hour run goes through mxl-st2110-gateway. SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 uses those gateways and tests the matrix; this repo adds no transport code |
 | 4 | Tolerance | per-stage accuracy −5…+15 ms passes (green); EBU R37 −40…+60 ms warns (orange); outside fails (red) |
 | 5 | Deployment | one image, two catalog types (`avsync-generator`, `avsync-analyzer`), `AVSYNC_ROLE` per instance |
 | 6 | Analyzer outputs | the `avsync` widget, the result video flow for the multiviewer, Grafana alerts — besides metrics, REST and the UI |
@@ -927,4 +925,4 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 - ATSC IS-191 (relative timing of sound and vision for broadcast operations)
 - ITU-T G.711 (PCMU, PCMA)
 - ITU-R BT.709-6
-- Sibling specifications: `LeeO86/mxl-scopes`, `mxl-test-player`, `mxl-multiviewer`, `mxl-st2110-gateway`, `mxl-audio-mixer` (Appendices A and B: the platform contract)
+- Sibling specifications: `LeeO86/mxl-scopes`, `mxl-test-player`, `mxl-multiviewer`, `mxl-st2110-gateway`, `mxl-srt-gateway`, `mxl-fabrics-agent`, `mxl-audio-mixer` (Appendices A and B: the platform contract)
