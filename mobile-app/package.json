@@ -4,10 +4,12 @@
   "private": true,
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "test": "node --test src/display.test.mjs"
+    "test": "node --test src/display.test.mjs src/measure.test.mjs src/session.test.mjs"
   },
   "dependencies": {
     "expo": "~52.0.0",
+    "expo-av": "~15.0.2",
+    "expo-camera": "~16.0.18",
     "react": "18.3.1",
     "react-native": "0.76.0"
   }
