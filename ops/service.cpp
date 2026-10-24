@@ -685,6 +685,10 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             rt.output_video += 1;
         };
+        callbacks.count_audio_grain = [&] {
+            std::lock_guard lock(rt.mu);
+            rt.output_audio += 1;
+        };
         callbacks.count_late = [&](bool video) {
             std::lock_guard lock(rt.mu);
             if (video) {

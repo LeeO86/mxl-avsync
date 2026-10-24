@@ -32,6 +32,7 @@ struct LiveCallbacks {
     std::function<void(const Measurement&)> add_event;
     std::function<void()> count_generator_event;
     std::function<void()> count_video_grain;
+    std::function<void()> count_audio_grain;
     std::function<void(bool video)> count_late;
     std::function<void()> count_resync;
 };

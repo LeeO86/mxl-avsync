@@ -221,10 +221,14 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             }
             if (domain.write_samples(audio_written + static_cast<uint64_t>(frames), samples.data(), frames, config.audio_channels, max_write)) {
                 audio_written += static_cast<uint64_t>(frames);
+                if (callbacks.count_audio_grain) {
+                    callbacks.count_audio_grain();
+                }
             } else {
                 callbacks.count_late(false);
             }
         }
+        sleep_until_tai(time_of_index(pace, index + 1));
     }
     domain.close();
     if (config.mxl_cleanup_on_exit && created_domain) {
@@ -351,6 +355,7 @@ void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, Result
             })) {
             note_preview_v210("generated", packed.data(), format.width, format.height);
         }
+        sleep_until_tai(time_of_index(pace, index + 1));
     }
     domain.close();
     if (config.mxl_cleanup_on_exit && created) {
