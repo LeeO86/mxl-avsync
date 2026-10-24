@@ -1,72 +1,109 @@
 #include "avsync/avsync.hpp"
+#include "avsync/dejavu_sans.hpp"
+
+#include <blend2d/blend2d.h>
 
 #include <algorithm>
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc++11-narrowing"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wnarrowing"
-#endif
-#include "font8x8_basic.h"
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+#include <cmath>
 
 namespace avsync {
+namespace {
+
+BLFontFace const& dejavu_face()
+{
+    static const BLFontFace face = [] {
+        BLFontData data;
+        BLFontFace created;
+        if (data.create_from_data(font::dejavuSans, font::dejavuSansSize) == BL_SUCCESS) {
+            created.create_from_data(data, 0);
+        }
+        return created;
+    }();
+    return face;
+}
+
+int font_px(int scale)
+{
+    return 8 * std::max(1, scale);
+}
+
+bool make_font(int scale, BLFont& font)
+{
+    const BLFontFace& face = dejavu_face();
+    return face.is_valid() && font.create_from_face(face, static_cast<float>(font_px(scale))) == BL_SUCCESS;
+}
+
+} // namespace
 
 void draw_text(LumaView view, int x, int y, std::string_view text, int scale, uint16_t y_value)
 {
-    if (scale < 1) {
-        scale = 1;
+    if (text.empty() || view.data == nullptr) {
+        return;
     }
-    int cursor = x;
-    for (unsigned char ch : text) {
-        if (ch >= 128) {
-            ch = '?';
+    BLFont font;
+    if (!make_font(scale, font)) {
+        return;
+    }
+    const int width = std::max(1, text_px_width(text, scale));
+    const int height = std::max(1, text_px_height(scale));
+    BLImage image(width, height, BL_FORMAT_A8);
+    {
+        BLContext ctx(image);
+        ctx.clear_all();
+        ctx.set_fill_style(BLRgba32(0xFFFFFFFF));
+        ctx.fill_utf8_text(BLPoint(0.0, font.metrics().ascent), font, text.data(), text.size());
+        ctx.end();
+    }
+    BLImageData pixels;
+    if (image.get_data(&pixels) != BL_SUCCESS || pixels.pixel_data == nullptr) {
+        return;
+    }
+    const auto* base = static_cast<const uint8_t*>(pixels.pixel_data);
+    for (int row = 0; row < height; ++row) {
+        const int yy = y + row;
+        if (yy < 0 || yy >= view.height) {
+            continue;
         }
-        for (int row = 0; row < 8; ++row) {
-            const unsigned char bits = static_cast<unsigned char>(font8x8_basic[ch][row]);
-            for (int col = 0; col < 8; ++col) {
-                // font8x8 stores the leftmost pixel in the least significant bit.
-                if ((bits & (1u << col)) == 0) {
-                    continue;
-                }
-                const int px = cursor + col * scale;
-                const int py = y + row * scale;
-                for (int dy = 0; dy < scale; ++dy) {
-                    const int yy = py + dy;
-                    if (yy < 0 || yy >= view.height) {
-                        continue;
-                    }
-                    uint16_t* line = view.data + static_cast<size_t>(yy) * static_cast<size_t>(view.stride);
-                    for (int dx = 0; dx < scale; ++dx) {
-                        const int xx = px + dx;
-                        if (xx >= 0 && xx < view.width) {
-                            line[xx] = y_value;
-                        }
-                    }
-                }
+        const uint8_t* src = base + static_cast<std::ptrdiff_t>(row) * pixels.stride;
+        uint16_t* dst = view.data + static_cast<size_t>(yy) * static_cast<size_t>(view.stride);
+        for (int col = 0; col < width; ++col) {
+            if (src[col] < 96) {
+                continue;
+            }
+            const int xx = x + col;
+            if (xx >= 0 && xx < view.width) {
+                dst[xx] = y_value;
             }
         }
-        cursor += 8 * scale + scale;
     }
 }
 
 int text_px_width(std::string_view text, int scale)
 {
-    if (text.empty() || scale < 1) {
+    if (text.empty()) {
         return 0;
     }
-    return static_cast<int>(text.size()) * (8 * scale + scale) - scale;
+    BLFont font;
+    if (!make_font(scale, font)) {
+        return 0;
+    }
+    BLGlyphBuffer glyphs;
+    glyphs.set_utf8_text(text.data(), text.size());
+    BLTextMetrics metrics;
+    if (font.get_text_metrics(glyphs, metrics) != BL_SUCCESS) {
+        return 0;
+    }
+    return std::max(0, static_cast<int>(std::lround(metrics.advance.x)));
 }
 
 int text_px_height(int scale)
 {
-    return 8 * std::max(1, scale);
+    BLFont font;
+    if (!make_font(scale, font)) {
+        return font_px(scale);
+    }
+    const BLFontMetrics metrics = font.metrics();
+    return std::max(1, static_cast<int>(std::ceil(metrics.ascent + metrics.descent)));
 }
 
 SyncDot sync_dot_kind(double position_ms)

@@ -9,6 +9,37 @@ option(AVSYNC_CORE_ONLY "Build only avsync-core and its tests" OFF)
 option(AVSYNC_WITH_FFMPEG "Build the file generator and analyzer" ON)
 option(AVSYNC_WITH_MXL "Build the live MXL path" OFF)
 
+# Same pin and static options as mxl-multiviewer. The release tarball ships asmjit.
+include(FetchContent)
+FetchContent_Declare(blend2d_src
+    URL https://blend2d.com/download/blend2d-0.21.2.tar.gz
+    URL_HASH SHA256=234ba57a64153c96885a6271f15fdcf6c594ac8cb03adaad19abb8d3b2b533fa
+)
+FetchContent_GetProperties(blend2d_src)
+if(NOT blend2d_src_POPULATED)
+    FetchContent_Populate(blend2d_src)
+endif()
+set(BLEND2D_STATIC ON CACHE BOOL "" FORCE)
+set(BLEND2D_TEST OFF CACHE BOOL "" FORCE)
+set(BLEND2D_DEMOS OFF CACHE BOOL "" FORCE)
+set(BLEND2D_NO_INSTALL ON CACHE BOOL "" FORCE)
+set(BLEND2D_NO_JIT_LOGGING ON CACHE BOOL "" FORCE)
+add_subdirectory(${blend2d_src_SOURCE_DIR} ${CMAKE_BINARY_DIR}/blend2d EXCLUDE_FROM_ALL)
+
+set(DEJAVU_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/avsync/dejavu_sans.hpp)
+add_custom_command(
+    OUTPUT ${DEJAVU_HEADER}
+    COMMAND ${CMAKE_COMMAND}
+            -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/third_party/dejavu/DejaVuSans.ttf
+            -DOUTPUT=${DEJAVU_HEADER}
+            -DNAMESPACE=avsync::font
+            -DVAR=dejavuSans
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBytes.cmake
+    DEPENDS third_party/dejavu/DejaVuSans.ttf cmake/EmbedBytes.cmake
+    COMMENT "Embedding DejaVu Sans"
+    VERBATIM
+)
+
 add_library(avsync-core STATIC
     core/src/plan.cpp
     core/src/chirp.cpp
@@ -24,8 +55,10 @@ add_library(avsync-core STATIC
 target_include_directories(avsync-core
     PUBLIC core/include
     PRIVATE third_party/pocketfft
-    PRIVATE third_party/font8x8
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+set_source_files_properties(core/src/text.cpp PROPERTIES OBJECT_DEPENDS "${DEJAVU_HEADER}")
+target_link_libraries(avsync-core PUBLIC blend2d::blend2d)
 target_compile_options(avsync-core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp)
