@@ -4,7 +4,7 @@ This plan comes before any code. It is updated as the work goes on: every decisi
 
 ## Status (2026-10-24)
 
-Core, file tools, the serve control plane, the live MXL reader and writer, the PTP status reader, and QR decode with zxing-cpp 2.3.0 are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
+Core, file tools, the serve control plane, the live MXL reader and writer, the PTP status reader, QR decode with zxing-cpp 2.3.0, and the container image are implemented. `avsync-core` does not link libmxl. `mxlio/` is linked only into `mxl-avsync` when `find_package(mxl)` succeeds. `/readyz` is 200 once the video and audio flows are open on a tmpfs domain. This repo reads and writes MXL flows and files only. It does not implement ST 2110, SRT, SIP, fabrics or WebRTC. The ST 2110 hour run goes through `mxl-st2110-gateway` (generator → MXL → gateway → network → gateway → MXL → analyzer). SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. File-mode H.264 and G.711 are test aids only. Stage 2 is "use the sibling gateways, test the matrix", with no transport code here. The phone app remains later and does not block live MXL. Decisions of §18 still hold, including the rewritten path decision. Deviations and limits are below.
 
 ## Pins
 
@@ -301,6 +301,109 @@ Output:
 
 The case "large qr stays decodable and the sync square moves" compares the decoded text with the Nayuki payload for test id `TEST-IDENT`, event 4, `tk` 1000, format `1080p50`.
 
+## Packaging and ops (2026-10-24)
+
+Every exported metric family is present from process start, counters at 0. `video_latency_ms` and `audio_latency_ms` are not exported: a published 0 would be a false latency. The names are in the changelog. Samples of each output-frame family are contiguous.
+
+The image is multi-stage. The build stage runs `avsync-core-tests` and `avsync-picture-tests`. The runtime stage is `USER 1000:1000`, labelled `io.dmf.mxl.revision` from the `MXL_REF` build arg. There is no `cap_sys_nice`: the writers sleep on TAI and do not use real-time scheduling. The release workflow pushes `ghcr.io/leeo86/mxl-avsync`. CI jobs are `dockerfile`, `image`, `test`, and `build-and-test`. `MXL_REF` is the workflow env and the Dockerfile `ARG`.
+
+Command:
+
+```
+LD_LIBRARY_PATH=/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  BIN=/tmp/avsync-qr/mxl-avsync bash tests/integration/metrics.sh
+```
+
+Output:
+
+```
+# HELP mxl_avsync_info Build information.
+# TYPE mxl_avsync_info gauge
+mxl_avsync_info{version="1.0.0",core_version="1.0.0",mxl_revision="218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7",role="generator"} 1
+# TYPE mxl_avsync_generator_active gauge
+mxl_avsync_generator_active 0
+# TYPE mxl_avsync_generator_audio_muted gauge
+mxl_avsync_generator_audio_muted 0
+# TYPE mxl_avsync_generator_events_total counter
+mxl_avsync_generator_events_total 0
+# TYPE mxl_avsync_output_frames_total counter
+mxl_avsync_output_frames_total{essence="video"} 0
+mxl_avsync_output_frames_total{essence="audio"} 0
+# TYPE mxl_avsync_output_frames_late_total counter
+mxl_avsync_output_frames_late_total{essence="video"} 0
+mxl_avsync_output_frames_late_total{essence="audio"} 0
+# TYPE mxl_avsync_output_frames_missed_total counter
+mxl_avsync_output_frames_missed_total{essence="video"} 0
+mxl_avsync_output_frames_missed_total{essence="audio"} 0
+# TYPE mxl_avsync_input_state gauge
+mxl_avsync_input_state{essence="video",state="waiting"} 0
+mxl_avsync_input_state{essence="audio",state="waiting"} 0
+mxl_avsync_input_state{essence="video",state="no_signal"} 0
+mxl_avsync_input_state{essence="audio",state="no_signal"} 0
+mxl_avsync_input_state{essence="video",state="not_routed"} 0
+mxl_avsync_input_state{essence="audio",state="not_routed"} 0
+mxl_avsync_input_state{essence="video",state="running"} 0
+mxl_avsync_input_state{essence="audio",state="running"} 0
+mxl_avsync_input_state{essence="video",state="format_mismatch"} 0
+mxl_avsync_input_state{essence="audio",state="format_mismatch"} 0
+# TYPE mxl_avsync_input_resyncs_total counter
+mxl_avsync_input_resyncs_total{essence="video"} 0
+mxl_avsync_input_resyncs_total{essence="audio"} 0
+# TYPE mxl_avsync_events_total counter
+mxl_avsync_events_total{result="paired"} 0
+mxl_avsync_events_total{result="missing_audio"} 0
+mxl_avsync_events_total{result="missing_video"} 0
+mxl_avsync_events_total{result="duplicate"} 0
+mxl_avsync_events_total{result="ambiguous"} 0
+mxl_avsync_events_total{result="out_of_range"} 0
+# TYPE mxl_avsync_grade gauge
+mxl_avsync_grade{grade="pass"} 0
+mxl_avsync_grade{grade="warn"} 0
+mxl_avsync_grade{grade="fail"} 0
+mxl_avsync_grade{grade="invalid"} 0
+# TYPE mxl_avsync_av_offset_ms gauge
+# TYPE mxl_avsync_av_offset_deviation_ms gauge
+mxl_avsync_av_offset_ms 0
+mxl_avsync_av_offset_deviation_ms 0
+# TYPE mxl_avsync_av_offset_seconds histogram
+mxl_avsync_av_offset_seconds_bucket{le="-0.5"} 0
+mxl_avsync_av_offset_seconds_bucket{le="-0.2"} 0
+mxl_avsync_av_offset_seconds_bucket{le="-0.1"} 0
+mxl_avsync_av_offset_seconds_bucket{le="-0.06"} 0
+mxl_avsync_av_offset_seconds_bucket{le="-0.04"} 0
+mxl_avsync_av_offset_seconds_bucket{le="-0.015"} 0
+mxl_avsync_av_offset_seconds_bucket{le="-0.005"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.005"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.015"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.04"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.06"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.1"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.2"} 0
+mxl_avsync_av_offset_seconds_bucket{le="0.5"} 0
+mxl_avsync_av_offset_seconds_bucket{le="+Inf"} 0
+mxl_avsync_av_offset_seconds_sum 0
+mxl_avsync_av_offset_seconds_count 0
+# TYPE mxl_avsync_video_drops_total counter
+# TYPE mxl_avsync_video_duplicates_total counter
+mxl_avsync_video_drops_total 0
+mxl_avsync_video_duplicates_total 0
+# TYPE mxl_avsync_audio_correlation gauge
+# TYPE mxl_avsync_audio_level_dbfs gauge
+mxl_avsync_audio_correlation 0
+mxl_avsync_audio_level_dbfs 0
+# TYPE mxl_avsync_reference_sync gauge
+mxl_avsync_reference_sync{type="tai-ptp",state="locked"} 0
+mxl_avsync_reference_sync{type="tai-ptp",state="unlocked"} 0
+mxl_avsync_reference_sync{type="tai-ptp",state="unknown"} 0
+# TYPE mxl_avsync_nmos_registry_up gauge
+mxl_avsync_nmos_registry_up 0
+# TYPE mxl_avsync_nmos_activations_total counter
+mxl_avsync_nmos_activations_total 0
+metrics.sh ok
+```
+
+This VM has no Docker, so the image was not built here. `docker buildx build --check` is the `dockerfile` CI job.
+
 ## Next step
 
-Packaging and ops: metrics present at 0 from the start, a multi-stage image like mxl-scopes, and the container release workflow. Do not add a separate interlaced file mux.
+No separate interlaced file mux.

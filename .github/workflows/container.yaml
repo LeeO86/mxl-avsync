@@ -1,0 +1,79 @@
+name: Container
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: version
+        name: Image version
+        # A v* tag must match the version the binary reports and CMakeLists.txt.
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/v}"
+            code="$(sed -n 's/^inline constexpr char kAppVersion\[\] = "\(.*\)";/\1/p' core/include/avsync/avsync.hpp)"
+            cmake="$(sed -n 's/^project(mxl-avsync VERSION \([0-9.]*\) .*/\1/p' CMakeLists.txt)"
+            if [[ "$tag" != "$code" || "$tag" != "$cmake" ]]; then
+              echo "::error::tag v$tag does not match kAppVersion $code / CMake $cmake"
+              exit 1
+            fi
+            echo "version=$tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=nightly-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=nightly-dev,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+            type=sha,prefix=git-
+          flavor: |
+            latest=false
+          labels: |
+            org.opencontainers.image.title=mxl-avsync
+            org.opencontainers.image.description=AV sync measurement for MXL
+            org.opencontainers.image.source=https://github.com/LeeO86/mxl-avsync
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

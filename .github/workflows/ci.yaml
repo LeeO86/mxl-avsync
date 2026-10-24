@@ -6,7 +6,55 @@ env:
   MXL_REF: 218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7
   NMOS_CPP_REF: fe303849527394b03bdedc8f161f377fe458bb62
 jobs:
+  dockerfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Check the Dockerfile
+        run: docker buildx build --check --file docker/Dockerfile .
+
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   test:
+    # Core, picture, file and API tests. No libmxl and no nmos-cpp.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build pkg-config g++ \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+      - name: build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+      - name: unit
+        run: ./build/avsync-core-tests && ./build/avsync-picture-tests
+      - name: api
+        run: ./tests/integration/api.sh
+      - name: metrics
+        run: ./tests/integration/metrics.sh
+      - name: file
+        run: ./tests/integration/file.sh
+      - name: stage 2 file paths
+        run: ./tests/integration/stage2.sh
+      - name: phone display rules
+        run: node --test mobile-app/src/display.test.mjs
+
+  build-and-test:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -62,14 +110,6 @@ jobs:
           cmake --build build -j"$(nproc)"
       - name: unit
         run: ./build/avsync-core-tests && ./build/avsync-picture-tests
-      - name: api
-        run: ./tests/integration/api.sh
-      - name: file
-        run: ./tests/integration/file.sh
-      - name: stage 2 file paths
-        run: ./tests/integration/stage2.sh
-      - name: phone display rules
-        run: node --test mobile-app/src/display.test.mjs
       - name: live
         run: |
           export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
