@@ -36,7 +36,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/widget/gen
 test "$code" = 400
 curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/stop" | grep -q '"stopped":true'
 curl -sf -X PATCH "http://127.0.0.1:$PORT/api/v1/generator" -H 'Content-Type: application/json' \
-  -d '{"source":"STUDIO A"}' | grep -q '"source":"STUDIO A"'
+  -d '{"source":"STUDIO A","subtitle":"desk@studio.example"}' | grep -q '"subtitle":"desk@studio.example"'
 curl -sf "http://127.0.0.1:$PORT/icon.png" | cmp -s - "$ROOT/web/icon.png"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/source-image" -H 'Content-Type: image/png' \
   --data-binary @"$ROOT/tests/fixtures/transparent.png" | grep -q '"frames":1'

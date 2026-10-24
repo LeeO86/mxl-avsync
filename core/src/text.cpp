@@ -88,15 +88,15 @@ SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms)
     if (frame < 0) {
         frame += period_frames;
     }
-    const double half_period = period_ms / 2.0;
-    place.scale_ms = std::max(250.0, half_period);
+    const double frame_ms = period_ms / static_cast<double>(period_frames);
     const int half = std::max(1, period_frames / 2);
+    place.scale_ms = half * frame_ms;
     if (frame == 0) {
         place.position_ms = 0;
     } else if (frame <= half) {
-        place.position_ms = place.scale_ms * static_cast<double>(frame) / static_cast<double>(half);
+        place.position_ms = frame * frame_ms;
     } else {
-        place.position_ms = place.scale_ms * static_cast<double>(frame - period_frames) / static_cast<double>(half);
+        place.position_ms = (frame - period_frames) * frame_ms;
     }
     place.position_ms = std::clamp(place.position_ms, -place.scale_ms, place.scale_ms);
     return place;

@@ -179,7 +179,8 @@ void install_web(HttpServer& http, Runtime& rt)
         std::lock_guard lock(rt.mu);
         if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
         return json_response({{"offset_ms", rt.config.offset_ms}, {"level_dbfs", rt.config.chirp_level_dbfs}, {"muted", !rt.config.audio_enable},
-            {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"notes", rt.config.notes},
+            {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"subtitle", rt.config.subtitle},
+            {"notes", rt.config.notes},
             {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
             {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
     });
@@ -197,6 +198,12 @@ void install_web(HttpServer& http, Runtime& rt)
             }
             flat["AVSYNC_SOURCE"] = body["source"];
         }
+        if (body.contains("subtitle")) {
+            if (!body["subtitle"].is_string() || body["subtitle"].get<std::string>().size() > 80) {
+                return json_response({{"error", "subtitle must be at most 80 characters"}}, 400);
+            }
+            flat["AVSYNC_SUBTITLE"] = body["subtitle"];
+        }
         if (body.contains("muted")) flat["AVSYNC_AUDIO_ENABLE"] = body["muted"].get<bool>() ? "false" : "true";
         if (body.contains("event_rate")) flat["AVSYNC_EVENT_RATE"] = std::to_string(body["event_rate"].get<int>());
         try {
@@ -204,7 +211,8 @@ void install_web(HttpServer& http, Runtime& rt)
         } catch (const std::exception& ex) {
             return json_response({{"error", ex.what()}}, 400);
         }
-        return json_response({{"ok", true}, {"offset_ms", rt.config.offset_ms}, {"muted", !rt.config.audio_enable}, {"source", rt.config.source}});
+        return json_response({{"ok", true}, {"offset_ms", rt.config.offset_ms}, {"muted", !rt.config.audio_enable},
+            {"source", rt.config.source}, {"subtitle", rt.config.subtitle}});
     });
     http.add("POST", "/api/v1/generator/source-image", [&](const HttpRequest& request) {
         std::lock_guard lock(rt.mu);

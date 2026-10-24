@@ -51,6 +51,7 @@
         <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
         <label>Title <input v-model="title" maxlength="80"/></label>
         <label>Source name <input v-model="source" maxlength="80"/></label>
+        <label>Subtitle <input v-model="subtitle" maxlength="80" placeholder="phone, email"/></label>
         <label>Source picture (PNG with transparency, or an animated GIF)
           <input type="file" accept="image/png,image/gif,.png,.gif" @change="onImage"/>
         </label>
@@ -82,7 +83,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos' }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos' }; },
   computed: {
     role() { return this.info.role || ''; },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
@@ -104,6 +105,7 @@ createApp({
         const g = await (await fetch('/api/v1/generator')).json();
         this.offset = g.offset_ms; this.level = g.level_dbfs; this.title = g.title || '';
         this.source = g.source || '';
+        this.subtitle = g.subtitle || '';
         this.imageSet = !!g.source_image; this.imageFrames = g.source_image_frames || 0;
         if (this.imageSet && !this.imageUrl) this.imageUrl = '/api/v1/generator/source-image';
         this.audioOn = !g.muted; this.stopped = !!g.stopped;
@@ -117,7 +119,7 @@ createApp({
     onImage(ev) { this.imageFile = (ev.target.files && ev.target.files[0]) || null; },
     async saveGenerator() {
       await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source})});
+        body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle})});
       if (this.imageFile) {
         const bytes = await this.imageFile.arrayBuffer();
         const type = this.imageFile.type || (this.imageFile.name.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png');

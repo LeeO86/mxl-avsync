@@ -264,20 +264,19 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
     const Y10 white{kYWhite, kYNeutralChroma, kYNeutralChroma};
     fill_yuv(frame, g.sweep_x0, g.sweep_y - track_h / 2, span, track_h, black);
     const int radius = std::max(12, frame.height / 40);
-    const int limit = std::max(20, static_cast<int>(std::lround(place.scale_ms)));
+    const double frame_ms = period_ms / static_cast<double>(std::max(1, period_frames));
+    const int frame_ms_i = std::max(1, static_cast<int>(std::lround(frame_ms)));
+    const int half_frames = std::max(1, period_frames / 2);
+    const int limit = half_frames * frame_ms_i;
     auto station_x = [&](int ms) {
         const double along = (static_cast<double>(ms) + place.scale_ms) / (2.0 * place.scale_ms);
         return g.sweep_x0 + static_cast<int>(std::lround(std::clamp(along, 0.0, 1.0) * (span - 1)));
     };
-    // Every 20 ms from the centre out to the scale ends. ±limit is kept when it is not itself a 20 ms step.
+    // One tick per frame, from −half a period to +half a period. At 1080p50 that is ±240 ms.
     std::vector<int> stations;
-    stations.push_back(0);
-    for (int ms = 20; ms < limit; ms += 20) {
-        stations.push_back(ms);
-        stations.push_back(-ms);
+    for (int frame = -half_frames; frame <= half_frames; ++frame) {
+        stations.push_back(frame * frame_ms_i);
     }
-    stations.push_back(limit);
-    stations.push_back(-limit);
     struct Label {
         int ms;
         int x0;
@@ -327,8 +326,10 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
         return !out.empty();
     };
     const int scales[] = {frame.height >= 720 ? 2 : 1, 1};
-    const int steps[] = {20, 50, 100};
-    for (int step : steps) {
+    // Four frames is 80 ms at 1080p50; five frames is 100 ms. Both land on frame times.
+    const int frame_steps[] = {4, 5};
+    for (int frame_step : frame_steps) {
+        const int step = frame_step * frame_ms_i;
         bool packed = false;
         for (int scale : scales) {
             if (pack(step, scale, labels)) {
@@ -413,10 +414,11 @@ const SourceStill* cached_app_icon()
 
 void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int right, int top, int bottom)
 {
-    const bool has_text = !info.source.empty();
+    const bool has_source = !info.source.empty();
+    const bool has_subtitle = !info.subtitle.empty();
     const bool has_image = info.source_image != nullptr && info.source_image->width > 0 && info.source_image->height > 0
         && info.source_image->rgba.size() >= static_cast<size_t>(info.source_image->width * info.source_image->height * 4);
-    if (!has_text && !has_image) {
+    if (!has_source && !has_subtitle && !has_image) {
         return;
     }
     const int avail_w = right - left;
@@ -425,32 +427,59 @@ void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int 
         return;
     }
     int scale = std::max(2, frame.height / 70);
+    struct Metrics {
+        int src_w;
+        int src_h;
+        int sub_w;
+        int sub_h;
+        int gap;
+        int image;
+        int block_w;
+        int block_h;
+    };
     auto measure = [&](int s) {
         const int pad = std::max(2, s);
-        const int tw = has_text ? text_px_width(info.source, s) + pad * 2 : 0;
-        const int th = has_text ? text_px_height(s) + pad * 2 : 0;
-        const int gap = (has_text && has_image) ? std::max(4, s) : 0;
-        const int ih = has_image ? (has_text ? th : std::min(avail_h, std::max(th, frame.height / 8))) : 0;
-        return std::tuple<int, int, int, int>{tw, th, gap, ih};
+        Metrics m;
+        m.src_w = has_source ? text_px_width(info.source, s) + pad * 2 : 0;
+        m.src_h = has_source ? text_px_height(s) + pad * 2 : 0;
+        m.sub_w = has_subtitle ? text_px_width(info.subtitle, s) + pad * 2 : 0;
+        m.sub_h = has_subtitle ? text_px_height(s) + pad * 2 : 0;
+        m.gap = std::max(4, s);
+        const int text_w = std::max(m.src_w, m.sub_w);
+        const int text_h = m.src_h + ((m.src_h > 0 && m.sub_h > 0) ? m.gap : 0) + m.sub_h;
+        m.image = 0;
+        if (has_image) {
+            m.image = m.src_h > 0 ? m.src_h : std::max(m.sub_h, std::min(avail_h, std::max(32, frame.height / 12)));
+        }
+        m.block_w = m.image + ((m.image > 0 && text_w > 0) ? m.gap : 0) + text_w;
+        m.block_h = std::max(m.image, text_h);
+        return m;
     };
     while (scale > 1) {
-        const auto [tw, th, gap, ih] = measure(scale);
-        if (tw + gap + ih <= avail_w && std::max(th, ih) <= avail_h) {
+        const Metrics m = measure(scale);
+        if (m.block_w <= avail_w && m.block_h <= avail_h) {
             break;
         }
         --scale;
     }
-    const auto [tw, th, gap, ih] = measure(scale);
-    if (has_text && tw > avail_w) {
+    const Metrics m = measure(scale);
+    if (m.block_w > avail_w || m.block_h > avail_h) {
         return;
     }
-    int x = left;
-    if (has_text) {
-        draw_text_box(frame, x, top, info.source, scale);
-        x += tw + gap;
+    const int origin_x = left + std::max(0, (avail_w - m.block_w) / 2);
+    const int origin_y = top + std::max(0, (avail_h - m.block_h) / 2);
+    int text_x = origin_x;
+    if (m.image > 0) {
+        blit_rgba(frame, origin_x, origin_y, m.image, *info.source_image);
+        text_x += m.image + m.gap;
     }
-    if (has_image && x + 4 < right) {
-        blit_rgba(frame, x, top, std::min(ih, right - x), *info.source_image);
+    int text_y = origin_y;
+    if (has_source) {
+        draw_text_box(frame, text_x, text_y, info.source, scale);
+        text_y += m.src_h + (has_subtitle ? m.gap : 0);
+    }
+    if (has_subtitle) {
+        draw_text_box(frame, text_x, text_y, info.subtitle, scale);
     }
 }
 
@@ -494,14 +523,11 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
     } else {
         draw_app_icon(frame, icon_x, icon_y, icon_px);
     }
-    const int ident_top = icon_y + icon_px + gap;
-    const int ident_bottom = std::min(geo.marker_y, geo.sweep_y) - 8;
-    const int ident_right = frame.width - geo.fid_size - 8;
-    draw_source_ident(frame, info, group_x, ident_right, ident_top, ident_bottom);
-    const std::string footer = "TEST SIGNAL";
-    const int footer_w = text_px_width(footer, banner_scale) + banner_pad * 2;
-    const int footer_h = text_px_height(banner_scale) + banner_pad * 2;
-    place((frame.width - footer_w) / 2, geo.strip_y - footer_h - 8, footer, banner_scale);
+    const int block_top = geo.marker_y + geo.marker_side + gap;
+    const int block_bottom = geo.strip_y - gap;
+    const int block_left = geo.fid_size + gap;
+    const int block_right = frame.width - geo.fid_size - gap;
+    draw_source_ident(frame, info, block_left, block_right, block_top, block_bottom);
     int text_x = qr_right;
     int text_y = icon_y;
     const int column_right = group_x - gap;

@@ -212,8 +212,9 @@ int text_px_height(int scale);
 enum class SyncDot { Early, Zero, Late };
 SyncDot sync_dot_kind(double position_ms);
 
-// Where the sync square is during one event. The scale is at least ±250 ms.
-// At 2/s and 1080p50 the square crosses that whole window in one 25-frame period.
+// Where the sync square is during one event. Each step is one frame.
+// At 1080p50 and 2/s that is 20 ms, so the window is ±240 ms and the square
+// crosses it once per 25-frame period.
 struct SyncPlace {
     double scale_ms = 250;
     double position_ms = 0;

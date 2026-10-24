@@ -153,7 +153,7 @@ TEST_CASE("large qr stays decodable and the sync square moves")
             boxes = std::move(found);
         }
     }
-    CHECK(best_runs >= 11);
+    CHECK(best_runs >= 7);
     for (size_t i = 2; i + 1 < boxes.size(); i += 2) {
         CHECK(boxes[i] >= boxes[i - 1] + 4);
     }

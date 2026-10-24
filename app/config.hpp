@@ -26,6 +26,7 @@ struct Config {
     std::string test_id;
     std::string title;
     std::string source;
+    std::string subtitle;
     std::string notes;
     int audio_channel = 0;
     int audio_window_ms = 10;

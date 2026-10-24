@@ -330,6 +330,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
             PictureInfo info;
             info.title = request.title;
             info.source = request.source;
+            info.subtitle = request.subtitle;
             info.notes = request.notes;
             info.format_line = request.format;
             info.av_offset_ms = offset;

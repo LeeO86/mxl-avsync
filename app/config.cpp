@@ -127,6 +127,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.test_id = pick("AVSYNC_TEST_ID", config.nmos_seed);
     config.title = pick("AVSYNC_TITLE", "");
     config.source = pick("AVSYNC_SOURCE", "");
+    config.subtitle = pick("AVSYNC_SUBTITLE", "");
     config.notes = pick("AVSYNC_NOTES", "");
     config.audio_channel = static_cast<int>(num(pick("AVSYNC_AUDIO_CHANNEL", "0"), "AVSYNC_AUDIO_CHANNEL"));
     config.audio_window_ms = static_cast<int>(num(pick("AVSYNC_AUDIO_WINDOW_MS", "10"), "AVSYNC_AUDIO_WINDOW_MS"));
@@ -172,7 +173,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     require(config.offset_ms >= -500 && config.offset_ms <= 500, "AVSYNC_AV_OFFSET_MS");
     require(config.chirp_level_dbfs >= -40 && config.chirp_level_dbfs <= -1, "AVSYNC_CHIRP_LEVEL_DBFS");
     require(config.qr_period_ms >= 500 && config.qr_period_ms <= 5000, "AVSYNC_QR_PERIOD_MS");
-    require(config.title.size() <= 80 && config.source.size() <= 80 && config.notes.size() <= 80, "free text longer than 80");
+    require(config.title.size() <= 80 && config.source.size() <= 80 && config.subtitle.size() <= 80 && config.notes.size() <= 80, "free text longer than 80");
     GradeWindows windows{config.pass_min_ms, config.pass_max_ms, config.warn_min_ms, config.warn_max_ms};
     require(windows_valid(windows), "grade windows must satisfy warn_min <= pass_min <= 0 <= pass_max <= warn_max");
     require(parse_video_format(config.video_format).has_value(), "AVSYNC_VIDEO_FORMAT");
@@ -197,6 +198,7 @@ nlohmann::json config_settings(const Config& config)
         {"AVSYNC_AUDIO_ENABLE", b(config.audio_enable)},
         {"AVSYNC_TITLE", config.title},
         {"AVSYNC_SOURCE", config.source},
+        {"AVSYNC_SUBTITLE", config.subtitle},
         {"AVSYNC_NOTES", config.notes},
         {"AVSYNC_TEST_ID", config.test_id},
         {"AVSYNC_PASS_MIN_MS", std::to_string(config.pass_min_ms)},
@@ -237,6 +239,7 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
         else if (key == "AVSYNC_AUDIO_ENABLE") config.audio_enable = parse_bool(value);
         else if (key == "AVSYNC_TITLE") config.title = value;
         else if (key == "AVSYNC_SOURCE") config.source = value;
+        else if (key == "AVSYNC_SUBTITLE") config.subtitle = value;
         else if (key == "AVSYNC_NOTES") config.notes = value;
         else if (key == "AVSYNC_TEST_ID") config.test_id = value;
         else if (key == "AVSYNC_PASS_MIN_MS") config.pass_min_ms = num(value, key.c_str());

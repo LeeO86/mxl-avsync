@@ -180,36 +180,38 @@ TEST_CASE("phone session subtracts a valid calibration and withholds the grade c
     CHECK(corrected.events.front().grade == "pass");
 }
 
-TEST_CASE("sync square travels at least ±250 ms once per event")
+TEST_CASE("sync square steps one frame at a time across ±240 ms at 1080p50")
 {
     const auto zero = sync_place(0, 25, 500);
-    CHECK(zero.scale_ms == doctest::Approx(250));
+    CHECK(zero.scale_ms == doctest::Approx(240));
     CHECK(zero.position_ms == doctest::Approx(0));
     CHECK(sync_dot_kind(zero.position_ms) == SyncDot::Zero);
     const auto late = sync_place(12, 25, 500);
-    CHECK(late.position_ms == doctest::Approx(250));
+    CHECK(late.position_ms == doctest::Approx(240));
     CHECK(sync_dot_kind(late.position_ms) == SyncDot::Late);
     const auto early = sync_place(13, 25, 500);
-    CHECK(early.position_ms == doctest::Approx(-250));
+    CHECK(early.position_ms == doctest::Approx(-240));
     CHECK(sync_dot_kind(early.position_ms) == SyncDot::Early);
     const auto near = sync_place(24, 25, 500);
-    CHECK(near.position_ms == doctest::Approx(-250.0 / 12.0));
+    CHECK(near.position_ms == doctest::Approx(-20));
     CHECK(sync_dot_kind(near.position_ms) == SyncDot::Early);
+    CHECK(sync_place(1, 25, 500).position_ms == doctest::Approx(20));
     int changes = 0;
     double previous = zero.position_ms;
     for (int frame = 1; frame < 25; ++frame) {
         const double position = sync_place(frame, 25, 500).position_ms;
-        CHECK(std::abs(position) <= 250.0 + 1e-6);
+        CHECK(std::abs(position) <= 240.0 + 1e-6);
+        CHECK(std::abs(std::fmod(position, 20.0)) < 1e-6);
         if (std::abs(position - previous) > 1.0) {
             ++changes;
         }
         previous = position;
     }
     CHECK(changes == 24);
-    CHECK(sync_place(0, 50, 1000).scale_ms >= 250);
+    CHECK(sync_place(0, 50, 1000).scale_ms == doctest::Approx(500));
     const auto fast = sync_place(6, 12, 240);
-    CHECK(fast.scale_ms == doctest::Approx(250));
-    CHECK(fast.position_ms == doctest::Approx(250));
+    CHECK(fast.scale_ms == doctest::Approx(120));
+    CHECK(fast.position_ms == doctest::Approx(120));
 
     const auto geo = frame_geometry(1920, 1080);
     CHECK(geo.qr_size >= 1080 * 25 / 100);

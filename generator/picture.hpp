@@ -12,6 +12,7 @@ namespace avsync {
 struct PictureInfo {
     std::string title;
     std::string source;
+    std::string subtitle;
     std::string notes;
     std::string format_line;
     std::string offset_line;
