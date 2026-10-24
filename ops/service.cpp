@@ -120,19 +120,24 @@ std::string metrics_text(Runtime& rt)
     os << "# TYPE mxl_avsync_generator_active gauge\nmxl_avsync_generator_active " << (gen && !rt.stopped && rt.media_ready ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_generator_audio_muted gauge\nmxl_avsync_generator_audio_muted " << (gen && !rt.config.audio_enable ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_generator_events_total counter\nmxl_avsync_generator_events_total " << rt.generator_events << "\n";
-    for (const char* essence : {"video", "audio"}) {
-        const double frames = essence == std::string("video") ? rt.output_video : rt.output_audio;
-        const double late = essence == std::string("video") ? rt.late_video : rt.late_audio;
-        os << "mxl_avsync_output_frames_total{essence=\"" << essence << "\"} " << frames << "\n";
-        os << "mxl_avsync_output_frames_late_total{essence=\"" << essence << "\"} " << late << "\n";
-        os << "mxl_avsync_output_frames_missed_total{essence=\"" << essence << "\"} 0\n";
-    }
+    os << "# TYPE mxl_avsync_output_frames_total counter\n";
+    os << "mxl_avsync_output_frames_total{essence=\"video\"} " << rt.output_video << "\n";
+    os << "mxl_avsync_output_frames_total{essence=\"audio\"} " << rt.output_audio << "\n";
+    os << "# TYPE mxl_avsync_output_frames_late_total counter\n";
+    os << "mxl_avsync_output_frames_late_total{essence=\"video\"} " << rt.late_video << "\n";
+    os << "mxl_avsync_output_frames_late_total{essence=\"audio\"} " << rt.late_audio << "\n";
+    os << "# TYPE mxl_avsync_output_frames_missed_total counter\n";
+    os << "mxl_avsync_output_frames_missed_total{essence=\"video\"} 0\n";
+    os << "mxl_avsync_output_frames_missed_total{essence=\"audio\"} 0\n";
+    os << "# TYPE mxl_avsync_input_state gauge\n";
     for (const char* state : {"waiting", "no_signal", "not_routed", "running", "format_mismatch"}) {
         const int on = ana && rt.input_state == state ? 1 : 0;
         os << "mxl_avsync_input_state{essence=\"video\",state=\"" << state << "\"} " << on << "\n";
         os << "mxl_avsync_input_state{essence=\"audio\",state=\"" << state << "\"} " << on << "\n";
     }
+    os << "# TYPE mxl_avsync_input_resyncs_total counter\n";
     os << "mxl_avsync_input_resyncs_total{essence=\"video\"} " << rt.resyncs << "\nmxl_avsync_input_resyncs_total{essence=\"audio\"} " << rt.resyncs << "\n";
+    os << "# TYPE mxl_avsync_events_total counter\n";
     for (const char* result : {"paired", "missing_audio", "missing_video", "duplicate", "ambiguous", "out_of_range"}) {
         int count = 0;
         if (ana) {
@@ -150,6 +155,7 @@ std::string metrics_text(Runtime& rt)
         grade = current_grade(rt.events, rt.config.grade_events,
             GradeWindows{rt.config.pass_min_ms, rt.config.pass_max_ms, rt.config.warn_min_ms, rt.config.warn_max_ms}, 0, rt.config.stale_s);
     }
+    os << "# TYPE mxl_avsync_grade gauge\n";
     for (const char* name : {"pass", "warn", "fail", "invalid"}) {
         os << "mxl_avsync_grade{grade=\"" << name << "\"} " << (ana && grade == name ? 1 : 0) << "\n";
     }
@@ -157,19 +163,28 @@ std::string metrics_text(Runtime& rt)
     if (!rt.events.empty() && rt.events.back().av_offset_ms) {
         offset = *rt.events.back().av_offset_ms;
     }
+    os << "# TYPE mxl_avsync_av_offset_ms gauge\n";
+    os << "# TYPE mxl_avsync_av_offset_deviation_ms gauge\n";
     os << "mxl_avsync_av_offset_ms " << offset << "\nmxl_avsync_av_offset_deviation_ms 0\n";
     os << "# TYPE mxl_avsync_av_offset_seconds histogram\n";
     for (const char* le : {"-0.5", "-0.2", "-0.1", "-0.06", "-0.04", "-0.015", "-0.005", "0.005", "0.015", "0.04", "0.06", "0.1", "0.2", "0.5", "+Inf"}) {
         os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << le << "\"} 0\n";
     }
     os << "mxl_avsync_av_offset_seconds_sum 0\nmxl_avsync_av_offset_seconds_count 0\n";
+    os << "# TYPE mxl_avsync_video_drops_total counter\n";
+    os << "# TYPE mxl_avsync_video_duplicates_total counter\n";
     os << "mxl_avsync_video_drops_total 0\nmxl_avsync_video_duplicates_total 0\n";
+    os << "# TYPE mxl_avsync_audio_correlation gauge\n";
+    os << "# TYPE mxl_avsync_audio_level_dbfs gauge\n";
     os << "mxl_avsync_audio_correlation 0\nmxl_avsync_audio_level_dbfs 0\n";
+    os << "# TYPE mxl_avsync_reference_sync gauge\n";
     for (const char* state : {"locked", "unlocked", "unknown"}) {
         const int on = ana && rt.ptp_sync_state == state ? 1 : 0;
         os << "mxl_avsync_reference_sync{type=\"tai-ptp\",state=\"" << state << "\"} " << on << "\n";
     }
+    os << "# TYPE mxl_avsync_nmos_registry_up gauge\n";
     os << "mxl_avsync_nmos_registry_up " << (rt.nmos_registered ? 1 : 0) << "\n";
+    os << "# TYPE mxl_avsync_nmos_activations_total counter\n";
     os << "mxl_avsync_nmos_activations_total 0\n";
     return os.str();
 }
