@@ -263,50 +263,116 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
     const Y10 black{kYBlack, kYNeutralChroma, kYNeutralChroma};
     const Y10 white{kYWhite, kYNeutralChroma, kYNeutralChroma};
     fill_yuv(frame, g.sweep_x0, g.sweep_y - track_h / 2, span, track_h, black);
-    const double ticks_ms[] = {-250, -200, -100, -20, 0, 20, 100, 200, 250};
     const int radius = std::max(12, frame.height / 40);
-    struct Placed {
+    const int limit = std::max(20, static_cast<int>(std::lround(place.scale_ms)));
+    auto station_x = [&](int ms) {
+        const double along = (static_cast<double>(ms) + place.scale_ms) / (2.0 * place.scale_ms);
+        return g.sweep_x0 + static_cast<int>(std::lround(std::clamp(along, 0.0, 1.0) * (span - 1)));
+    };
+    // Every 20 ms from the centre out to the scale ends. ±limit is kept when it is not itself a 20 ms step.
+    std::vector<int> stations;
+    stations.push_back(0);
+    for (int ms = 20; ms < limit; ms += 20) {
+        stations.push_back(ms);
+        stations.push_back(-ms);
+    }
+    stations.push_back(limit);
+    stations.push_back(-limit);
+    struct Label {
+        int ms;
         int x0;
         int x1;
+        int scale;
     };
-    std::vector<Placed> labels;
-    auto fits = [&](int x0, int x1) {
-        for (const auto& box : labels) {
-            if (x0 < box.x1 && x1 > box.x0) {
+    std::vector<Label> labels;
+    auto pack = [&](int step, int scale, std::vector<Label>& out) {
+        out.clear();
+        const int pad = std::max(2, scale);
+        const int gap = 4;
+        std::vector<int> marks;
+        marks.push_back(0);
+        for (int ms = step; ms < limit; ms += step) {
+            marks.push_back(ms);
+            marks.push_back(-ms);
+        }
+        if (std::find(marks.begin(), marks.end(), limit) == marks.end()) {
+            marks.push_back(limit);
+            marks.push_back(-limit);
+        }
+        for (int ms : marks) {
+            char text[16];
+            if (ms == 0) {
+                std::snprintf(text, sizeof(text), "0");
+            } else {
+                std::snprintf(text, sizeof(text), "%+d", ms);
+            }
+            const int tw = text_px_width(text, scale) + pad * 2;
+            if (tw > span) {
+                return false;
+            }
+            const int tx = station_x(ms);
+            int lx = tx - tw / 2;
+            lx = std::max(g.sweep_x0, std::min(lx, g.sweep_x1 - tw));
+            if (tx < lx || tx >= lx + tw) {
+                return false;
+            }
+            out.push_back({ms, lx, lx + tw, scale});
+        }
+        std::sort(out.begin(), out.end(), [](const Label& a, const Label& b) { return a.x0 < b.x0; });
+        for (size_t i = 1; i < out.size(); ++i) {
+            if (out[i].x0 < out[i - 1].x1 + gap) {
                 return false;
             }
         }
-        return true;
+        return !out.empty();
     };
-    for (double ms : ticks_ms) {
-        if (std::abs(ms) > place.scale_ms + 0.1) {
-            continue;
+    const int scales[] = {frame.height >= 720 ? 2 : 1, 1};
+    const int steps[] = {20, 50, 100};
+    for (int step : steps) {
+        bool packed = false;
+        for (int scale : scales) {
+            if (pack(step, scale, labels)) {
+                packed = true;
+                break;
+            }
         }
-        const double along = (ms + place.scale_ms) / (2.0 * place.scale_ms);
-        const int tx = g.sweep_x0 + static_cast<int>(std::lround(along * (span - 1)));
-        const bool major = ms == 0 || std::abs(ms) == 250 || std::abs(ms) == 100 || std::abs(ms) == 20;
-        const int tick_h = (ms == 0) ? track_h * 5 : (major ? track_h * 3 : track_h * 2);
+        if (packed) {
+            break;
+        }
+        labels.clear();
+    }
+    auto labeled = [&](int ms) {
+        for (const auto& label : labels) {
+            if (label.ms == ms) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (const auto& label : labels) {
+        const bool present = std::find(stations.begin(), stations.end(), label.ms) != stations.end();
+        if (!present) {
+            stations.push_back(label.ms);
+        }
+    }
+    for (int ms : stations) {
+        const int tx = station_x(ms);
+        const int tick_h = (ms == 0) ? track_h * 5 : (labeled(ms) ? track_h * 3 : track_h * 2);
         fill_yuv(frame, tx - tick_w / 2, g.sweep_y - tick_h / 2, tick_w, tick_h, white);
-        // End labels stay one step smaller so ±200 and ±250 both fit on the line.
-        int label_scale = frame.height >= 720 ? 2 : 1;
-        if (std::abs(ms) >= 200 || std::abs(ms) == 20) {
-            label_scale = 1;
-        }
-        char label[16];
-        if (ms == 0) {
-            std::snprintf(label, sizeof(label), "0");
-        } else {
-            std::snprintf(label, sizeof(label), "%+.0f", ms);
-        }
+    }
+    if (!labels.empty()) {
+        const int label_scale = labels.front().scale;
         const int pad = std::max(2, label_scale);
-        const int tw = text_px_width(label, label_scale) + pad * 2;
         const int th = text_px_height(label_scale) + pad * 2;
-        int lx = tx - tw / 2;
-        lx = std::max(g.sweep_x0, std::min(lx, g.sweep_x1 - tw));
         const int label_y = g.sweep_y - radius - th - 8;
-        if (fits(lx, lx + tw)) {
-            draw_text_box(frame, lx, label_y, label, label_scale);
-            labels.push_back({lx, lx + tw});
+        for (const auto& label : labels) {
+            char text[16];
+            if (label.ms == 0) {
+                std::snprintf(text, sizeof(text), "0");
+            } else {
+                std::snprintf(text, sizeof(text), "%+d", label.ms);
+            }
+            draw_text_box(frame, label.x0, label_y, text, label_scale);
         }
     }
     const double along = (place.position_ms + place.scale_ms) / (2.0 * place.scale_ms);

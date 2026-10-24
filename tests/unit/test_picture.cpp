@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 using namespace avsync;
 
@@ -111,4 +112,49 @@ TEST_CASE("large qr stays decodable and the sync square moves")
     CHECK(sample(early, at_early) == static_cast<uint16_t>(81 * 4));
     CHECK(zero.cb[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(zero.width / 2) + static_cast<size_t>(at_zero / 2)] == kYNeutralChroma);
     CHECK(zero.y[static_cast<size_t>(geometry.sweep_y - 18) * static_cast<size_t>(zero.width) + static_cast<size_t>(at_zero)] == kYWhite);
+
+    // A tick every 20 ms across ±250, on a row the centre square does not cover.
+    const int tick_row = geometry.sweep_y - 8;
+    int tick_runs = 0;
+    bool in_tick = false;
+    for (int x = geometry.sweep_x0; x < geometry.sweep_x1; ++x) {
+        const bool on = zero.y[static_cast<size_t>(tick_row) * static_cast<size_t>(zero.width) + static_cast<size_t>(x)] == kYWhite;
+        if (on && !in_tick) {
+            ++tick_runs;
+        }
+        in_tick = on;
+    }
+    CHECK(tick_runs >= 20);
+
+    // Label boxes sit on the black pad above the glyphs and must not touch.
+    std::vector<int> boxes;
+    int best_runs = 0;
+    for (int row = geometry.sweep_y - 70; row < geometry.sweep_y - 30; ++row) {
+        std::vector<int> found;
+        bool in_box = false;
+        int box_start = 0;
+        for (int x = geometry.sweep_x0; x <= geometry.sweep_x1; ++x) {
+            const bool on = x < geometry.sweep_x1
+                && zero.y[static_cast<size_t>(row) * static_cast<size_t>(zero.width) + static_cast<size_t>(x)] == kYBlack;
+            if (on && !in_box) {
+                box_start = x;
+                in_box = true;
+            } else if (!on && in_box) {
+                if (x - box_start > 8) {
+                    found.push_back(box_start);
+                    found.push_back(x);
+                }
+                in_box = false;
+            }
+        }
+        const int runs = static_cast<int>(found.size() / 2);
+        if (runs > best_runs) {
+            best_runs = runs;
+            boxes = std::move(found);
+        }
+    }
+    CHECK(best_runs >= 11);
+    for (size_t i = 2; i + 1 < boxes.size(); i += 2) {
+        CHECK(boxes[i] >= boxes[i - 1] + 4);
+    }
 }
