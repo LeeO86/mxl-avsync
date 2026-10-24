@@ -126,6 +126,38 @@ curl -sf "$AAPI/api/v1/status"
 echo
 echo -n "offset 35: "
 wait_offset 35 0
+wait_jpeg() {
+  local url="$1" out="$2" code=""
+  for _ in $(seq 1 25); do
+    code=$(curl -s -o "$out" -w '%{http_code}' "$url" || true)
+    if [[ "$code" == "200" ]] && python3 -c 'import sys; b=open(sys.argv[1],"rb").read(2); sys.exit(0 if b==b"\xff\xd8" else 1)' "$out"; then
+      echo "jpeg $(wc -c < "$out") bytes $url"
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "jpeg missing $url (HTTP ${code})" >&2
+  return 1
+}
+wait_jpeg "$GAPI/api/v1/preview/generated.jpg" "$WORK/generated.jpg"
+code=$(curl -s -o "$WORK/no-input.json" -w '%{http_code}' "$GAPI/api/v1/preview/input.jpg" || true)
+test "$code" = 404
+grep -q 'no frame yet' "$WORK/no-input.json"
+wait_jpeg "$AAPI/api/v1/preview/input.jpg" "$WORK/input.jpg"
+wait_jpeg "$AAPI/api/v1/preview/generated.jpg" "$WORK/result.jpg"
+curl -sf "$AAPI/api/v1/status" > "$WORK/astatus.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["result_flow"]; open(sys.argv[2],"w").write(d["result_domain"]+"\n"+d["result_flow"]+"\n")' "$WORK/astatus.json" "$WORK/result.txt"
+RDOM=$(sed -n '1p' "$WORK/result.txt")
+RFLOW=$(sed -n '2p' "$WORK/result.txt")
+for _ in $(seq 1 15); do
+  if "$SAMPLE" "$RDOM" "$RFLOW" | tee "$WORK/result-grain.txt" | grep -q 'width=960'; then
+    break
+  fi
+  sleep 0.2
+done
+grep -q 'grain_rows=540' "$WORK/result-grain.txt"
+grep -q 'valid=1' "$WORK/result-grain.txt"
+cat "$WORK/result-grain.txt"
 SEQ=$(newest_offset 0 | awk '{print $1}')
 
 echo -n "offset 0: "

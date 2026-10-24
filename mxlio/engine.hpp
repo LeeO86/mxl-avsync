@@ -15,6 +15,8 @@ struct MediaStatus {
     std::string detail;
     std::string video_flow;
     std::string audio_flow;
+    std::string result_flow;
+    std::string result_domain;
     std::string domain;
     int width = 0;
     int height = 0;
@@ -26,6 +28,7 @@ struct LiveCallbacks {
     std::function<Config()> copy_config;
     std::function<bool()> stopped;
     std::function<void(const MediaStatus&)> set_status;
+    std::function<void(const std::string& flow, const std::string& domain)> set_result;
     std::function<void(const Measurement&)> add_event;
     std::function<void()> count_generator_event;
     std::function<void()> count_video_grain;

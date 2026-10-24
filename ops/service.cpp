@@ -8,6 +8,7 @@
 
 #ifdef AVSYNC_WITH_MXL
 #include "engine.hpp"
+#include "preview.hpp"
 #endif
 
 #include <atomic>
@@ -45,6 +46,8 @@ struct Runtime {
     std::string media_detail;
     std::string video_flow;
     std::string audio_flow;
+    std::string result_flow;
+    std::string result_domain;
     int grain_rows = 0;
     int frame_width = 0;
     int frame_height = 0;
@@ -200,9 +203,23 @@ void install_web(HttpServer& http, Runtime& rt)
         return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
             {"input_state", rt.input_state}, {"detail", rt.media_detail}, {"nmos_registered", rt.nmos_registered},
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
+            {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
             {"interlaced", rt.interlaced_flow}});
     });
+    auto preview_response = [](const std::string& slot) {
+#ifdef AVSYNC_WITH_MXL
+        std::vector<uint8_t> jpeg;
+        if (preview_jpeg(slot, &jpeg)) {
+            return HttpResponse{200, "image/jpeg", std::string(jpeg.begin(), jpeg.end()), {{"Cache-Control", "no-store"}}};
+        }
+#else
+        (void)slot;
+#endif
+        return json_response({{"error", "no frame yet"}}, 404);
+    };
+    http.add("GET", "/api/v1/preview/input.jpg", [&](const HttpRequest&) { return preview_response("input"); });
+    http.add("GET", "/api/v1/preview/generated.jpg", [&](const HttpRequest&) { return preview_response("generated"); });
     http.add("GET", "/statusz", [&](const HttpRequest& request) {
         return http_status_alias(rt);
         (void)request;
@@ -630,6 +647,11 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             return rt.stopped;
         };
+        callbacks.set_result = [&](const std::string& flow, const std::string& domain) {
+            std::lock_guard lock(rt.mu);
+            rt.result_flow = flow;
+            rt.result_domain = domain;
+        };
         callbacks.set_status = [&](const MediaStatus& status) {
             std::lock_guard lock(rt.mu);
             rt.media_ready = status.ready && !rt.stopped;
@@ -639,6 +661,10 @@ int run_service(Config config)
             rt.media_detail = status.detail;
             rt.video_flow = status.video_flow;
             rt.audio_flow = status.audio_flow;
+            if (!status.result_flow.empty()) {
+                rt.result_flow = status.result_flow;
+                rt.result_domain = status.result_domain;
+            }
             rt.grain_rows = status.grain_rows;
             rt.frame_width = status.width;
             rt.frame_height = status.height;

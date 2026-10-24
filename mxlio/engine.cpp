@@ -2,10 +2,13 @@
 
 #include "domain.hpp"
 #include "picture.hpp"
+#include "preview.hpp"
 #include "uuid.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <mutex>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -178,6 +181,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             });
             if (wrote) {
                 callbacks.count_video_grain();
+                note_preview_v210("generated", packed.data(), format->width, grain_rows);
                 if (frame_in_period == 0) {
                     callbacks.count_generator_event();
                 }
@@ -228,6 +232,132 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     }
 }
 
+struct ResultCaption {
+    std::mutex mu;
+    std::string line = "NO EVENTS";
+    std::string grade = "invalid";
+    std::string state = "WAITING";
+};
+
+bool result_format_of(const Config& config, VideoFormat* format)
+{
+    if (format == nullptr) {
+        return false;
+    }
+    if (auto known = parse_video_format(config.result_format)) {
+        *format = *known;
+        format->interlaced = false;
+        format->frame = Rate{std::max(1, config.result_rate), 1};
+        format->token = config.result_format;
+        return format->width >= 16 && format->height >= 16;
+    }
+    int width = 0;
+    int height = 0;
+    if (std::sscanf(config.result_format.c_str(), "%dx%d", &width, &height) == 2 && width >= 16 && height >= 16 && (width % 2) == 0) {
+        *format = VideoFormat{config.result_format, width, height, {std::max(1, config.result_rate), 1}, false};
+        return true;
+    }
+    return false;
+}
+
+void paint_result(Yuv422p10& frame, const std::string& line, const std::string& grade, const std::string& state)
+{
+    uint16_t y = 180;
+    uint16_t cb = kYNeutralChroma;
+    uint16_t cr = kYNeutralChroma;
+    if (grade == "pass") {
+        y = 520;
+        cb = 360;
+        cr = 400;
+    } else if (grade == "warn") {
+        y = 640;
+        cb = 420;
+        cr = 640;
+    } else if (grade == "fail") {
+        y = 420;
+        cb = 480;
+        cr = 720;
+    }
+    std::fill(frame.y.begin(), frame.y.end(), y);
+    std::fill(frame.cb.begin(), frame.cb.end(), cb);
+    std::fill(frame.cr.begin(), frame.cr.end(), cr);
+    LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
+    draw_text(view, 24, 28, "AV SYNC", 2, kYWhite);
+    const std::string shown = line.size() > 42 ? line.substr(0, 42) : line;
+    draw_text(view, 24, 80, shown, 2, kYWhite);
+    draw_text(view, 24, 140, grade, 2, kYWhite);
+    draw_text(view, 24, 190, state, 2, kYWhite);
+}
+
+void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, ResultCaption& caption)
+{
+    const Config config = callbacks.copy_config();
+    if (!config.result_enable) {
+        return;
+    }
+    VideoFormat format;
+    if (!result_format_of(config, &format)) {
+        return;
+    }
+    std::string error;
+    bool created = false;
+    if (!ensure_output_domain(config.mxl_output_domain_dir, config.mxl_output_domain_id, config.mxl_history_ns, &error, &created)) {
+        return;
+    }
+    Domain domain;
+    if (!domain.open(config.mxl_output_domain_dir, &error)) {
+        return;
+    }
+    domain.garbage_collect();
+    const std::string flow_id = uuid_v5("mxl-avsync/" + config.seed() + "/flow/result/" + config.result_format);
+    Rate pace = format.frame;
+    if (!domain.create_result_writer(flow_id, video_flow_json(flow_id, "AVSync Result Video", "AV sync result", format, "AVSync Result:Video"), &pace, &error)) {
+        return;
+    }
+    if (callbacks.set_result) {
+        callbacks.set_result(flow_id, config.mxl_output_domain_dir);
+    }
+    Yuv422p10 picture;
+    picture.resize(format.width, format.height);
+    std::vector<uint8_t> packed(v210_line_bytes(format.width) * static_cast<size_t>(format.height));
+    auto last_draw = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    while (!stop.load()) {
+        if (callbacks.stopped && callbacks.stopped()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            continue;
+        }
+        const uint64_t index = index_now(pace);
+        const uint64_t when = time_of_index(pace, index);
+        if (tai_now() + 1000000 < when) {
+            sleep_until_tai(when);
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_draw >= std::chrono::milliseconds(200)) {
+            std::string line;
+            std::string grade;
+            std::string state;
+            {
+                std::lock_guard lock(caption.mu);
+                line = caption.line;
+                grade = caption.grade;
+                state = caption.state;
+            }
+            paint_result(picture, line, grade, state);
+            pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format.width, format.height, format.width, packed.data());
+            last_draw = now;
+        }
+        if (domain.write_result_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {
+                std::memcpy(dst, packed.data(), std::min(size, packed.size()));
+            })) {
+            note_preview_v210("generated", packed.data(), format.width, format.height);
+        }
+    }
+    domain.close();
+    if (config.mxl_cleanup_on_exit && created) {
+        remove_own_domain(config.mxl_output_domain_dir, config.mxl_output_domain_id);
+    }
+}
+
 bool acceptable_video(const FlowDesc& flow)
 {
     return flow.media_type == "video/v210" && flow.width >= 2 && flow.height >= 2 && !flow.bottom_field_first;
@@ -269,6 +399,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     status.state = "waiting";
     status.detail = "no flow";
     callbacks.set_status(status);
+    ResultCaption caption;
+    std::thread result_thread(run_result_writer, std::ref(stop), std::ref(callbacks), std::ref(caption));
 
     auto close_readers = [&] {
         video_domain.close();
@@ -282,7 +414,11 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (!video_domain.is_open() || !audio_domain.is_open()) {
             video = {};
             audio = {};
+            const auto own_domain = std::filesystem::absolute(config.mxl_output_domain_dir);
             for (const auto& flow : scan_flows(config.mxl_domain_scan)) {
+                if (std::filesystem::absolute(flow.domain_path) == own_domain) {
+                    continue;
+                }
                 if (video.flow_id.empty() && acceptable_video(flow)) {
                     video = flow;
                 } else if (flow.media_type == "video/v210" && flow.bottom_field_first) {
@@ -377,6 +513,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
         cursor = want;
         have_cursor = true;
+        note_preview_v210("input", packed.data(), video.width, grain_rows);
         unpack_v210_luma(packed.data(), video.width, grain_rows, luma.data(), video.width);
         VideoFormat tracked;
         tracked.token = video.interlaced ? "field" : "progressive";
@@ -471,23 +608,37 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
         if (pairer) {
             for (const auto& event : pairer->poll(static_cast<double>(tai_now()) / 1e6)) {
+                {
+                    std::lock_guard lock(caption.mu);
+                    caption.grade = event.grade;
+                    caption.state = event.grade == "invalid" ? "NO EVENTS" : "RUNNING";
+                    caption.line = event.av_offset_ms ? describe_offset(*event.av_offset_ms).line : event.reason;
+                }
                 callbacks.add_event(event);
             }
         }
     }
     close_readers();
+    if (result_thread.joinable()) {
+        result_thread.join();
+    }
 }
 
 } // namespace
 
 void run_live_media(std::atomic<bool>& stop, LiveCallbacks callbacks)
 {
+    struct PreviewLife {
+        PreviewLife() { start_preview_worker(); }
+        ~PreviewLife() { stop_preview_worker(); }
+    } preview_life;
     const Config config = callbacks.copy_config();
     if (config.role == "generator") {
         run_generator(stop, callbacks);
     } else if (config.role == "analyzer") {
         run_analyzer(stop, callbacks);
     }
+    (void)preview_life;
 }
 
 } // namespace avsync

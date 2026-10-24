@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build pkg-config ca-certificates git python3 \
       curl zip unzip tar bison flex autoconf automake libtool \
       libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+      libjpeg-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 https://github.com/microsoft/vcpkg /opt/vcpkg \
     && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics

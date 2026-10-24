@@ -261,14 +261,15 @@ std::vector<FlowDesc> scan_flows(const std::string& root)
     return found;
 }
 
-std::string video_flow_json(const std::string& id, const std::string& label, const std::string& description, const VideoFormat& format)
+std::string video_flow_json(const std::string& id, const std::string& label, const std::string& description, const VideoFormat& format,
+    const std::string& group)
 {
     const char* mode = format.interlaced ? "interlaced_tff" : "progressive";
     const Rate frame = format.frame;
     std::ostringstream out;
     out << "{\"id\":\"" << json_escape(id) << "\",\"format\":\"urn:x-nmos:format:video\",\"label\":\"" << json_escape(label)
         << "\",\"description\":\"" << json_escape(description)
-        << "\",\"tags\":{\"urn:x-nmos:tag:grouphint/v1.0\":[\"AVSync Test:Video\"],\"urn:x-mxl:tag:test-signal/v1.0\":[\"mxl-avsync\"]}"
+        << "\",\"tags\":{\"urn:x-nmos:tag:grouphint/v1.0\":[\"" << json_escape(group) << "\"],\"urn:x-mxl:tag:test-signal/v1.0\":[\"mxl-avsync\"]}"
         << ",\"parents\":[],\"media_type\":\"video/v210\",\"grain_rate\":{\"numerator\":" << frame.num << ",\"denominator\":" << frame.den
         << "},\"frame_width\":" << format.width << ",\"frame_height\":" << format.height << ",\"interlace_mode\":\"" << mode
         << "\",\"colorspace\":\"BT709\",\"components\":["
@@ -311,6 +312,7 @@ bool Domain::open(const std::string& path, std::string* error)
 void Domain::close()
 {
     release_video_writer();
+    release_result_writer();
     release_audio_writer();
     release_video_reader();
     release_audio_reader();
@@ -355,6 +357,57 @@ bool Domain::create_video_writer(const std::string& flow_id, const std::string& 
     }
     (void)flow_id;
     return true;
+}
+
+bool Domain::create_result_writer(const std::string& flow_id, const std::string& definition, Rate* pace, std::string* error)
+{
+    release_result_writer();
+    mxlFlowWriter writer = nullptr;
+    mxlFlowConfigInfo info{};
+    bool created = false;
+    auto status = mxlCreateFlowWriter(as_instance(instance_), definition.c_str(), "{\"maxCommitBatchSizeHint\":1}", &writer, &info, &created);
+    if (status != MXL_STATUS_OK || writer == nullptr) {
+        if (error != nullptr) {
+            *error = "result flow writer failed for " + flow_id;
+        }
+        return false;
+    }
+    result_writer_ = writer;
+    if (pace != nullptr && info.common.grainRate.numerator > 0 && info.common.grainRate.denominator > 0) {
+        pace->num = info.common.grainRate.numerator;
+        pace->den = info.common.grainRate.denominator;
+    }
+    return true;
+}
+
+bool Domain::write_result_grain(uint64_t index, size_t expected_bytes, const std::function<void(uint8_t*, size_t)>& fill)
+{
+    auto* writer = static_cast<mxlFlowWriter>(result_writer_);
+    if (writer == nullptr) {
+        return false;
+    }
+    mxlGrainInfo info{};
+    uint8_t* payload = nullptr;
+    if (mxlFlowWriterOpenGrain(writer, index, &info, &payload) != MXL_STATUS_OK || payload == nullptr) {
+        return false;
+    }
+    if (info.grainSize < expected_bytes) {
+        info.flags = MXL_GRAIN_FLAG_INVALID;
+        mxlFlowWriterCommitGrain(writer, &info);
+        return false;
+    }
+    fill(payload, static_cast<size_t>(info.grainSize));
+    info.flags = 0;
+    info.validSlices = info.totalSlices;
+    return mxlFlowWriterCommitGrain(writer, &info) == MXL_STATUS_OK;
+}
+
+void Domain::release_result_writer()
+{
+    if (result_writer_ != nullptr && instance_ != nullptr) {
+        mxlReleaseFlowWriter(as_instance(instance_), static_cast<mxlFlowWriter>(result_writer_));
+    }
+    result_writer_ = nullptr;
 }
 
 bool Domain::create_audio_writer(const std::string& flow_id, const std::string& definition, size_t* max_write, std::string* error)

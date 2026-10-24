@@ -15,7 +15,8 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build pkg-config g++ \
             curl zip unzip tar git ca-certificates python3 \
             bison flex autoconf automake libtool \
-            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+            libjpeg-dev
       - name: Build MXL
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg /opt/vcpkg

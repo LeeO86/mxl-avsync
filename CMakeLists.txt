@@ -112,12 +112,15 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
 
     find_package(mxl CONFIG QUIET)
     if(mxl_FOUND)
+        pkg_check_modules(JPEG REQUIRED IMPORTED_TARGET libjpeg)
         add_library(avsync-mxlio STATIC
             mxlio/domain.cpp
             mxlio/engine.cpp
+            mxlio/jpeg.cpp
+            mxlio/preview.cpp
         )
         target_include_directories(avsync-mxlio PUBLIC mxlio PRIVATE util)
-        target_link_libraries(avsync-mxlio PUBLIC avsync-file mxl::mxl)
+        target_link_libraries(avsync-mxlio PUBLIC avsync-file mxl::mxl PkgConfig::JPEG)
         target_compile_options(avsync-mxlio PRIVATE -Wall -Wextra -Wno-unused-parameter)
         target_link_libraries(mxl-avsync PRIVATE avsync-mxlio)
         target_compile_definitions(mxl-avsync PRIVATE AVSYNC_WITH_MXL=1)

@@ -203,6 +203,25 @@ live.sh ok
 
 The three offsets are the newest paired event after each generator start (1080p50, 2/s) on `/dev/shm`. The analyzer's expected offset was 0, so 35 ms and −35 ms grade warn and 0 ms grades pass. The interlaced grain is one field: 540 rows, 2 764 800 bytes, `interlaced_tff`. No latency is claimed.
 
+## Result picture and JPEG previews (2026-10-24)
+
+The analyzer writes a second flow, `uuid_v5("mxl-avsync/<seed>/flow/result/<format>")`, default 960×540 at 25/s. The picture is redrawn at 5 Hz. JPEG snapshots of the generated flow and the incoming flow are encoded on a worker thread, about once a second. `GET /api/v1/preview/input.jpg` and `GET /api/v1/preview/generated.jpg` return `image/jpeg`, or 404 `{"error":"no frame yet"}`. The web UI reloads both URLs once a second. There is no preview stream.
+
+Same command as the closed loop above. The run that included the new checks printed:
+
+```
+offset 35: 3585749982 35.0 warn
+jpeg 24287 bytes http://127.0.0.1:18480/api/v1/preview/generated.jpg
+jpeg 24115 bytes http://127.0.0.1:18482/api/v1/preview/input.jpg
+jpeg 5537 bytes http://127.0.0.1:18482/api/v1/preview/generated.jpg
+index=44821874778 bytes=1382400 grain_rows=540 width=960 height=540 interlaced=0 valid=1
+offset 0: 3585749984 0.0 pass
+offset -35 after reopen: 3585749986 -35.0 warn
+live.sh ok
+```
+
+The generator's input preview was HTTP 404 `no frame yet`. The analyzer result flow was 960×540, one progressive grain, 1 382 400 bytes. The analyzer's generated JPEG is that result tile; its input JPEG is the test signal it is reading.
+
 ## Next step
 
-Result picture as its own MXL video flow, and about 1 fps JPEG snapshots of the input and generated flows. Not a transport, and not NMOS-cpp. The hour run, SRT and SIP stay on the sibling gateways.
+Replace the hand-written NMOS node with nmos-cpp. Not a transport. The hour run, SRT and SIP stay on the sibling gateways.

@@ -48,7 +48,8 @@ bool flow_file_id(const std::string& domain_path, const std::string& flow_id, Fl
 // Domains under root (root itself, and one level of children) and the flows in each.
 std::vector<FlowDesc> scan_flows(const std::string& root);
 
-std::string video_flow_json(const std::string& id, const std::string& label, const std::string& description, const VideoFormat& format);
+std::string video_flow_json(const std::string& id, const std::string& label, const std::string& description, const VideoFormat& format,
+    const std::string& group = "AVSync Test:Video");
 std::string audio_flow_json(const std::string& id, const std::string& label, int channels);
 
 // One MXL instance for one domain directory.
@@ -66,15 +67,18 @@ public:
     void garbage_collect();
 
     bool create_video_writer(const std::string& flow_id, const std::string& definition, Rate* pace, int* grain_rows, std::string* error);
+    bool create_result_writer(const std::string& flow_id, const std::string& definition, Rate* pace, std::string* error);
     bool create_audio_writer(const std::string& flow_id, const std::string& definition, size_t* max_write, std::string* error);
     bool create_video_reader(const std::string& flow_id, FlowDesc* desc, Rate* pace, int* grain_rows, uint32_t* grain_count, std::string* error);
     bool create_audio_reader(const std::string& flow_id, int* channels, size_t* max_read, std::string* error);
 
     bool write_grain(uint64_t index, size_t expected_bytes, const std::function<void(uint8_t*, size_t)>& fill);
+    bool write_result_grain(uint64_t index, size_t expected_bytes, const std::function<void(uint8_t*, size_t)>& fill);
     bool write_silence_grain(uint64_t index);
     bool write_samples(uint64_t end_index, const float* interleaved, int frames, int channels, size_t max_write);
 
     void release_video_writer();
+    void release_result_writer();
     void release_audio_writer();
     void release_video_reader();
     void release_audio_reader();
@@ -89,6 +93,7 @@ private:
     std::string path_;
     void* instance_ = nullptr;
     void* video_writer_ = nullptr;
+    void* result_writer_ = nullptr;
     void* audio_writer_ = nullptr;
     void* video_reader_ = nullptr;
     void* audio_reader_ = nullptr;
