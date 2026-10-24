@@ -1,5 +1,6 @@
 #include "file_tool.hpp"
 #include "config.hpp"
+#include "paths.hpp"
 #include "service.hpp"
 
 #include "avsync/avsync.hpp"
@@ -21,7 +22,8 @@ void usage()
       [--channels 2] [--container mov|mp4|mkv] [--video-codec prores|v210|h264]
       [--audio-codec pcm24|pcm16|aac] [--title ...] [--notes ...] [--allow-container-shift]
   mxl-avsync analyze <file> [--manifest m.json] [--json out.json] [--from s] [--to s]
-      [--channel 0] [--fail-on warn|fail]
+      [--channel 0] [--fail-on warn|fail] [--locate]
+  mxl-avsync paths
   mxl-avsync validate <file.json>
   mxl-avsync merge <a.json> <b.json> [--json out.json]
   mxl-avsync serve
@@ -144,6 +146,7 @@ int main(int argc, char** argv)
         }
         request.channel = std::atoi(opt("--channel", "0").c_str());
         request.fail_on = opt("--fail-on", "");
+        request.locate = flag("--locate");
         const int code = avsync::run_analyze(request, error);
         if (code != 0) {
             std::cerr << error << "\n";
@@ -171,6 +174,10 @@ int main(int argc, char** argv)
             std::cerr << error << "\n";
         }
         return code;
+    }
+    if (command == "paths") {
+        std::cout << avsync::stage_paths_text();
+        return 0;
     }
     if (command == "serve") {
         try {

@@ -18,6 +18,8 @@ add_library(avsync-core STATIC
     core/src/qr.cpp
     core/src/g711.cpp
     core/src/text.cpp
+    core/src/locate.cpp
+    core/src/phone.cpp
 )
 target_include_directories(avsync-core
     PUBLIC core/include
@@ -26,7 +28,7 @@ target_include_directories(avsync-core
 )
 target_compile_options(avsync-core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
-add_executable(avsync-core-tests tests/unit/test_core.cpp)
+add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp)
 target_include_directories(avsync-core-tests PRIVATE third_party/doctest)
 target_link_libraries(avsync-core-tests PRIVATE avsync-core)
 target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -56,6 +58,7 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     target_compile_options(avsync-file PRIVATE -Wall -Wextra -Wno-unused-parameter)
     add_executable(mxl-avsync
         app/main.cpp
+        app/paths.cpp
         app/config.cpp
         util/uuid.cpp
         ops/http.cpp

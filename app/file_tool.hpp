@@ -36,6 +36,7 @@ struct AnalyzeRequest {
     double to_s = -1;
     int channel = 0;
     std::string fail_on; // "", "warn", "fail"
+    bool locate = false; // stage 2: fiducial search in a scaled or cropped picture
 };
 
 // 0 success, 1 container/analysis failure, 2 no events, 78 bad arguments.

@@ -606,6 +606,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
             }
         }
         MarkerTracker tracker(synthetic, event_rate);
+        std::optional<MarkerTracker> locate_tracker;
         std::vector<float> audio;
         double audio_origin_ms = 0;
         bool audio_origin_set = false;
@@ -650,7 +651,24 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
                         }
                     }
                     const int64_t grain = frame->pts == AV_NOPTS_VALUE ? 0 : frame->pts;
-                    auto obs = tracker.push(luma.data(), width, grain, ms);
+                    VideoObservation obs;
+                    if (request.locate) {
+                        const LocatedMarker located = read_located_marker(luma.data(), width, height, width);
+                        if (located.located) {
+                            if (!locate_tracker) {
+                                VideoFormat located_format = synthetic;
+                                located_format.width = located.width;
+                                located_format.height = located.height;
+                                locate_tracker = MarkerTracker(located_format, event_rate);
+                            }
+                            obs = locate_tracker->push(located.canonical.data(), located.width, grain, ms);
+                            if (obs.event) {
+                                obs.flags.push_back("fiducial_lock");
+                            }
+                        }
+                    } else {
+                        obs = tracker.push(luma.data(), width, grain, ms);
+                    }
                     if (obs.event) {
                         videos.push_back(obs);
                     }
@@ -799,28 +817,7 @@ int run_merge(const std::string& a_path, const std::string& b_path, const std::s
         nlohmann::json b;
         ain >> a;
         bin >> b;
-        const bool common = a["reference"].value("type", "") == "tai-ptp" && b["reference"].value("type", "") == "tai-ptp";
-        nlohmann::json events = nlohmann::json::array();
-        for (const auto& left : a["events"]) {
-            for (const auto& right : b["events"]) {
-                if (left.value("event_id", "") != right.value("event_id", "")) {
-                    continue;
-                }
-                nlohmann::json row = {{"event_id", left["event_id"]}, {"source", left}, {"destination", right}};
-                if (common && left.contains("video_event_time") && right.contains("video_event_time") && left["video_event_time"].is_number()
-                    && right["video_event_time"].is_number()) {
-                    const double e2e_ms = (right["video_event_time"].get<double>() - left["video_event_time"].get<double>()) / 1e6;
-                    row["video_e2e_latency_ms"] = e2e_ms;
-                    row["valid"] = true;
-                } else {
-                    row["valid"] = false;
-                    row["reason"] = "end-to-end latency needs reference.type tai-ptp at both points";
-                }
-                events.push_back(row);
-            }
-        }
-        nlohmann::json doc = {{"schema", kResultSchema}, {"mode", "LIVE"}, {"reference", {{"type", common ? "tai-ptp" : "none"}}},
-            {"events", events}, {"note", "t_arr(destination) - t_arr(source) for one event id; file timelines are not a latency reference"}};
+        nlohmann::json doc = merge_result_documents(a, b);
         if (!out_path.empty()) {
             std::ofstream out(out_path);
             out << doc.dump(2) << "\n";

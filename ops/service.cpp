@@ -1,6 +1,7 @@
 #include "service.hpp"
 
 #include "http.hpp"
+#include "paths.hpp"
 #include "report.hpp"
 #include "uuid.hpp"
 
@@ -291,6 +292,24 @@ void install_web(HttpServer& http, Runtime& rt)
             os << it.key() << "=" << it.value().get<std::string>() << "\n";
         }
         return HttpResponse{200, "text/plain", os.str(), {}};
+    });
+    http.add("POST", "/api/v1/merge", [&](const HttpRequest& request) {
+        try {
+            const auto body = nlohmann::json::parse(request.body.empty() ? "{}" : request.body);
+            if (!body.contains("source") || !body.contains("destination")) {
+                return json_response({{"error", "source and destination results are required"}}, 400);
+            }
+            return json_response(merge_result_documents(body["source"], body["destination"]));
+        } catch (const std::exception& ex) {
+            return json_response({{"error", ex.what()}}, 400);
+        }
+    });
+    http.add("GET", "/api/v1/paths", [&](const HttpRequest&) {
+        nlohmann::json list = nlohmann::json::array();
+        for (const auto& path : stage_paths()) {
+            list.push_back({{"id", path.id}, {"stage", path.stage}, {"runnable_here", path.runnable_here}, {"detail", path.detail}});
+        }
+        return json_response(list);
     });
     http.add("GET", "/api/v1/events/ws", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);

@@ -23,3 +23,7 @@ jobs:
         run: ./tests/integration/api.sh
       - name: file
         run: ./tests/integration/file.sh
+      - name: stage 2 file paths
+        run: ./tests/integration/stage2.sh
+      - name: phone display rules
+        run: node --test mobile-app/src/display.test.mjs

@@ -130,6 +130,47 @@ nlohmann::json result_document(const std::string& test_id, const std::string& mo
     };
 }
 
+nlohmann::json merge_result_documents(const nlohmann::json& a, const nlohmann::json& b)
+{
+    const bool common = a.contains("reference") && b.contains("reference") && a["reference"].value("type", "") == "tai-ptp"
+        && b["reference"].value("type", "") == "tai-ptp";
+    auto time_of = [](const nlohmann::json& event) -> const nlohmann::json* {
+        if (event.contains("video_arrival_time") && event["video_arrival_time"].is_number()) {
+            return &event["video_arrival_time"];
+        }
+        if (event.contains("video_event_time") && event["video_event_time"].is_number()) {
+            return &event["video_event_time"];
+        }
+        return nullptr;
+    };
+    nlohmann::json events = nlohmann::json::array();
+    const auto& left_events = a.contains("events") ? a["events"] : nlohmann::json::array();
+    const auto& right_events = b.contains("events") ? b["events"] : nlohmann::json::array();
+    for (const auto& left : left_events) {
+        for (const auto& right : right_events) {
+            if (left.value("event_id", "") != right.value("event_id", "")) {
+                continue;
+            }
+            nlohmann::json row = {{"event_id", left.value("event_id", "")}, {"source", left}, {"destination", right}};
+            const nlohmann::json* lt = time_of(left);
+            const nlohmann::json* rt = time_of(right);
+            if (common && lt != nullptr && rt != nullptr) {
+                row["video_e2e_latency_ms"] = (rt->get<double>() - lt->get<double>()) / 1e6;
+                row["valid"] = true;
+                row["time_field"] = left.contains("video_arrival_time") ? "video_arrival_time" : "video_event_time";
+            } else {
+                row["valid"] = false;
+                row["reason"] = "end-to-end latency needs reference.type tai-ptp at both points";
+            }
+            events.push_back(std::move(row));
+        }
+    }
+    return {{"schema", kResultSchema}, {"mode", "LIVE"}, {"graded_on", "offset"},
+        {"reference", {{"type", common ? "tai-ptp" : "none"}, {"sync_state", common ? "unknown" : "unknown"}}},
+        {"events", std::move(events)},
+        {"note", "Cross-node view: t_arr(destination) - t_arr(source) for one event id. The fabrics agent itself is a host gap."}};
+}
+
 std::string human_report(const nlohmann::json& result)
 {
     const auto& stats = result["statistics"]["window"];
