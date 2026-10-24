@@ -2,6 +2,7 @@
 
 #include "http.hpp"
 #include "paths.hpp"
+#include "picture.hpp"
 #include "report.hpp"
 #include "uuid.hpp"
 
@@ -32,6 +33,8 @@ struct Runtime {
     std::vector<Measurement> events;
     int events_epoch = 0;
     double generator_events = 0;
+    std::string source_image_path;
+    int source_image_frames = 0;
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
 };
 
@@ -55,6 +58,14 @@ std::string read_file(const std::filesystem::path& path)
 {
     std::ifstream in(path);
     std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+std::string read_binary(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
     ss << in.rdbuf();
     return ss.str();
 }
@@ -169,7 +180,8 @@ void install_web(HttpServer& http, Runtime& rt)
         if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
         return json_response({{"offset_ms", rt.config.offset_ms}, {"level_dbfs", rt.config.chirp_level_dbfs}, {"muted", !rt.config.audio_enable},
             {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"notes", rt.config.notes},
-            {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format}});
+            {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
+            {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
     });
     http.add("PATCH", "/api/v1/generator", [&](const HttpRequest& request) {
         std::lock_guard lock(rt.mu);
@@ -179,6 +191,12 @@ void install_web(HttpServer& http, Runtime& rt)
         if (body.contains("offset_ms")) flat["AVSYNC_AV_OFFSET_MS"] = std::to_string(body["offset_ms"].get<double>());
         if (body.contains("level_dbfs")) flat["AVSYNC_CHIRP_LEVEL_DBFS"] = std::to_string(body["level_dbfs"].get<double>());
         if (body.contains("title")) flat["AVSYNC_TITLE"] = body["title"];
+        if (body.contains("source")) {
+            if (!body["source"].is_string() || body["source"].get<std::string>().size() > 80) {
+                return json_response({{"error", "source must be at most 80 characters"}}, 400);
+            }
+            flat["AVSYNC_SOURCE"] = body["source"];
+        }
         if (body.contains("muted")) flat["AVSYNC_AUDIO_ENABLE"] = body["muted"].get<bool>() ? "false" : "true";
         if (body.contains("event_rate")) flat["AVSYNC_EVENT_RATE"] = std::to_string(body["event_rate"].get<int>());
         try {
@@ -186,7 +204,52 @@ void install_web(HttpServer& http, Runtime& rt)
         } catch (const std::exception& ex) {
             return json_response({{"error", ex.what()}}, 400);
         }
-        return json_response({{"ok", true}, {"offset_ms", rt.config.offset_ms}, {"muted", !rt.config.audio_enable}});
+        return json_response({{"ok", true}, {"offset_ms", rt.config.offset_ms}, {"muted", !rt.config.audio_enable}, {"source", rt.config.source}});
+    });
+    http.add("POST", "/api/v1/generator/source-image", [&](const HttpRequest& request) {
+        std::lock_guard lock(rt.mu);
+        if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
+        const std::string& body = request.body;
+        std::string ext;
+        std::string type;
+        if (body.size() >= 8 && static_cast<unsigned char>(body[0]) == 0x89 && body.compare(1, 3, "PNG") == 0) {
+            ext = ".png";
+            type = "image/png";
+        } else if (body.size() >= 6 && (body.compare(0, 6, "GIF87a") == 0 || body.compare(0, 6, "GIF89a") == 0)) {
+            ext = ".gif";
+            type = "image/gif";
+        } else {
+            return json_response({{"error", "source image must be a PNG or a GIF"}}, 415);
+        }
+        std::filesystem::create_directories(rt.config.state_dir);
+        const auto dir = std::filesystem::path(rt.config.state_dir);
+        const auto path = dir / ("source-ident" + ext);
+        {
+            std::ofstream out(path, std::ios::binary);
+            out.write(body.data(), static_cast<std::streamsize>(body.size()));
+            if (!out) return json_response({{"error", "could not store source image"}}, 500);
+        }
+        SourceClip clip;
+        std::string error;
+        if (!clip.load(path.string(), error)) {
+            std::filesystem::remove(path);
+            return json_response({{"error", error}}, 400);
+        }
+        const auto other = dir / (ext == ".png" ? "source-ident.gif" : "source-ident.png");
+        std::error_code ec;
+        std::filesystem::remove(other, ec);
+        rt.source_image_path = path.string();
+        rt.source_image_frames = static_cast<int>(clip.frames.size());
+        return json_response({{"ok", true}, {"frames", rt.source_image_frames}, {"content_type", type}});
+    });
+    http.add("GET", "/api/v1/generator/source-image", [&](const HttpRequest&) {
+        std::lock_guard lock(rt.mu);
+        if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
+        if (rt.source_image_path.empty() || !std::filesystem::exists(rt.source_image_path)) {
+            return json_response({{"error", "no source image"}}, 404);
+        }
+        const bool gif = rt.source_image_path.size() >= 4 && rt.source_image_path.compare(rt.source_image_path.size() - 4, 4, ".gif") == 0;
+        return HttpResponse{200, gif ? "image/gif" : "image/png", read_binary(rt.source_image_path), {}};
     });
     http.add("POST", "/api/v1/generator/stop", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
@@ -350,6 +413,11 @@ void install_web(HttpServer& http, Runtime& rt)
         const auto path = std::filesystem::path(web_root()) / "index.html";
         if (!std::filesystem::exists(path)) return json_response({{"error", "ui missing"}}, 404);
         return HttpResponse{200, "text/html; charset=utf-8", read_file(path), {}};
+    });
+    http.add("GET", "/icon.png", [&](const HttpRequest&) {
+        const auto path = std::filesystem::path(web_root()) / "icon.png";
+        if (!std::filesystem::exists(path)) return json_response({{"error", "icon missing"}}, 404);
+        return HttpResponse{200, "image/png", read_binary(path), {}};
     });
     http.add("GET", "/vendor/vue.global.prod.js", [&](const HttpRequest&) {
         const auto path = std::filesystem::path(web_root()) / "vendor" / "vue.global.prod.js";

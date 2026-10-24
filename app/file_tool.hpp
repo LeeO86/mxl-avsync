@@ -18,6 +18,7 @@ struct GenerateRequest {
     std::string audio_codec = "pcm24";
     std::string title;
     std::string source;
+    std::string source_image;
     std::string notes;
     std::string test_id = "TEST-2026-0001";
     std::string out_path;

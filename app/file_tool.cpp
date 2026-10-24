@@ -215,6 +215,10 @@ int run_generate(const GenerateRequest& request, std::string& error)
         plan_config.chirp_high_hz = request.chirp_high_hz;
         plan_config.chirp_level_dbfs = request.chirp_level_dbfs;
         const EventPlan plan = make_file_plan(plan_config);
+        SourceClip source_clip;
+        if (!request.source_image.empty() && !source_clip.load(request.source_image, error)) {
+            return 78;
+        }
         const Rate grain = format->grain_rate();
         const int width = format->width;
         const int height = format->grain_height();
@@ -329,6 +333,9 @@ int run_generate(const GenerateRequest& request, std::string& error)
             info.notes = request.notes;
             info.format_line = request.format;
             info.av_offset_ms = offset;
+            info.media_ms = ms;
+            info.period_ms = period.period_ms;
+            info.source_image = source_clip.at(ms);
             info.offset_line = "offset " + std::to_string(static_cast<int>(std::lround(offset))) + " ms";
             char counter[64];
             std::snprintf(counter, sizeof(counter), "frame as written by the generator %07lld", static_cast<long long>(index));

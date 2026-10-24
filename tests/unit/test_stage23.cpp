@@ -3,6 +3,7 @@
 #include "avsync/avsync.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 using namespace avsync;
@@ -177,4 +178,42 @@ TEST_CASE("phone session subtracts a valid calibration and withholds the grade c
     REQUIRE(corrected.events.front().av_offset_ms);
     CHECK(*corrected.events.front().av_offset_ms == doctest::Approx(0.0).epsilon(0.05));
     CHECK(corrected.events.front().grade == "pass");
+}
+
+TEST_CASE("sync square travels at least ±250 ms once per event")
+{
+    const auto zero = sync_place(0, 25, 500);
+    CHECK(zero.scale_ms == doctest::Approx(250));
+    CHECK(zero.position_ms == doctest::Approx(0));
+    CHECK(sync_dot_kind(zero.position_ms) == SyncDot::Zero);
+    const auto late = sync_place(12, 25, 500);
+    CHECK(late.position_ms == doctest::Approx(250));
+    CHECK(sync_dot_kind(late.position_ms) == SyncDot::Late);
+    const auto early = sync_place(13, 25, 500);
+    CHECK(early.position_ms == doctest::Approx(-250));
+    CHECK(sync_dot_kind(early.position_ms) == SyncDot::Early);
+    const auto near = sync_place(24, 25, 500);
+    CHECK(near.position_ms == doctest::Approx(-250.0 / 12.0));
+    CHECK(sync_dot_kind(near.position_ms) == SyncDot::Early);
+    int changes = 0;
+    double previous = zero.position_ms;
+    for (int frame = 1; frame < 25; ++frame) {
+        const double position = sync_place(frame, 25, 500).position_ms;
+        CHECK(std::abs(position) <= 250.0 + 1e-6);
+        if (std::abs(position - previous) > 1.0) {
+            ++changes;
+        }
+        previous = position;
+    }
+    CHECK(changes == 24);
+    CHECK(sync_place(0, 50, 1000).scale_ms >= 250);
+    const auto fast = sync_place(6, 12, 240);
+    CHECK(fast.scale_ms == doctest::Approx(250));
+    CHECK(fast.position_ms == doctest::Approx(250));
+
+    const auto geo = frame_geometry(1920, 1080);
+    CHECK(geo.qr_size >= 1080 * 25 / 100);
+    CHECK(geo.qr_x >= geo.fid_size);
+    CHECK(geo.qr_x + geo.qr_size <= geo.marker_x - 4);
+    CHECK(geo.qr_y + geo.qr_size <= geo.sweep_y - 4);
 }

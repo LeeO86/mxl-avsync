@@ -20,7 +20,8 @@ void usage()
   mxl-avsync generate --format 1080p50 --duration 60 --offset 0 --out test.mov
       [--offset-sweep -40,-20,0,20,40] [--event-rate 2] [--audio-rate 48000]
       [--channels 2] [--container mov|mp4|mkv] [--video-codec prores|v210|h264]
-      [--audio-codec pcm24|pcm16|aac] [--title ...] [--notes ...] [--allow-container-shift]
+      [--audio-codec pcm24|pcm16|aac] [--title ...] [--source ...] [--source-image png|gif]
+      [--notes ...] [--allow-container-shift]
   mxl-avsync analyze <file> [--manifest m.json] [--json out.json] [--from s] [--to s]
       [--channel 0] [--fail-on warn|fail] [--locate]
   mxl-avsync paths
@@ -111,6 +112,7 @@ int main(int argc, char** argv)
         request.audio_codec = opt("--audio-codec", "pcm24");
         request.title = opt("--title", "");
         request.source = opt("--source", "");
+        request.source_image = opt("--source-image", "");
         request.notes = opt("--notes", "");
         request.test_id = opt("--test-id", "TEST-2026-0001");
         request.out_path = opt("--out", positional.empty() ? "" : positional.back());

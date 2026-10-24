@@ -3,6 +3,7 @@
     "name": "mxl-avsync",
     "slug": "mxl-avsync",
     "version": "2.0.0",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "ios": {"bundleIdentifier": "io.leeo86.mxl.avsync", "infoPlist": {"NSCameraUsageDescription": "See the AV sync test picture.", "NSMicrophoneUsageDescription": "Hear the AV sync chirps."}},

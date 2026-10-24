@@ -49,12 +49,20 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     target_link_libraries(quirc PUBLIC m)
     add_library(avsync-file STATIC
         generator/picture.cpp
+        generator/source_image.cpp
         third_party/nayuki/qrcodegen.cpp
         app/report.cpp
         app/file_tool.cpp
     )
     target_include_directories(avsync-file PUBLIC generator app core/include third_party third_party/nayuki third_party/quirc)
+    target_compile_definitions(avsync-file PUBLIC AVSYNC_ICON_PATH="${CMAKE_SOURCE_DIR}/web/icon.png")
     target_link_libraries(avsync-file PUBLIC avsync-core quirc PkgConfig::FFMPEG)
+    add_executable(avsync-picture-tests tests/unit/test_picture.cpp)
+    target_include_directories(avsync-picture-tests PRIVATE third_party/doctest)
+    target_compile_definitions(avsync-picture-tests PRIVATE AVSYNC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+    target_link_libraries(avsync-picture-tests PRIVATE avsync-file)
+    target_compile_options(avsync-picture-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    add_test(NAME picture COMMAND avsync-picture-tests)
     target_compile_options(avsync-file PRIVATE -Wall -Wextra -Wno-unused-parameter)
     add_executable(mxl-avsync
         app/main.cpp

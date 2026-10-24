@@ -4,12 +4,14 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>mxl-avsync</title>
+<link rel="icon" href="/icon.png"/>
 <script src="/vendor/vue.global.prod.js"></script>
 <style>
   :root { color-scheme: dark; --bg:#121417; --panel:#1c2128; --ink:#e7ecf1; --muted:#9aa7b5; --line:#2c3540;
     --pass:#1f8a4c; --warn:#d9822b; --fail:#c4392a; --invalid:#6b7280; }
   body { margin:0; font:15px/1.4 ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
   header { display:flex; gap:16px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
+  header img { width:32px; height:32px; border-radius:6px; }
   h1 { font-size:16px; margin:0; letter-spacing:.04em; }
   .pill { border-radius:999px; padding:2px 10px; background:#243040; color:var(--muted); font-size:12px; }
   nav { display:flex; gap:8px; padding:10px 20px; }
@@ -29,6 +31,7 @@
 <body>
 <div id="app">
   <header>
+    <img src="/icon.png" alt=""/>
     <h1>mxl-avsync</h1>
     <span class="pill">{{ info.role || '…' }}</span>
     <span class="pill">{{ info.label || '' }}</span>
@@ -46,7 +49,13 @@
       <div v-if="role=='generator'">
         <label>Set offset (ms, + audio late) <input type="number" v-model.number="offset" min="-500" max="500"/></label>
         <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
-        <label>Title <input v-model="title"/></label>
+        <label>Title <input v-model="title" maxlength="80"/></label>
+        <label>Source name <input v-model="source" maxlength="80"/></label>
+        <label>Source picture (PNG with transparency, or an animated GIF)
+          <input type="file" accept="image/png,image/gif,.png,.gif" @change="onImage"/>
+        </label>
+        <p v-if="imageSet">Source picture stored{{ imageFrames > 1 ? ' (' + imageFrames + ' frames)' : '' }}.</p>
+        <img v-if="imageSet" :src="imageUrl" alt="" style="height:72px;background:#222;margin-top:8px"/>
         <button @click="saveGenerator">Apply</button>
         <button @click="mute">{{ audioOn ? 'Mute' : 'Unmute' }}</button>
         <button @click="toggleRun">{{ stopped ? 'Start' : 'Stop' }}</button>
@@ -73,7 +82,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', audioOn:true, stopped:false, nmos:'nmos' }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos' }; },
   computed: {
     role() { return this.info.role || ''; },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
@@ -94,6 +103,9 @@ createApp({
       if (this.role === 'generator') {
         const g = await (await fetch('/api/v1/generator')).json();
         this.offset = g.offset_ms; this.level = g.level_dbfs; this.title = g.title || '';
+        this.source = g.source || '';
+        this.imageSet = !!g.source_image; this.imageFrames = g.source_image_frames || 0;
+        if (this.imageSet && !this.imageUrl) this.imageUrl = '/api/v1/generator/source-image';
         this.audioOn = !g.muted; this.stopped = !!g.stopped;
       } else {
         this.measurement = await (await fetch('/api/v1/measurement')).json();
@@ -102,9 +114,19 @@ createApp({
         this.grading = await (await fetch('/api/v1/grading')).json();
       }
     },
+    onImage(ev) { this.imageFile = (ev.target.files && ev.target.files[0]) || null; },
     async saveGenerator() {
       await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title})});
+        body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source})});
+      if (this.imageFile) {
+        const bytes = await this.imageFile.arrayBuffer();
+        const type = this.imageFile.type || (this.imageFile.name.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png');
+        const saved = await fetch('/api/v1/generator/source-image', {method:'POST', headers:{'Content-Type': type}, body: bytes});
+        if (!saved.ok) return;
+        this.imageUrl = '/api/v1/generator/source-image?t=' + Date.now();
+        this.imageFile = null;
+      }
+      await this.refresh();
     },
     async mute() { await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({muted:this.audioOn})}); await this.refresh(); },
     async toggleRun() { await fetch(this.stopped ? '/api/v1/generator/start' : '/api/v1/generator/stop', {method:'POST'}); await this.refresh(); },

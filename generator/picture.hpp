@@ -18,7 +18,25 @@ struct PictureInfo {
     std::string qr_json;
     std::string counter; // "frame as written by the generator 0000123"
     std::string time_line;
-    double av_offset_ms = 0; // set offset; the sync-line dot shows this
+    double av_offset_ms = 0;
+    double media_ms = 0;
+    double period_ms = 500;
+    const struct SourceStill* source_image = nullptr;
+};
+
+struct SourceStill {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> rgba;
+};
+
+struct SourceClip {
+    std::vector<SourceStill> frames;
+    std::vector<double> start_ms;
+    double loop_ms = 0;
+    bool load(const std::string& path, std::string& error);
+    // Frame of an animated GIF at this media time. A still always returns its only picture.
+    const SourceStill* at(double media_ms) const;
 };
 
 struct Yuv422p10 {

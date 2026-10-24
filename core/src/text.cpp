@@ -64,15 +64,42 @@ int text_px_height(int scale)
     return 8 * std::max(1, scale);
 }
 
-SyncDot sync_dot_kind(double av_offset_ms)
+SyncDot sync_dot_kind(double position_ms)
 {
-    if (av_offset_ms < -1e-9) {
+    if (position_ms < -1e-6) {
         return SyncDot::Early;
     }
-    if (av_offset_ms > 1e-9) {
+    if (position_ms > 1e-6) {
         return SyncDot::Late;
     }
     return SyncDot::Zero;
+}
+
+SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms)
+{
+    SyncPlace place;
+    if (period_frames < 1) {
+        period_frames = 1;
+    }
+    if (period_ms <= 0) {
+        period_ms = 500;
+    }
+    int frame = frame_in_period % period_frames;
+    if (frame < 0) {
+        frame += period_frames;
+    }
+    const double half_period = period_ms / 2.0;
+    place.scale_ms = std::max(250.0, half_period);
+    const int half = std::max(1, period_frames / 2);
+    if (frame == 0) {
+        place.position_ms = 0;
+    } else if (frame <= half) {
+        place.position_ms = place.scale_ms * static_cast<double>(frame) / static_cast<double>(half);
+    } else {
+        place.position_ms = place.scale_ms * static_cast<double>(frame - period_frames) / static_cast<double>(half);
+    }
+    place.position_ms = std::clamp(place.position_ms, -place.scale_ms, place.scale_ms);
+    return place;
 }
 
 } // namespace avsync

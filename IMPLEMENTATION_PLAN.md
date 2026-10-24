@@ -168,6 +168,8 @@ Implemented on top of the stage 1 branch. `mxl-avsync paths` lists what runs her
 6. **Live SRT, the fabrics agent, and live SIP are not processes in this repo.** The file-mode distortion (H.264, G.711) and the merge view are implemented. The gateway, the agent, and a SIP function are host gaps.
 7. **The phone UI is not executed on a device here.** Capture sources for iOS (host clock) and Android (`REALTIME` sensor timestamps) are in `mobile-app/modules/avsync/`. They are not compiled by CMake.
 
+The on-screen sync scale is a moving square, not the configured offset. It travels at least ±250 ms once per event (25 frames at 1080p50 and 2/s): red while early, white at 0, green while late. The analyzer still reads only the marker block and the Gray strip. A source name and a PNG or GIF (`--source-image`, `POST /api/v1/generator/source-image`) are drawn beside that name. `web/icon.png` is the app icon on the test signal, the web GUI, and the phone app.
+
 ## Next step
 
 On the Linux host: link libmxl, then the SRT gateway loop, a two-node fabrics merge, and a device build of the Expo app against the calibration rig. ST 2110 remains the stage 1 host gap.

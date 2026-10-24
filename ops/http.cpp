@@ -142,6 +142,12 @@ void HttpServer::serve(int port)
         if (auto it = request.headers.find("content-length"); it != request.headers.end()) {
             length = std::atoi(it->second.c_str());
         }
+        if (length > 8 * 1024 * 1024) {
+            const char* too_large = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            send(fd, too_large, std::strlen(too_large), MSG_NOSIGNAL);
+            close(fd);
+            continue;
+        }
         while (static_cast<int>(body.size()) < length) {
             const ssize_t n = recv(fd, buf, sizeof(buf), 0);
             if (n <= 0) {

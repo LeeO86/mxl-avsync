@@ -4,7 +4,11 @@
 #include "quirc.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <tuple>
+#include <vector>
 
 namespace avsync {
 namespace {
@@ -168,38 +172,220 @@ void draw_text_box(Yuv422p10& frame, int x, int y, std::string_view text, int sc
     draw_text(view, x + pad, y + pad, text, scale, kYWhite);
 }
 
-void draw_sync_scale(Yuv422p10& frame, double av_offset_ms)
+void draw_app_icon(Yuv422p10& frame, int x, int y, int size)
 {
+    if (size < 8) {
+        return;
+    }
+    // Same mark as web/icon.png: dark purple field, white clapper, black board.
+    const Y10 purple = y8(59, 161, 142);
+    const Y10 ink{kYBlack, kYNeutralChroma, kYNeutralChroma};
+    const Y10 paper{kYWhite, kYNeutralChroma, kYNeutralChroma};
+    fill_yuv(frame, x, y, size, size, purple);
+    const int inset = std::max(2, size * 10 / 64);
+    const int clapper_y = y + size * 14 / 64;
+    const int clapper_h = std::max(3, size * 16 / 64);
+    const int board_y = clapper_y + clapper_h + std::max(1, size / 32);
+    const int board_h = std::max(4, size * 26 / 64);
+    fill_yuv(frame, x + inset, clapper_y, size - 2 * inset, clapper_h, paper);
+    for (int row = 0; row < clapper_h; ++row) {
+        for (int col = 0; col < size - 2 * inset; ++col) {
+            const double t = static_cast<double>(col) / std::max(1, size - 2 * inset) + static_cast<double>(row) / std::max(1, clapper_h);
+            const int band = static_cast<int>(t * 3.0);
+            if (band % 2 == 1) {
+                fill_yuv(frame, x + inset + col, clapper_y + row, 1, 1, ink);
+            }
+        }
+    }
+    fill_yuv(frame, x + inset, board_y, size - 2 * inset, board_h, ink);
+    fill_yuv(frame, x + inset, clapper_y + clapper_h, size - 2 * inset, std::max(1, size / 32), paper);
+}
+
+void blit_rgba(Yuv422p10& frame, int dst_x, int dst_y, int box, const SourceStill& image)
+{
+    if (image.width <= 0 || image.height <= 0 || image.rgba.size() < static_cast<size_t>(image.width * image.height * 4) || box <= 0) {
+        return;
+    }
+    const double scale = std::min(static_cast<double>(box) / image.width, static_cast<double>(box) / image.height);
+    const int dw = std::max(1, static_cast<int>(std::lround(image.width * scale)));
+    const int dh = std::max(1, static_cast<int>(std::lround(image.height * scale)));
+    for (int y = 0; y < dh; ++y) {
+        const int sy = std::min(image.height - 1, static_cast<int>(y / scale));
+        const int dy = dst_y + y;
+        if (dy < 0 || dy >= frame.height) {
+            continue;
+        }
+        for (int x = 0; x < dw; ++x) {
+            const int sx = std::min(image.width - 1, static_cast<int>(x / scale));
+            const int dx = dst_x + x;
+            if (dx < 0 || dx >= frame.width) {
+                continue;
+            }
+            const uint8_t* p = image.rgba.data() + static_cast<size_t>(sy * image.width + sx) * 4;
+            const int alpha = p[3];
+            if (alpha == 0) {
+                continue;
+            }
+            const double r = p[0] / 255.0;
+            const double g = p[1] / 255.0;
+            const double b = p[2] / 255.0;
+            const double Y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            const double Cb = -0.1146 * r - 0.3854 * g + 0.5 * b;
+            const double Cr = 0.5 * r - 0.4542 * g - 0.0458 * b;
+            auto lim = [](double v, double bias, double gain) {
+                return static_cast<uint16_t>(std::lround(std::clamp(bias + gain * v, 0.0, 1023.0)));
+            };
+            uint16_t yv = lim(Y, 64, 876);
+            uint16_t cb = lim(Cb, 512, 896);
+            uint16_t cr = lim(Cr, 512, 896);
+            if (alpha < 255) {
+                const double a = alpha / 255.0;
+                const size_t yi = static_cast<size_t>(dy) * frame.width + dx;
+                const size_t ci = static_cast<size_t>(dy) * (frame.width / 2) + dx / 2;
+                yv = static_cast<uint16_t>(std::lround(yv * a + frame.y[yi] * (1.0 - a)));
+                cb = static_cast<uint16_t>(std::lround(cb * a + frame.cb[ci] * (1.0 - a)));
+                cr = static_cast<uint16_t>(std::lround(cr * a + frame.cr[ci] * (1.0 - a)));
+            }
+            frame.y[static_cast<size_t>(dy) * frame.width + dx] = yv;
+            frame.cb[static_cast<size_t>(dy) * (frame.width / 2) + dx / 2] = cb;
+            frame.cr[static_cast<size_t>(dy) * (frame.width / 2) + dx / 2] = cr;
+        }
+    }
+}
+
+void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, double period_ms)
+{
+    const SyncPlace place = sync_place(frame_in_period, period_frames, period_ms);
     const FrameGeometry g = frame_geometry(frame.width, frame.height);
     const int span = std::max(1, g.sweep_x1 - g.sweep_x0);
-    const int track_h = std::max(4, frame.height / 180);
-    fill_yuv(frame, g.sweep_x0, g.sweep_y - track_h / 2, span, track_h, Y10{kYBlack, kYNeutralChroma, kYNeutralChroma});
-    const int centre = g.sweep_x0 + span / 2;
-    fill_yuv(frame, centre - 1, g.sweep_y - track_h, 3, track_h * 3, Y10{kYWhite, kYNeutralChroma, kYNeutralChroma});
-    constexpr double kScaleMs = 40.0;
-    const double clamped = std::clamp(av_offset_ms, -kScaleMs, kScaleMs);
-    const double along = (clamped + kScaleMs) / (2.0 * kScaleMs);
-    const int dot = g.sweep_x0 + static_cast<int>(std::lround(along * (span - 1)));
-    const int radius = std::max(8, frame.height / 60);
-    Y10 color{kYWhite, kYNeutralChroma, kYNeutralChroma};
-    const SyncDot kind = sync_dot_kind(av_offset_ms);
+    const int track_h = std::max(6, frame.height / 120);
+    const int tick_w = std::max(3, frame.width / 640);
+    const Y10 black{kYBlack, kYNeutralChroma, kYNeutralChroma};
+    const Y10 white{kYWhite, kYNeutralChroma, kYNeutralChroma};
+    fill_yuv(frame, g.sweep_x0, g.sweep_y - track_h / 2, span, track_h, black);
+    const double ticks_ms[] = {-250, -200, -100, -20, 0, 20, 100, 200, 250};
+    const int radius = std::max(12, frame.height / 40);
+    struct Placed {
+        int x0;
+        int x1;
+    };
+    std::vector<Placed> labels;
+    auto fits = [&](int x0, int x1) {
+        for (const auto& box : labels) {
+            if (x0 < box.x1 && x1 > box.x0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    for (double ms : ticks_ms) {
+        if (std::abs(ms) > place.scale_ms + 0.1) {
+            continue;
+        }
+        const double along = (ms + place.scale_ms) / (2.0 * place.scale_ms);
+        const int tx = g.sweep_x0 + static_cast<int>(std::lround(along * (span - 1)));
+        const bool major = ms == 0 || std::abs(ms) == 250 || std::abs(ms) == 100 || std::abs(ms) == 20;
+        const int tick_h = (ms == 0) ? track_h * 5 : (major ? track_h * 3 : track_h * 2);
+        fill_yuv(frame, tx - tick_w / 2, g.sweep_y - tick_h / 2, tick_w, tick_h, white);
+        // End labels stay one step smaller so ±200 and ±250 both fit on the line.
+        int label_scale = frame.height >= 720 ? 2 : 1;
+        if (std::abs(ms) >= 200 || std::abs(ms) == 20) {
+            label_scale = 1;
+        }
+        char label[16];
+        if (ms == 0) {
+            std::snprintf(label, sizeof(label), "0");
+        } else {
+            std::snprintf(label, sizeof(label), "%+.0f", ms);
+        }
+        const int pad = std::max(2, label_scale);
+        const int tw = text_px_width(label, label_scale) + pad * 2;
+        const int th = text_px_height(label_scale) + pad * 2;
+        int lx = tx - tw / 2;
+        lx = std::max(g.sweep_x0, std::min(lx, g.sweep_x1 - tw));
+        const int label_y = g.sweep_y - radius - th - 8;
+        if (fits(lx, lx + tw)) {
+            draw_text_box(frame, lx, label_y, label, label_scale);
+            labels.push_back({lx, lx + tw});
+        }
+    }
+    const double along = (place.position_ms + place.scale_ms) / (2.0 * place.scale_ms);
+    const int dot = g.sweep_x0 + static_cast<int>(std::lround(std::clamp(along, 0.0, 1.0) * (span - 1)));
+    Y10 color = white;
+    const SyncDot kind = sync_dot_kind(place.position_ms);
     if (kind == SyncDot::Early) {
         color = y8(81, 90, 240);
     } else if (kind == SyncDot::Late) {
         color = y8(145, 54, 34);
     }
-    fill_yuv(frame, dot - radius, g.sweep_y - radius, radius * 2, radius * 2, color);
-    const int label_scale = std::max(2, frame.height / 540);
-    const int label_y = g.sweep_y + radius + 4;
-    const char* ticks[] = {"-40", "-20", "0", "+20", "+40"};
-    for (int i = 0; i < 5; ++i) {
-        const int tx = g.sweep_x0 + span * i / 4;
-        const int tw = text_px_width(ticks[i], label_scale);
-        draw_text_box(frame, tx - tw / 2, label_y, ticks[i], label_scale);
+    const int side = radius * 2;
+    fill_yuv(frame, dot - radius, g.sweep_y - radius, side, side, color);
+    const int word = frame.height >= 720 ? 2 : 1;
+    const int word_y = g.sweep_y + radius + 6;
+    draw_text_box(frame, g.sweep_x0, word_y, "early", word);
+    const int late_w = text_px_width("late", word) + std::max(2, word) * 2;
+    draw_text_box(frame, g.sweep_x1 - late_w, word_y, "late", word);
+}
+
+const SourceStill* cached_app_icon()
+{
+    static SourceStill still;
+    static int state = 0;
+    if (state == 0) {
+        state = 1;
+#ifdef AVSYNC_ICON_PATH
+        SourceClip clip;
+        std::string error;
+        if (clip.load(AVSYNC_ICON_PATH, error) && !clip.frames.empty()) {
+            still = std::move(clip.frames.front());
+            state = 2;
+        }
+#endif
     }
-    draw_text_box(frame, g.sweep_x0, label_y + text_px_height(label_scale) + 8, "early", label_scale);
-    const int late_w = text_px_width("late", label_scale) + std::max(2, label_scale) * 2;
-    draw_text_box(frame, g.sweep_x1 - late_w, label_y + text_px_height(label_scale) + 8, "late", label_scale);
+    return state == 2 ? &still : nullptr;
+}
+
+void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int right, int top, int bottom)
+{
+    const bool has_text = !info.source.empty();
+    const bool has_image = info.source_image != nullptr && info.source_image->width > 0 && info.source_image->height > 0
+        && info.source_image->rgba.size() >= static_cast<size_t>(info.source_image->width * info.source_image->height * 4);
+    if (!has_text && !has_image) {
+        return;
+    }
+    const int avail_w = right - left;
+    const int avail_h = bottom - top;
+    if (avail_w < 16 || avail_h < 8) {
+        return;
+    }
+    int scale = std::max(2, frame.height / 70);
+    auto measure = [&](int s) {
+        const int pad = std::max(2, s);
+        const int tw = has_text ? text_px_width(info.source, s) + pad * 2 : 0;
+        const int th = has_text ? text_px_height(s) + pad * 2 : 0;
+        const int gap = (has_text && has_image) ? std::max(4, s) : 0;
+        const int ih = has_image ? (has_text ? th : std::min(avail_h, std::max(th, frame.height / 8))) : 0;
+        return std::tuple<int, int, int, int>{tw, th, gap, ih};
+    };
+    while (scale > 1) {
+        const auto [tw, th, gap, ih] = measure(scale);
+        if (tw + gap + ih <= avail_w && std::max(th, ih) <= avail_h) {
+            break;
+        }
+        --scale;
+    }
+    const auto [tw, th, gap, ih] = measure(scale);
+    if (has_text && tw > avail_w) {
+        return;
+    }
+    int x = left;
+    if (has_text) {
+        draw_text_box(frame, x, top, info.source, scale);
+        x += tw + gap;
+    }
+    if (has_image && x + 4 < right) {
+        blit_rgba(frame, x, top, std::min(ih, right - x), *info.source_image);
+    }
 }
 
 void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int frame_in_period, int period_frames, bool marker_white)
@@ -220,37 +406,63 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
     auto place = [&](int x, int y, std::string_view text, int text_scale) {
         draw_text_box(frame, x, y, text, text_scale);
     };
-    const std::string banner = "TEST SIGNAL - mxl-avsync";
-    const int banner_scale = scale;
-    const int banner_w = text_px_width(banner, banner_scale) + std::max(2, banner_scale) * 2;
-    place((frame.width - banner_w) / 2, 16, banner, banner_scale);
+    const std::string banner = "TEST SIGNAL";
+    const int banner_scale = std::max(2, frame.height / 270);
+    const int banner_pad = std::max(2, banner_scale);
+    const int banner_w = text_px_width(banner, banner_scale) + banner_pad * 2;
+    const int banner_h = text_px_height(banner_scale) + banner_pad * 2;
+    const int icon_px = std::max(48, frame.height / 12);
+    const int gap = std::max(8, frame.width / 160);
+    const int group_w = banner_w + gap + icon_px;
+    int group_x = (frame.width - group_w) / 2;
+    group_x = std::max(group_x, geo.fid_size + 4);
+    const int qr_right = geo.qr_x + geo.qr_size + gap;
+    if (group_x < qr_right) {
+        group_x = qr_right;
+    }
+    const int icon_y = std::max(6, geo.qr_y);
+    const int icon_x = group_x + banner_w + gap;
+    place(group_x, icon_y + std::max(0, (icon_px - banner_h) / 2), banner, banner_scale);
+    if (const SourceStill* icon = cached_app_icon()) {
+        blit_rgba(frame, icon_x, icon_y, icon_px, *icon);
+    } else {
+        draw_app_icon(frame, icon_x, icon_y, icon_px);
+    }
+    const int ident_top = icon_y + icon_px + gap;
+    const int ident_bottom = std::min(geo.marker_y, geo.sweep_y) - 8;
+    const int ident_right = frame.width - geo.fid_size - 8;
+    draw_source_ident(frame, info, group_x, ident_right, ident_top, ident_bottom);
     const std::string footer = "TEST SIGNAL";
-    const int footer_w = text_px_width(footer, banner_scale) + std::max(2, banner_scale) * 2;
-    const int footer_h = text_px_height(banner_scale) + std::max(2, banner_scale) * 2;
+    const int footer_w = text_px_width(footer, banner_scale) + banner_pad * 2;
+    const int footer_h = text_px_height(banner_scale) + banner_pad * 2;
     place((frame.width - footer_w) / 2, geo.strip_y - footer_h - 8, footer, banner_scale);
-    int text_x = geo.qr_x + geo.qr_size + scale * 4;
-    int text_y = scale * 16;
+    int text_x = qr_right;
+    int text_y = icon_y;
+    const int column_right = group_x - gap;
     auto line = [&](const std::string& text) {
-        if (text.empty()) {
+        if (text.empty() || text_x >= column_right) {
             return;
         }
-        place(text_x, text_y, text, small);
-        text_y += text_px_height(small) + std::max(2, small) * 2 + 4;
+        int text_scale = small;
+        while (text_scale > 1 && text_px_width(text, text_scale) + 8 > column_right - text_x) {
+            --text_scale;
+        }
+        if (text_px_width(text, text_scale) + 8 > column_right - text_x) {
+            return;
+        }
+        place(text_x, text_y, text, text_scale);
+        text_y += text_px_height(text_scale) + std::max(2, text_scale) * 2 + 4;
     };
     line(info.title);
-    line(info.source);
     line(info.format_line);
     line(info.offset_line);
     line(info.notes);
-    line(info.counter);
-    line(info.time_line);
     place(geo.marker_x + geo.marker_side + scale * 4, geo.marker_y, info.counter, small);
     place(geo.marker_x + geo.marker_side + scale * 4, geo.marker_y + text_px_height(small) + 12, info.time_line, small);
     blit_qr(view, info.qr_json);
     const int qr_span = geo.qr_size + scale * 2;
     chroma_neutral(frame, geo.qr_x, geo.qr_y, qr_span, qr_span);
-    draw_sync_scale(frame, info.av_offset_ms);
-    (void)period_frames;
+    draw_sync_scale(frame, frame_in_period, period_frames, info.period_ms);
 }
 
 std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int height, int stride)
