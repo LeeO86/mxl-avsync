@@ -168,7 +168,7 @@ Implemented on top of the stage 1 branch. `mxl-avsync paths` lists what runs her
 6. **Live SRT, the fabrics agent, and live SIP are not processes in this repo.** The file-mode distortion (H.264, G.711) and the merge view are implemented. The gateway, the agent, and a SIP function are host gaps.
 7. **The phone UI is not executed on a device here.** Capture sources for iOS (host clock) and Android (`REALTIME` sensor timestamps) are in `mobile-app/modules/avsync/`. They are not compiled by CMake.
 
-The on-screen sync scale is a moving square, not the configured offset. Each step is one frame. At 1080p50 and 2/s that is ±240 ms, one tick per frame, crossed once per event: red while early, white at 0, green while late. The analyzer still reads only the marker block and the Gray strip. Under the centre square, a PNG or GIF sits immediately left of the source name, with `AVSYNC_SUBTITLE` on the next line (`--subtitle`, `PATCH /api/v1/generator`). `web/icon.png` is the app icon on the test signal, the web GUI, and the phone app.
+The on-screen sync scale is a moving square, not the configured offset. Each step is one frame. At 1080p50 and 2/s that is ±240 ms, one tick per frame, crossed once per event: red while early, white at 0, green while late. The analyzer still reads only the marker block and the Gray strip. Under the centre square, a PNG or GIF sits immediately left of the source name, with `AVSYNC_SUBTITLE` on the next line (`--subtitle`, `PATCH /api/v1/generator`). `assets/app-icon.svg` is the app icon. The phone store and adaptive icons, the web favicon, touch icon, and header mark, and the test-signal mark are rasters of that file.
 
 ## Next step
 

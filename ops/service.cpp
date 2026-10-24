@@ -75,6 +75,13 @@ HttpResponse json_response(const nlohmann::json& body, int status = 200)
     return HttpResponse{status, "application/json", body.dump(), {}};
 }
 
+HttpResponse icon_png(const char* name)
+{
+    const auto path = std::filesystem::path(web_root()) / name;
+    if (!std::filesystem::exists(path)) return json_response({{"error", "icon missing"}}, 404);
+    return HttpResponse{200, "image/png", read_binary(path), {}};
+}
+
 std::string metrics_text(Runtime& rt)
 {
     std::lock_guard lock(rt.mu);
@@ -422,11 +429,9 @@ void install_web(HttpServer& http, Runtime& rt)
         if (!std::filesystem::exists(path)) return json_response({{"error", "ui missing"}}, 404);
         return HttpResponse{200, "text/html; charset=utf-8", read_file(path), {}};
     });
-    http.add("GET", "/icon.png", [&](const HttpRequest&) {
-        const auto path = std::filesystem::path(web_root()) / "icon.png";
-        if (!std::filesystem::exists(path)) return json_response({{"error", "icon missing"}}, 404);
-        return HttpResponse{200, "image/png", read_binary(path), {}};
-    });
+    http.add("GET", "/icon.png", [](const HttpRequest&) { return icon_png("icon.png"); });
+    http.add("GET", "/favicon-32.png", [](const HttpRequest&) { return icon_png("favicon-32.png"); });
+    http.add("GET", "/apple-touch-icon.png", [](const HttpRequest&) { return icon_png("apple-touch-icon.png"); });
     http.add("GET", "/vendor/vue.global.prod.js", [&](const HttpRequest&) {
         const auto path = std::filesystem::path(web_root()) / "vendor" / "vue.global.prod.js";
         return HttpResponse{200, "text/javascript", read_file(path), {}};
