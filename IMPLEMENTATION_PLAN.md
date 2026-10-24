@@ -263,17 +263,17 @@ locked:
 event:
 3585761511 0.0 pass locked 80
 empty url:
-{"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"}}
+{"audio_enable":true,"audio_flow":"","detail":"no flow","grain_rows":0,"height":0,"input_state":"waiting","interlaced":false,"media_ready":false,"nmos_registered":false,"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"},"result_domain":"/dev/shm/avs-ptp-kMAjYi/empty","result_flow":"9f8fdeea-a396-5da3-b9ba-cbba87431431","role":"analyzer","stopped":false,"video_flow":"","width":0}
 dead url:
-{"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"}}
+{"audio_enable":true,"audio_flow":"","detail":"no flow","grain_rows":0,"height":0,"input_state":"waiting","interlaced":false,"media_ready":false,"nmos_registered":false,"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"},"result_domain":"/dev/shm/avs-ptp-kMAjYi/dead","result_flow":"9f8fdeea-a396-5da3-b9ba-cbba87431431","role":"analyzer","stopped":false,"video_flow":"","width":0}
 https refused:
-{"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"}}
+{"audio_enable":true,"audio_flow":"","detail":"no flow","grain_rows":0,"height":0,"input_state":"waiting","interlaced":false,"media_ready":false,"nmos_registered":false,"ptp":{"accuracy_ns":"unknown","sync_state":"unknown"},"result_domain":"/dev/shm/avs-ptp-kMAjYi/https","result_flow":"9f8fdeea-a396-5da3-b9ba-cbba87431431","role":"analyzer","stopped":false,"video_flow":"","width":0}
 unlocked:
-{"ptp":{"accuracy_ns":"500","sync_state":"unlocked"}}
+{"audio_enable":true,"audio_flow":"","detail":"no flow","grain_rows":0,"height":0,"input_state":"waiting","interlaced":false,"media_ready":false,"nmos_registered":false,"ptp":{"accuracy_ns":"500","sync_state":"unlocked"},"result_domain":"/dev/shm/avs-ptp-kMAjYi/unlocked","result_flow":"9f8fdeea-a396-5da3-b9ba-cbba87431431","role":"analyzer","stopped":false,"video_flow":"","width":0}
 ptp.sh ok
 ```
 
-The locked status line and the event line are the full script output for those steps. The later status documents also carried `role`, flows and `media_ready`; only the `ptp` object is repeated here. The event had no `video_latency_ms` and no `audio_latency_ms`. Offset 0.0 graded pass.
+The event line is seq, offset, grade, `sync_state`, `accuracy_ns`. That event had no `video_latency_ms` and no `audio_latency_ms`.
 
 ## Next step
 
