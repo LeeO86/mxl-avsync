@@ -7,7 +7,12 @@
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "ios": {"bundleIdentifier": "io.leeo86.mxl.avsync", "infoPlist": {"NSCameraUsageDescription": "See the AV sync test picture.", "NSMicrophoneUsageDescription": "Hear the AV sync chirps."}},
-    "android": {"package": "io.leeo86.mxl.avsync", "permissions": ["CAMERA", "RECORD_AUDIO"]},
+    "android": {
+      "package": "io.leeo86.mxl.avsync",
+      "adaptiveIcon": {"foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#091426"},
+      "permissions": ["CAMERA", "RECORD_AUDIO"]
+    },
+    "web": {"favicon": "./assets/favicon.png"},
     "plugins": ["./modules/avsync/app.plugin.js"]
   }
 }

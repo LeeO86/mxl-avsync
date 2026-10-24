@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
 import { AIM_TEXT, encodeWav, formatResultWhen, measureSentence, offsetText, selectHighestFrameRate, spikeBucket, statusLine, waveformPeaks } from './src/measure.mjs';
 import {
   clearCalibration,
@@ -180,7 +180,10 @@ function SettingsSheet({ onClose, onClearCalibration, onRepeat, onClearResults }
   return (
     <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
       <View style={{ backgroundColor: panel, padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
-        <Text style={{ color: ink, fontSize: 18, marginBottom: 12 }}>Settings</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+          <Image source={require('./assets/icon.png')} style={{ width: 28, height: 28, borderRadius: 6, marginRight: 10 }} />
+          <Text style={{ color: ink, fontSize: 18 }}>Settings</Text>
+        </View>
         <SettingsRow label="Clear saved calibration" onPress={onClearCalibration} />
         <SettingsRow label="Repeat calibration" onPress={onRepeat} />
         <SettingsRow label="Clear results" onPress={onClearResults} />
@@ -355,7 +358,10 @@ export default function App() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: bg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8 }}>
-        <Text style={{ color: muted, letterSpacing: 1 }}>{tab === 'measure' ? 'MEASURE' : 'RESULTS'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Image source={require('./assets/icon.png')} style={{ width: 28, height: 28, borderRadius: 6, marginRight: 10 }} />
+          <Text style={{ color: muted, letterSpacing: 1 }}>{tab === 'measure' ? 'MEASURE' : 'RESULTS'}</Text>
+        </View>
         <GearButton onPress={() => setSettingsOpen(true)} />
       </View>
       {tab === 'measure' ? (
