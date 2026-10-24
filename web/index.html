@@ -47,6 +47,9 @@
     <section v-if="tab=='Signal' || tab=='Measurement'">
       <div v-if="role=='analyzer'" class="offset" :style="{color:gradeColor}">{{ sentence }}</div>
       <p v-if="role=='analyzer'">{{ grade }} · {{ measurement.reason || measurement.input_state || 'NO EVENTS' }}</p>
+      <p style="color:var(--muted)">Preview</p>
+      <img :src="'/api/v1/preview/input.jpg?t=' + previewTick" alt="input" style="max-height:180px;background:#111;margin-right:8px"/>
+      <img :src="'/api/v1/preview/generated.jpg?t=' + previewTick" alt="generated" style="max-height:180px;background:#111"/>
       <div v-if="role=='generator'">
         <label>Set offset (ms, + audio late) <input type="number" v-model.number="offset" min="-500" max="500"/></label>
         <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
@@ -84,7 +87,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos' }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos', previewTick:0 }; },
   computed: {
     role() { return this.info.role || ''; },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
@@ -100,6 +103,7 @@ createApp({
   },
   methods: {
     async refresh() {
+      this.previewTick = Date.now();
       this.status = await (await fetch('/api/v1/status')).json();
       this.nmos = this.status.nmos_registered ? 'registered' : 'nmos';
       if (this.role === 'generator') {

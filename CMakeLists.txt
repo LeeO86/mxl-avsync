@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(AVSYNC_CORE_ONLY "Build only avsync-core and its tests" OFF)
 option(AVSYNC_WITH_FFMPEG "Build the file generator and analyzer" ON)
-option(AVSYNC_WITH_MXL "Build the live MXL path" OFF)
+# Live MXL is linked when find_package(mxl) succeeds. avsync-core stays free of libmxl.
 
 # Same pin and static options as mxl-multiviewer. The release tarball ships asmjit.
 include(FetchContent)
@@ -109,4 +109,35 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     target_compile_definitions(mxl-avsync PRIVATE AVSYNC_WEB_DIR="${CMAKE_SOURCE_DIR}/web")
     target_link_libraries(mxl-avsync PRIVATE avsync-file pthread)
     target_compile_options(mxl-avsync PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+    find_package(mxl CONFIG QUIET)
+    if(mxl_FOUND)
+        pkg_check_modules(JPEG REQUIRED IMPORTED_TARGET libjpeg)
+        add_library(avsync-mxlio STATIC
+            mxlio/domain.cpp
+            mxlio/engine.cpp
+            mxlio/jpeg.cpp
+            mxlio/preview.cpp
+        )
+        target_include_directories(avsync-mxlio PUBLIC mxlio PRIVATE util)
+        target_link_libraries(avsync-mxlio PUBLIC avsync-file mxl::mxl PkgConfig::JPEG)
+        target_compile_options(avsync-mxlio PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        target_link_libraries(mxl-avsync PRIVATE avsync-mxlio)
+        target_compile_definitions(mxl-avsync PRIVATE AVSYNC_WITH_MXL=1)
+        if(MXL_RUNTIME_LIB_DIRS)
+            set_target_properties(mxl-avsync PROPERTIES BUILD_RPATH "${MXL_RUNTIME_LIB_DIRS}")
+        endif()
+        add_executable(avsync-sample-flow tests/tools/sample_flow.cpp)
+        target_link_libraries(avsync-sample-flow PRIVATE avsync-mxlio)
+        target_compile_options(avsync-sample-flow PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        add_executable(avsync-pattern-writer tests/tools/pattern_writer.cpp)
+        target_link_libraries(avsync-pattern-writer PRIVATE avsync-mxlio)
+        target_compile_options(avsync-pattern-writer PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        if(MXL_RUNTIME_LIB_DIRS)
+            set_target_properties(avsync-sample-flow avsync-pattern-writer PROPERTIES BUILD_RPATH "${MXL_RUNTIME_LIB_DIRS}")
+        endif()
+        message(STATUS "libmxl found: live reader and writer are linked into mxl-avsync")
+    else()
+        message(STATUS "libmxl not found: mxl-avsync has no live MXL path")
+    endif()
 endif()

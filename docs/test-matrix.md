@@ -47,7 +47,7 @@ H.264 and G.711 rows below are FFmpeg test aids. They are not live SRT or SIP in
 
 | Path | Why |
 | --- | --- |
-| MXL generator → analyzer on one node | this binary does not link libmxl; `/readyz` stays 503 until a build with libmxl creates the flows |
+| MXL generator → analyzer on one node | measured on this VM, 1080p50, 2/s, tmpfs domain. Set 35 / 0 / −35 ms read back as 35.0002 (warn), 0.0002 (pass) and −35.0005 (warn). 1080i25 grain is one 540-line field. No latency: PTP state was not read |
 | ST 2110 hour run, 1 h at 1080p50 and 1080i25 | not this repo. Through mxl-st2110-gateway: generator → MXL → gateway → network → gateway → MXL → analyzer |
 | SRT | not this repo. mxl-srt-gateway presents an MXL flow. The H.264 rows above are file-mode test aids |
 | Cross-node fabrics | not this repo. mxl-fabrics-agent moves the flows. The merge view here runs on saved results |
