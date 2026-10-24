@@ -38,6 +38,8 @@ curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/stop" | grep -q '"stop
 curl -sf -X PATCH "http://127.0.0.1:$PORT/api/v1/generator" -H 'Content-Type: application/json' \
   -d '{"source":"STUDIO A","subtitle":"desk@studio.example"}' | grep -q '"subtitle":"desk@studio.example"'
 curl -sf "http://127.0.0.1:$PORT/icon.png" | cmp -s - "$ROOT/web/icon.png"
+curl -sf "http://127.0.0.1:$PORT/favicon-32.png" | cmp -s - "$ROOT/web/favicon-32.png"
+curl -sf "http://127.0.0.1:$PORT/apple-touch-icon.png" | cmp -s - "$ROOT/web/apple-touch-icon.png"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/source-image" -H 'Content-Type: image/png' \
   --data-binary @"$ROOT/tests/fixtures/transparent.png" | grep -q '"frames":1'
 curl -sf "http://127.0.0.1:$PORT/api/v1/generator/source-image" | cmp -s - "$ROOT/tests/fixtures/transparent.png"
