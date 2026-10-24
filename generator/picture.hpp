@@ -18,6 +18,7 @@ struct PictureInfo {
     std::string qr_json;
     std::string counter; // "frame as written by the generator 0000123"
     std::string time_line;
+    double av_offset_ms = 0; // set offset; the sync-line dot shows this
 };
 
 struct Yuv422p10 {

@@ -34,6 +34,20 @@ void place(std::vector<uint16_t>& canvas, int cw, int ch, const std::vector<uint
 
 } // namespace
 
+TEST_CASE("bitmap text reads left to right and the sync dot is white only at zero")
+{
+    std::vector<uint16_t> luma(8 * 8, 0);
+    LumaView view{luma.data(), 8, 8, 8};
+    draw_text(view, 0, 0, "T", 1, kYWhite);
+    // 'T' top row is 0x3F: the bar starts at the left edge and does not fill the right edge.
+    CHECK(luma[0] == kYWhite);
+    CHECK(luma[5] == kYWhite);
+    CHECK(luma[7] == 0);
+    CHECK(sync_dot_kind(-20) == SyncDot::Early);
+    CHECK(sync_dot_kind(0) == SyncDot::Zero);
+    CHECK(sync_dot_kind(15) == SyncDot::Late);
+}
+
 TEST_CASE("fiducials locate a scaled and offset tile")
 {
     constexpr int sw = 320;

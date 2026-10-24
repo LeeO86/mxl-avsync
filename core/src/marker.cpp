@@ -156,14 +156,9 @@ void draw_timing(LumaView view, uint64_t seq, int frame_in_period, int period_fr
         }
         rect(view, g.strip_x + i * g.strip_w, g.strip_y, g.strip_w, g.strip_h, bit ? kYWhite : kYBlack);
     }
-    if (period_frames < 1) {
-        period_frames = 1;
-    }
-    const double frac = std::clamp(static_cast<double>(frame_in_period) / static_cast<double>(period_frames), 0.0, 0.999);
-    const int span = std::max(1, g.sweep_x1 - g.sweep_x0);
-    const int dot = g.sweep_x0 + static_cast<int>(frac * span);
-    const int radius = (frame_in_period == 0) ? std::max(6, view.height / 80) : std::max(3, view.height / 140);
-    rect(view, dot - radius, g.sweep_y - radius, radius * 2, radius * 2, kYWhite);
+    (void)period_frames;
+    // The moving phase dot used to live here. The generator draws the offset dot
+    // on this scale (0 at the centre). The analyzer reads the marker and the strip, not this line.
 }
 
 uint32_t binary_to_gray(uint32_t value)

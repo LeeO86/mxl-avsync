@@ -205,6 +205,12 @@ void fill_luma(LumaView view, uint16_t y);
 void draw_static_layer(LumaView view);
 void draw_timing(LumaView view, uint64_t seq, int frame_in_period, int period_frames, bool marker_white);
 void draw_text(LumaView view, int x, int y, std::string_view text, int scale, uint16_t y_value);
+int text_px_width(std::string_view text, int scale);
+int text_px_height(int scale);
+
+// Visual sync scale. Negative is audio early (left, red), zero is white, positive is audio late (right, green).
+enum class SyncDot { Early, Zero, Late };
+SyncDot sync_dot_kind(double av_offset_ms);
 
 struct MarkerReading {
     enum class State { Black, White, Invalid };

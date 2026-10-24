@@ -328,6 +328,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
             info.source = request.source;
             info.notes = request.notes;
             info.format_line = request.format;
+            info.av_offset_ms = offset;
             info.offset_line = "offset " + std::to_string(static_cast<int>(std::lround(offset))) + " ms";
             char counter[64];
             std::snprintf(counter, sizeof(counter), "frame as written by the generator %07lld", static_cast<long long>(index));

@@ -26,7 +26,8 @@ void draw_text(LumaView view, int x, int y, std::string_view text, int scale, ui
         for (int row = 0; row < 8; ++row) {
             const unsigned char bits = static_cast<unsigned char>(font8x8_basic[ch][row]);
             for (int col = 0; col < 8; ++col) {
-                if ((bits & (1u << (7 - col))) == 0) {
+                // font8x8 stores the leftmost pixel in the least significant bit.
+                if ((bits & (1u << col)) == 0) {
                     continue;
                 }
                 const int px = cursor + col * scale;
@@ -48,6 +49,30 @@ void draw_text(LumaView view, int x, int y, std::string_view text, int scale, ui
         }
         cursor += 8 * scale + scale;
     }
+}
+
+int text_px_width(std::string_view text, int scale)
+{
+    if (text.empty() || scale < 1) {
+        return 0;
+    }
+    return static_cast<int>(text.size()) * (8 * scale + scale) - scale;
+}
+
+int text_px_height(int scale)
+{
+    return 8 * std::max(1, scale);
+}
+
+SyncDot sync_dot_kind(double av_offset_ms)
+{
+    if (av_offset_ms < -1e-9) {
+        return SyncDot::Early;
+    }
+    if (av_offset_ms > 1e-9) {
+        return SyncDot::Late;
+    }
+    return SyncDot::Zero;
 }
 
 } // namespace avsync
