@@ -1,7 +1,7 @@
 #include "picture.hpp"
 
 #include "qrcodegen.hpp"
-#include "quirc.h"
+#include "ReadBarcode.h"
 
 #include <algorithm>
 #include <cmath>
@@ -570,36 +570,23 @@ std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int h
     if (w < 16 || h < 16) {
         return std::nullopt;
     }
-    quirc* qr = quirc_new();
-    if (qr == nullptr || quirc_resize(qr, w, h) < 0) {
-        quirc_destroy(qr);
-        return std::nullopt;
-    }
-    int qw = 0;
-    int qh = 0;
-    uint8_t* image = quirc_begin(qr, &qw, &qh);
-    for (int y = 0; y < qh; ++y) {
+    std::vector<uint8_t> gray(static_cast<size_t>(w) * static_cast<size_t>(h));
+    for (int y = 0; y < h; ++y) {
         const uint16_t* src = luma + static_cast<size_t>(y0 + y) * static_cast<size_t>(stride) + x0;
-        uint8_t* dst = image + static_cast<size_t>(y) * static_cast<size_t>(qw);
-        for (int x = 0; x < qw; ++x) {
+        uint8_t* dst = gray.data() + static_cast<size_t>(y) * static_cast<size_t>(w);
+        for (int x = 0; x < w; ++x) {
             dst[x] = static_cast<uint8_t>(std::min(255, src[x] >> 2));
         }
     }
-    quirc_end(qr);
-    std::optional<std::string> found;
-    const int count = quirc_count(qr);
-    for (int i = 0; i < count; ++i) {
-        quirc_code code;
-        quirc_extract(qr, i, &code);
-        quirc_data data;
-        if (quirc_decode(&code, &data) != QUIRC_SUCCESS) {
-            continue;
-        }
-        found = std::string(reinterpret_cast<char*>(data.payload), static_cast<size_t>(data.payload_len));
-        break;
+    ZXing::ReaderOptions options;
+    options.setFormats(ZXing::BarcodeFormat::QRCode);
+    options.setTextMode(ZXing::TextMode::Plain);
+    const ZXing::ImageView view(gray.data(), w, h, ZXing::ImageFormat::Lum);
+    const ZXing::Barcode barcode = ZXing::ReadBarcode(view, options);
+    if (!barcode.isValid() || barcode.text().empty()) {
+        return std::nullopt;
     }
-    quirc_destroy(qr);
-    return found;
+    return barcode.text();
 }
 
 } // namespace avsync

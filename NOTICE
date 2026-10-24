@@ -9,7 +9,7 @@ This product includes:
 - pocketfft (BSD-3-Clause), https://github.com/mreineck/pocketfft
 - Blend2D 0.21.2 (Zlib), https://blend2d.com/, fetched at configure time with the asmjit it ships
 - DejaVu Sans 2.37, third_party/dejavu/ (Bitstream Vera licence, see third_party/dejavu/LICENSE)
-- quirc (ISC), https://github.com/dlbeer/quirc
+- zxing-cpp 2.3.0 (Apache-2.0), https://github.com/zxing-cpp/zxing-cpp, fetched at configure time, readers only
 - Vue 3 (MIT), https://vuejs.org/
 - FFmpeg (LGPL), dynamically linked, used for file mux and demux only
 
