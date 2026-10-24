@@ -7,7 +7,8 @@ This product includes:
 - nlohmann/json (MIT), https://github.com/nlohmann/json
 - Nayuki QR Code generator (MIT), https://www.nayuki.io/page/qr-code-generator-library
 - pocketfft (BSD-3-Clause), https://github.com/mreineck/pocketfft
-- font8x8 (public domain), https://github.com/dhepper/font8x8
+- Blend2D 0.21.2 (Zlib), https://blend2d.com/, fetched at configure time with the asmjit it ships
+- DejaVu Sans 2.37, third_party/dejavu/ (Bitstream Vera licence, see third_party/dejavu/LICENSE)
 - quirc (ISC), https://github.com/dlbeer/quirc
 - Vue 3 (MIT), https://vuejs.org/
 - FFmpeg (LGPL), dynamically linked, used for file mux and demux only

@@ -143,7 +143,7 @@ Exit: calibrated phones agree with the live analyzer within their stated uncerta
 
 ## Deviations
 
-1. **Text is font8x8, not Blend2D.** The timing picture, TEST SIGNAL legend and counters are drawn with the public-domain 8x8 font. Layout, marker, strip, fiducials and QR are as specified. 1080p draw cost on this VM is 0.16 ms/frame (`docs/performance.md`). Blend2D can replace `draw_text` without touching detection.
+1. **Text is Blend2D 0.21.2 with DejaVu Sans 2.37**, the same pin mxl-multiviewer uses. Blend2D and the asmjit in its release tarball are fetched at configure time and linked statically. The font file is `third_party/dejavu/DejaVuSans.ttf`, embedded by `cmake/EmbedBytes.cmake`. `draw_text` still writes white luma into the black boxes. Marker, strip, fiducials and QR are unchanged.
 2. **QR decode is quirc (ISC), not zxing-cpp.** Encode is still Nayuki, error correction M. quirc reads the codes this generator writes. zxing can replace `decode_qr_text`.
 3. **NMOS is an in-tree IS-04 v1.3 / IS-05 v1.1 node, not nmos-cpp.** It exposes the node, device, flows, senders and receivers, the test-signal tag, group hints, and `mxl_domain_id` / `mxl_flow_id` on `urn:x-nmos:transport:mxl`. It does not run the AMWA test suite and it never sends IS-05 to another device. nmos-cpp at `fe303849` remains the pin if a later build swaps the module.
 4. **libmxl is not linked in the default binary.** The pin is recorded (`MXL_REF=218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7`). Ubuntu 24.04's fmt/spdlog packages are older than the MXL v1.1 build, so this VM did not produce a live writer. File round trips and the control API are what this environment can prove.

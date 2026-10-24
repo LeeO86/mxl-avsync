@@ -35,15 +35,33 @@ void place(std::vector<uint16_t>& canvas, int cw, int ch, const std::vector<uint
 
 } // namespace
 
-TEST_CASE("bitmap text reads left to right and the sync dot is white only at zero")
+TEST_CASE("text reads left to right and the sync dot is white only at zero")
 {
-    std::vector<uint16_t> luma(8 * 8, 0);
-    LumaView view{luma.data(), 8, 8, 8};
-    draw_text(view, 0, 0, "T", 1, kYWhite);
-    // 'T' top row is 0x3F: the bar starts at the left edge and does not fill the right edge.
-    CHECK(luma[0] == kYWhite);
-    CHECK(luma[5] == kYWhite);
-    CHECK(luma[7] == 0);
+    auto span = [](std::string_view word) {
+        const int width = std::max(8, text_px_width(word, 3));
+        const int height = std::max(8, text_px_height(3));
+        std::vector<uint16_t> luma(static_cast<size_t>(width * height), 0);
+        LumaView view{luma.data(), width, height, width};
+        draw_text(view, 0, 0, word, 3, kYWhite);
+        int left = width;
+        int right = -1;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                if (luma[static_cast<size_t>(y * width + x)] != kYWhite) {
+                    continue;
+                }
+                left = std::min(left, x);
+                right = std::max(right, x);
+            }
+        }
+        return std::pair<int, int>{left, right};
+    };
+    const auto tee = span("T");
+    const auto tee_dot = span("T.");
+    CHECK(tee.second >= tee.first);
+    // The added mark of "T." sits to the right of "T".
+    CHECK(tee_dot.second > tee.second);
+    CHECK(tee_dot.first <= tee.first + 1);
     CHECK(sync_dot_kind(-20) == SyncDot::Early);
     CHECK(sync_dot_kind(0) == SyncDot::Zero);
     CHECK(sync_dot_kind(15) == SyncDot::Late);
