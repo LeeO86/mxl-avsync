@@ -4,6 +4,7 @@ on:
   pull_request:
 env:
   MXL_REF: 218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7
+  NMOS_CPP_REF: fe303849527394b03bdedc8f161f377fe458bb62
 jobs:
   test:
     runs-on: ubuntu-24.04
@@ -16,7 +17,11 @@ jobs:
             curl zip unzip tar git ca-certificates python3 \
             bison flex autoconf automake libtool \
             libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
-            libjpeg-dev
+            libjpeg-dev \
+            libboost-system-dev libboost-thread-dev libboost-chrono-dev \
+            libboost-date-time-dev libboost-regex-dev libboost-random-dev \
+            libboost-filesystem-dev libcpprest-dev nlohmann-json3-dev \
+            libssl-dev uuid-dev libavahi-compat-libdnssd-dev
       - name: Build MXL
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg /opt/vcpkg
@@ -42,11 +47,18 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/opt/mxl
           cmake --build /tmp/mxl/build -j"$(nproc)"
           sudo cmake --install /tmp/mxl/build
+      - name: Fetch nmos-cpp
+        run: |
+          git init /tmp/nmos-cpp
+          git -C /tmp/nmos-cpp remote add origin https://github.com/sony/nmos-cpp.git
+          git -C /tmp/nmos-cpp fetch --depth 1 origin "$NMOS_CPP_REF"
+          git -C /tmp/nmos-cpp checkout FETCH_HEAD
       - name: build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="/opt/mxl;/tmp/mxl/build/vcpkg_installed/x64-linux" \
-            -DMXL_RUNTIME_LIB_DIRS="/opt/mxl/lib;/tmp/mxl/build/vcpkg_installed/x64-linux/lib"
+            -DMXL_RUNTIME_LIB_DIRS="/opt/mxl/lib;/tmp/mxl/build/vcpkg_installed/x64-linux/lib" \
+            -DAVSYNC_WITH_NMOS=ON -DNMOS_CPP_DIR=/tmp/nmos-cpp/Development
           cmake --build build -j"$(nproc)"
       - name: unit
         run: ./build/avsync-core-tests && ./build/avsync-picture-tests
@@ -62,3 +74,4 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./tests/integration/live.sh
+          ./tests/integration/nmos.sh

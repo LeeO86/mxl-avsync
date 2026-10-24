@@ -104,8 +104,11 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         util/uuid.cpp
         ops/http.cpp
         ops/service.cpp
+        nmos/ids.cpp
+        nmos/route.cpp
+        nmos/node.cpp
     )
-    target_include_directories(mxl-avsync PRIVATE util ops)
+    target_include_directories(mxl-avsync PRIVATE util ops nmos app)
     target_compile_definitions(mxl-avsync PRIVATE AVSYNC_WEB_DIR="${CMAKE_SOURCE_DIR}/web")
     target_link_libraries(mxl-avsync PRIVATE avsync-file pthread)
     target_compile_options(mxl-avsync PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -139,5 +142,28 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         message(STATUS "libmxl found: live reader and writer are linked into mxl-avsync")
     else()
         message(STATUS "libmxl not found: mxl-avsync has no live MXL path")
+    endif()
+
+    option(AVSYNC_WITH_NMOS "Build the NMOS node with nmos-cpp" OFF)
+    set(NMOS_CPP_DIR "" CACHE PATH "nmos-cpp Development directory")
+    if(AVSYNC_WITH_NMOS)
+        if(NOT NMOS_CPP_DIR)
+            message(FATAL_ERROR "AVSYNC_WITH_NMOS=ON requires -DNMOS_CPP_DIR")
+        endif()
+        set(NMOS_CPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(NMOS_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(NMOS_CPP_USE_SUPPLIED_JSON_SCHEMA_VALIDATOR ON CACHE BOOL "" FORCE)
+        set(NMOS_CPP_USE_SUPPLIED_JWT_CPP ON CACHE BOOL "" FORCE)
+        set(NMOS_CPP_USE_AVAHI OFF CACHE BOOL "" FORCE)
+        set(CMAKE_CXX_STANDARD 17)
+        add_subdirectory(${NMOS_CPP_DIR} ${CMAKE_BINARY_DIR}/nmos-cpp EXCLUDE_FROM_ALL)
+        set(CMAKE_CXX_STANDARD 20)
+        target_compile_definitions(mxl-avsync PRIVATE AVSYNC_WITH_NMOS=1)
+        target_link_libraries(mxl-avsync PRIVATE nmos-cpp::nmos-cpp)
+        set_source_files_properties(nmos/node.cpp PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            COMPILE_FLAGS "-std=c++17 -w")
+        message(STATUS "nmos-cpp: IS-04/IS-05 node is linked into mxl-avsync")
     endif()
 endif()
