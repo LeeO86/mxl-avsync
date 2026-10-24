@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, Text, View } from 'react-native';
+import { Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
 import { AIM_TEXT, encodeWav, formatResultWhen, measureSentence, offsetText, selectHighestFrameRate, spikeBucket, statusLine, waveformPeaks } from './src/measure.mjs';
 import {
   clearCalibration,
@@ -157,7 +157,7 @@ function MeasureScreen({ session, onClear }) {
 
 function ResultsScreen({ session }) {
   return (
-    <View style={{ flex: 1, padding: 20 }}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
       {session.results.length === 0 ? (
         <Text style={{ color: muted }}>No saved results</Text>
       ) : (
@@ -168,7 +168,7 @@ function ResultsScreen({ session }) {
           </View>
         ))
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -287,10 +287,17 @@ function CalibrationWizard({ onClose, onSave }) {
   }
 
   if (recording.step === 'recording') {
+    const cancel = () => {
+      const mic = micRef.current;
+      micRef.current = null;
+      mic?.stopAndUnloadAsync?.();
+      onClose();
+    };
     return (
       <View style={sheet}>
         <Text style={{ color: ink, fontSize: 22 }}>Listening</Text>
         <Text style={{ color: muted, marginTop: 8 }}>Recording stops when a sharp sound is heard.</Text>
+        <Pressable onPress={cancel} style={{ marginTop: 12 }}><Text style={{ color: muted }}>Cancel</Text></Pressable>
         <CameraPane />
       </View>
     );
