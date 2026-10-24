@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/LeeO86/mxl-avsync/schemas/manifest.schema.json",
+  "title": "mxl-avsync manifest",
+  "type": "object",
+  "required": ["schema", "generator", "test_id", "mode", "timeline", "duration_ms", "video", "audio", "container", "events"],
+  "properties": {
+    "schema": {"const": "mxl-avsync-manifest/1"},
+    "generator": {
+      "type": "object",
+      "required": ["version", "core"],
+      "properties": {"version": {"type": "string"}, "core": {"type": "string"}}
+    },
+    "test_id": {"type": "string"},
+    "mode": {"const": "FILE"},
+    "timeline": {"const": "file"},
+    "duration_ms": {"type": "number"},
+    "video": {"type": "object"},
+    "audio": {"type": "object"},
+    "container": {"type": "object"},
+    "events": {"type": "array", "items": {"type": "object"}}
+  }
+}

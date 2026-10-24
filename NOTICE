@@ -1,0 +1,16 @@
+mxl-avsync
+Copyright (c) 2026 Adrian Hilber
+
+This product includes:
+
+- doctest (MIT), https://github.com/doctest/doctest
+- nlohmann/json (MIT), https://github.com/nlohmann/json
+- Nayuki QR Code generator (MIT), https://www.nayuki.io/page/qr-code-generator-library
+- pocketfft (BSD-3-Clause), https://github.com/mreineck/pocketfft
+- font8x8 (public domain), https://github.com/dhepper/font8x8
+- quirc (ISC), https://github.com/dlbeer/quirc
+- Vue 3 (MIT), https://vuejs.org/
+- FFmpeg (LGPL), dynamically linked, used for file mux and demux only
+
+The live build is intended to link libmxl (Apache-2.0) at dmf-mxl/mxl release/v1.1
+commit 218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7. This tree's default binary does not link it.

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/LeeO86/mxl-avsync/schemas/event-log.schema.json",
+  "title": "mxl-avsync event log record",
+  "type": "object",
+  "required": ["schema", "test_id", "event_id", "seq", "mode", "grade"],
+  "properties": {
+    "schema": {"const": "mxl-avsync-event-log/1"},
+    "test_id": {"type": "string"},
+    "event_id": {"type": "string"},
+    "seq": {"type": "integer", "minimum": 0},
+    "mode": {"enum": ["FILE", "LIVE"]},
+    "grade": {"enum": ["pass", "warn", "fail", "invalid"]},
+    "av_offset_ms": {"type": ["number", "null"]},
+    "flags": {"type": "array", "items": {"type": "string"}},
+    "reference": {"type": "object"}
+  }
+}

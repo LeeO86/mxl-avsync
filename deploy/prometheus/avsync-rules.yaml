@@ -1,0 +1,33 @@
+# Proposed alert rules for the platform (SPECIFICATION §16.6).
+# The platform owns k8s/monitoring/20-rules.yaml.j2; this file is the proposal shipped with 1.0.
+groups:
+  - name: mxl-avsync
+    rules:
+      - alert: AVSyncFail
+        expr: mxl_avsync_grade{grade="fail"} == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: AV sync is outside EBU R37
+      - alert: AVSyncWarn
+        expr: mxl_avsync_grade{grade="warn"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: AV sync is inside EBU R37 but outside the per-stage window
+      - alert: AVSyncNoEvents
+        expr: mxl_avsync_input_state{state="running"} == 1 and rate(mxl_avsync_events_total{result="paired"}[1m]) == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Analyzer is routed and has paired no events for a minute
+      - alert: AVSyncGeneratorMuted
+        expr: mxl_avsync_generator_audio_muted == 1
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: Generator chirps have been muted for 10 minutes

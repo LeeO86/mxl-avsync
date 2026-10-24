@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/LeeO86/mxl-avsync/schemas/qr-payload.schema.json",
+  "title": "mxl-avsync QR payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["s", "t", "m", "k", "tk", "o", "r", "f"],
+  "properties": {
+    "s": {"const": "mxl-avsync/1"},
+    "t": {"type": "string", "minLength": 1, "maxLength": 64},
+    "m": {"enum": ["FILE", "LIVE"]},
+    "k": {"type": "integer", "minimum": 0},
+    "tk": {"type": "integer"},
+    "o": {"oneOf": [{"type": "integer"}, {"const": "sweep"}]},
+    "r": {"enum": [1, 2, 4]},
+    "f": {"type": "string", "minLength": 1}
+  }
+}

@@ -1,0 +1,5 @@
+build
+.git
+*.mov
+*.mp4
+*.mkv

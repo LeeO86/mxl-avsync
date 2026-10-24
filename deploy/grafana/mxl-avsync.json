@@ -1,0 +1,13 @@
+{
+  "title": "mxl-avsync",
+  "uid": "mxl-avsync",
+  "schemaVersion": 39,
+  "tags": ["mxl", "avsync"],
+  "timezone": "utc",
+  "panels": [
+    {"type": "timeseries", "title": "AV offset (ms)", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "targets": [{"expr": "mxl_avsync_av_offset_ms", "legendFormat": "offset"}]},
+    {"type": "timeseries", "title": "Grade", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "targets": [{"expr": "mxl_avsync_grade", "legendFormat": "{{grade}}"}]},
+    {"type": "timeseries", "title": "Latencies (ms)", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}, "targets": [{"expr": "mxl_avsync_video_latency_ms", "legendFormat": "video"}, {"expr": "mxl_avsync_audio_latency_ms", "legendFormat": "audio"}]},
+    {"type": "timeseries", "title": "Drops and events", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}, "targets": [{"expr": "mxl_avsync_video_drops_total", "legendFormat": "drops"}, {"expr": "sum by (result) (mxl_avsync_events_total)", "legendFormat": "{{result}}"}]}
+  ]
+}

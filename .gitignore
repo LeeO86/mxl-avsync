@@ -1,0 +1,7 @@
+build/
+*.o
+*.mov
+*.mp4
+*.mkv
+*.manifest.json
+.cache/
