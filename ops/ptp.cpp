@@ -104,11 +104,6 @@ PtpReading read_ptp_status(const std::string& url, int timeout_ms)
             reading.accuracy_ns = json["accuracy_ns"].dump();
         }
     }
-    reading.read = reading.sync_state != "unknown" || json.contains("sync_state");
-    if (reading.sync_state != "locked" && reading.sync_state != "unlocked" && reading.sync_state != "unknown") {
-        reading.sync_state = "unknown";
-        reading.read = false;
-    }
     return reading;
 }
 

@@ -7,7 +7,6 @@ namespace avsync {
 struct PtpReading {
     std::string sync_state = "unknown";
     std::string accuracy_ns = "unknown";
-    bool read = false;
 };
 
 // GET the URL and read {"sync_state","accuracy_ns"}. Any failure leaves sync_state unknown.
