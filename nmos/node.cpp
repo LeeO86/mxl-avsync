@@ -399,7 +399,6 @@ void NmosNode::start()
         throw std::runtime_error(message);
     }
     ready_lock.unlock();
-    const auto self = "http://127.0.0.1:" + std::to_string(impl_->config.nmos_port) + "/x-nmos/node/v1.3/self";
     for (int attempt = 0; attempt < 40; ++attempt) {
         try {
             web::http::client::http_client client(us("http://127.0.0.1:" + std::to_string(impl_->config.nmos_port)));

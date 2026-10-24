@@ -419,7 +419,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (!video_domain.is_open() || !audio_domain.is_open()) {
             video = {};
             audio = {};
-            if (config.nmos_enable) {
+            if (config.nmos_enable && callbacks.input_route) {
                 const auto video_route = callbacks.input_route ? callbacks.input_route(true) : InputRoute{};
                 const auto audio_route = callbacks.input_route ? callbacks.input_route(false) : InputRoute{};
                 if (!video_route.enable || video_route.flow_id.empty() || !audio_route.enable || audio_route.flow_id.empty()) {
