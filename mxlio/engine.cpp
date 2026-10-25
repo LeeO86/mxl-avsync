@@ -14,6 +14,7 @@
 #include <cstring>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <thread>
 
 namespace avsync {
@@ -245,6 +246,7 @@ struct ResultCaption {
     std::string line = "NO EVENTS";
     std::string grade = "invalid";
     std::string state = "WAITING";
+    double event_ms = 0;
 };
 
 bool result_format_of(const Config& config, VideoFormat* format)
@@ -349,6 +351,19 @@ void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, Result
                 line = caption.line;
                 grade = caption.grade;
                 state = caption.state;
+                const Config live = callbacks.copy_config();
+                if (caption.event_ms > 0) {
+                    const double age_s = (static_cast<double>(tai_now()) / 1e6 - caption.event_ms) / 1000.0;
+                    if (age_s > live.stale_s) {
+                        grade = "invalid";
+                        std::ostringstream aged;
+                        aged.setf(std::ios::fixed);
+                        aged.precision(0);
+                        aged << std::lround(age_s) << " s ago";
+                        line = aged.str();
+                        state = "NO SIGNAL";
+                    }
+                }
             }
             paint_result(picture, line, grade, state);
             pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format.width, format.height, format.width, packed.data());
@@ -732,6 +747,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     caption.grade = event.grade;
                     caption.state = event.grade == "invalid" ? "NO EVENTS" : "RUNNING";
                     caption.line = event.av_offset_ms ? describe_offset(*event.av_offset_ms).line : event.reason;
+                    caption.event_ms = event.video_time_ms;
                 }
                 callbacks.add_event(event);
             }

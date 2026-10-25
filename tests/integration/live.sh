@@ -252,9 +252,33 @@ start_gen -35 1080p50
 wait_ready "$GAPI/readyz"
 wait_offset -35 "$((SEQ + 1))"
 
+echo "stale grade"
+kill -TERM "$GEN_PID"
+wait "$GEN_PID" || true
+GEN_PID=""
+sleep 7
+python3 - "$AAPI" <<'PY'
+import json, sys, urllib.request
+api = sys.argv[1]
+with urllib.request.urlopen(api + "/api/v1/measurement") as response:
+    body = json.load(response)
+if body.get("grade") != "invalid":
+    sys.exit("grade stayed " + str(body.get("grade")))
+age = float(body.get("age_ms", 0))
+if age < 5000:
+    sys.exit("age_ms " + str(age))
+sentence = body.get("sentence") or ""
+if "in sync" in sentence or "after video" in sentence or "before video" in sentence:
+    sys.exit("stale sentence " + sentence)
+metrics = urllib.request.urlopen(api + "/metrics").read().decode()
+if 'mxl_avsync_grade{grade="pass"} 1' in metrics or 'mxl_avsync_grade{grade="invalid"} 1' not in metrics:
+    sys.exit("grade metric still live")
+print("invalid", sentence, "age_ms", round(age))
+PY
+
 echo "interlaced field grain"
-kill -TERM "$GEN_PID"; wait "$GEN_PID" || true; GEN_PID=""
-kill -TERM "$ANA_PID"; wait "$ANA_PID" || true; ANA_PID=""
+if [[ -n "$GEN_PID" ]]; then kill -TERM "$GEN_PID"; wait "$GEN_PID" || true; GEN_PID=""; fi
+if [[ -n "$ANA_PID" ]]; then kill -TERM "$ANA_PID"; wait "$ANA_PID" || true; ANA_PID=""; fi
 rm -rf "$WORK/gen"
 start_gen 0 1080i25
 wait_ready "$GAPI/readyz"
