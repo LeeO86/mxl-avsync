@@ -372,6 +372,9 @@ void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, Result
         if (domain.write_result_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {
                 std::memcpy(dst, packed.data(), std::min(size, packed.size()));
             })) {
+            if (callbacks.count_video_grain) {
+                callbacks.count_video_grain();
+            }
             note_preview_v210("generated", packed.data(), format.width, format.height);
         }
         sleep_until_tai(time_of_index(pace, index + 1));

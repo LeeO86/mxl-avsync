@@ -215,6 +215,22 @@ done
 grep -q 'grain_rows=540' "$WORK/result-grain.txt"
 grep -q 'valid=1' "$WORK/result-grain.txt"
 cat "$WORK/result-grain.txt"
+python3 - "$AAPI" <<'PY'
+import re, sys, urllib.request
+text = urllib.request.urlopen(sys.argv[1] + "/metrics").read().decode()
+def sample(name):
+    match = re.search(rf"^{re.escape(name)} (\S+)$", text, re.M)
+    if not match:
+        sys.exit("missing " + name)
+    return float(match.group(1))
+count = sample("mxl_avsync_av_offset_seconds_count")
+correlation = sample("mxl_avsync_audio_correlation")
+level = sample("mxl_avsync_audio_level_dbfs")
+frames = sample('mxl_avsync_output_frames_total{essence="video"}')
+if count < 1 or correlation < 0.5 or level > -1 or frames < 1:
+    sys.exit(f"metrics count={count} correlation={correlation} level={level} frames={frames}")
+print("metrics", int(count), round(correlation, 3), round(level, 1), int(frames))
+PY
 SEQ=$(newest_offset 0 | awk '{print $1}')
 echo -n "live offset 80: "
 curl -sf -X PATCH "$GAPI/api/v1/generator" -H 'Content-Type: application/json' -d '{"offset_ms":80}' \
