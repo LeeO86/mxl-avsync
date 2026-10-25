@@ -11,6 +11,7 @@ namespace avsync {
 
 struct MediaStatus {
     bool ready = false;
+    bool live = true;
     std::string state;
     std::string detail;
     std::string video_flow;

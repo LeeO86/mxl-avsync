@@ -62,6 +62,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         MediaStatus status;
         status.state = "waiting";
         status.detail = error;
+        status.live = error.find("already has id") == std::string::npos;
         callbacks.set_status(status);
         while (!stop.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));

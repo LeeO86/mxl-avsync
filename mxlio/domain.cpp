@@ -179,7 +179,8 @@ bool ensure_output_domain(const std::string& path, const std::string& id, int64_
         const std::string have = existing.is_object() ? existing.value("id", "") : "";
         if (have != id) {
             if (error != nullptr) {
-                *error = "domain " + path + " already has id " + have;
+                *error = "domain " + path + " already has id " + have
+                    + "; set MXL_OUTPUT_DOMAIN_ID or NMOS_SEED to keep that id, or remove the leftover directory";
             }
             return false;
         }

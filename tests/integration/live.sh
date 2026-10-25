@@ -11,7 +11,9 @@ export LD_LIBRARY_PATH="${MXL_LIB_DIR:-/opt/mxl/lib}${VCPKG_LIB_DIR:+:$VCPKG_LIB
 WORK="$(mktemp -d /dev/shm/avs-XXXXXX)"
 GEN_PID=""
 ANA_PID=""
+STALE_PID=""
 cleanup() {
+  [[ -n "$STALE_PID" ]] && { kill -TERM "$STALE_PID" 2>/dev/null || true; wait "$STALE_PID" 2>/dev/null || true; }
   [[ -n "$GEN_PID" ]] && { kill -TERM "$GEN_PID" 2>/dev/null || true; wait "$GEN_PID" 2>/dev/null || true; }
   [[ -n "$ANA_PID" ]] && { kill -TERM "$ANA_PID" 2>/dev/null || true; wait "$ANA_PID" 2>/dev/null || true; }
   rm -rf "$WORK"
@@ -111,6 +113,39 @@ wait_offset() {
 
 mkdir -p "$WORK/gstate" "$WORK/astate"
 echo "live.sh work $WORK"
+
+STALE="$WORK/stale-gen"
+mkdir -p "$STALE"
+OLD_ID=11111111-1111-4111-8111-111111111111
+NEW_ID=22222222-2222-4222-8222-222222222222
+printf '%s\n' "{\"id\":\"$OLD_ID\",\"label\":\"leftover\",\"description\":\"leftover\",\"tags\":{}}" > "$STALE/domain_def.json"
+SPORT=18484
+AVSYNC_ROLE=generator AVSYNC_EVENT_RATE=2 AVSYNC_STATE_DIR="$WORK/stale-state" NMOS_ENABLE=false \
+  MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$STALE" MXL_OUTPUT_DOMAIN_ID="$NEW_ID" \
+  MXL_CLEANUP_ON_EXIT=true WEB_PORT="$SPORT" \
+  "$BIN" serve >"$WORK/stale.log" 2>&1 &
+STALE_PID=$!
+stale_code=""
+for _ in $(seq 1 50); do
+  stale_code=$(curl -s -o /tmp/avsync-stale-livez.json -w '%{http_code}' "http://127.0.0.1:$SPORT/livez" || true)
+  [[ "$stale_code" == "503" ]] && break
+  sleep 0.1
+done
+test "$stale_code" = 503
+grep -q '"status":"domain"' /tmp/avsync-stale-livez.json
+detail=$(curl -sf "http://127.0.0.1:$SPORT/api/v1/status")
+printf '%s\n' "$detail" | grep -q 'MXL_OUTPUT_DOMAIN_ID'
+printf '%s\n' "$detail" | grep -q 'NMOS_SEED'
+printf '%s\n' "$detail" | grep -q 'leftover directory'
+printf '%s\n' "$detail" | grep -q "$OLD_ID"
+test -f "$STALE/domain_def.json"
+grep -q "$OLD_ID" "$STALE/domain_def.json"
+kill -0 "$STALE_PID"
+kill -TERM "$STALE_PID" 2>/dev/null || true
+wait "$STALE_PID" 2>/dev/null || true
+STALE_PID=""
+test -f "$STALE/domain_def.json"
+echo "leftover domain refuses a new id and fails livez"
 
 start_gen 35 1080p50
 wait_http "$GAPI/livez"
