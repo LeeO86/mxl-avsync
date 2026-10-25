@@ -479,7 +479,7 @@ mxl-avsync analyze rec.mov
 
 ## 10. Configuration
 
-Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable names, string values) > defaults. Invalid configuration exits 78. The file is written atomically. "Live" keys apply without a restart; "flow" keys apply live and mint new output flow ids; "restart" keys are saved and reported as `restart_required`. The CLI takes the same keys as `--` options.
+Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable names, string values) > defaults. Invalid configuration exits 78. The file is written atomically. "Live" keys apply without a restart, including a key that was set in the environment at start: `PATCH /api/v1/generator` and `PUT /api/v1/config` change it and the next events use the new value. Import still skips env-set keys and lists them. "Flow" keys apply live and mint new output flow ids; "restart" keys are saved and reported as `restart_required`. The CLI takes the same keys as `--` options.
 
 ### 10.1 Both roles
 

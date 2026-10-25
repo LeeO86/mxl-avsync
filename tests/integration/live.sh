@@ -216,6 +216,22 @@ grep -q 'grain_rows=540' "$WORK/result-grain.txt"
 grep -q 'valid=1' "$WORK/result-grain.txt"
 cat "$WORK/result-grain.txt"
 SEQ=$(newest_offset 0 | awk '{print $1}')
+echo -n "live offset 80: "
+curl -sf -X PATCH "$GAPI/api/v1/generator" -H 'Content-Type: application/json' -d '{"offset_ms":80}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"] and d["offset_ms"]==80'
+curl -sf "$GAPI/api/v1/generator" | python3 -c 'import json,sys; assert json.load(sys.stdin)["offset_ms"]==80'
+wait_offset 80 "$((SEQ + 1))"
+SEQ=$(newest_offset 0 | awk '{print $1}')
+echo -n "live offset 0: "
+curl -sf -X PUT "$GAPI/api/v1/config" -H 'Content-Type: application/json' -d '{"AVSYNC_AV_OFFSET_MS":"0"}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"] and d["restart_required"]==[]'
+curl -sf "$GAPI/api/v1/generator" | python3 -c 'import json,sys; assert json.load(sys.stdin)["offset_ms"]==0'
+wait_offset 0 "$((SEQ + 1))"
+SEQ=$(newest_offset 0 | awk '{print $1}')
+echo -n "live offset 35: "
+curl -sf -X PATCH "$GAPI/api/v1/generator" -H 'Content-Type: application/json' -d '{"offset_ms":35}' \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"] and d["offset_ms"]==35'
+wait_offset 35 "$((SEQ + 1))"
 
 echo -n "offset 0: "
 kill -TERM "$GEN_PID"

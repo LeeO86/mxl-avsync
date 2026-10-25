@@ -80,5 +80,6 @@ Config load_config(const std::map<std::string, std::string>& extra = {});
 nlohmann::json config_settings(const Config& config);
 void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std::string>* skipped_env);
 bool is_restart_key(const std::string& key);
+bool is_live_key(const std::string& key);
 
 } // namespace avsync

@@ -71,6 +71,15 @@ bool is_restart_key(const std::string& key)
         || key.rfind("WEB_", 0) == 0 || key == "HOST_ID" || key == "WIDGET_FRAME_ANCESTORS" || key == "LOG_FORMAT" || key == "SHUTDOWN_TIMEOUT_S";
 }
 
+bool is_live_key(const std::string& key)
+{
+    return key == "AVSYNC_AV_OFFSET_MS" || key == "AVSYNC_CHIRP_LEVEL_DBFS" || key == "AVSYNC_AUDIO_ENABLE"
+        || key == "AVSYNC_TEST_ID" || key == "AVSYNC_TITLE" || key == "AVSYNC_SOURCE" || key == "AVSYNC_SUBTITLE" || key == "AVSYNC_NOTES"
+        || key == "AVSYNC_AUDIO_CHANNEL" || key == "AVSYNC_AUDIO_THRESHOLD" || key == "AVSYNC_QR_RATE"
+        || key == "AVSYNC_PASS_MIN_MS" || key == "AVSYNC_PASS_MAX_MS" || key == "AVSYNC_WARN_MIN_MS" || key == "AVSYNC_WARN_MAX_MS"
+        || key == "AVSYNC_GRADE_EVENTS" || key == "AVSYNC_STALE_S" || key == "AVSYNC_STATS_WINDOW" || key == "LOG_LEVEL";
+}
+
 Config load_config(const std::map<std::string, std::string>& extra)
 {
     Config config;
@@ -221,10 +230,12 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
     auto text = [](const nlohmann::json& value) { return value.is_string() ? value.get<std::string>() : value.dump(); };
     for (auto it = flat.begin(); it != flat.end(); ++it) {
         if (config.from_env.count(it.key())) {
-            if (skipped_env) {
-                skipped_env->push_back(it.key());
+            if (skipped_env || !is_live_key(it.key())) {
+                if (skipped_env) {
+                    skipped_env->push_back(it.key());
+                }
+                continue;
             }
-            continue;
         }
         const std::string value = text(it.value());
         const std::string& key = it.key();
