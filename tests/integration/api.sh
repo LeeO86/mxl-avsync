@@ -34,6 +34,18 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/widget/mis
 test "$code" = 404
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/widget/generator?nope=1")
 test "$code" = 400
+curl -sf "http://127.0.0.1:$PORT/widget/generator" | tee /tmp/widget-gen.html | grep -q 'TEST SIGNAL ACTIVE'
+grep -q 'widget-ready' /tmp/widget-gen.html
+grep -q 'widget-size' /tmp/widget-gen.html
+grep -q 'Mute' /tmp/widget-gen.html
+grep -q 'Stop' /tmp/widget-gen.html
+grep -q 'offset ' /tmp/widget-gen.html
+curl -sf "http://127.0.0.1:$PORT/widget/avsync" | tee /tmp/widget-av.html | grep -q 'widget-ready'
+grep -q '/api/v1/measurement' /tmp/widget-av.html
+grep -q '/api/v1/statistics' /tmp/widget-av.html
+grep -q '120:80' /tmp/widget-av.html
+curl -sf "http://127.0.0.1:$PORT/widget/avsync?latency=false&trend=0" | grep -q 'const latency=false'
+curl -sf "http://127.0.0.1:$PORT/widget/avsync?latency=false&trend=0" | grep -q 'const trend=false'
 curl -sf -X POST "http://127.0.0.1:$PORT/api/v1/generator/stop" | grep -q '"stopped":true'
 curl -sf -X PATCH "http://127.0.0.1:$PORT/api/v1/generator" -H 'Content-Type: application/json' \
   -d '{"source":"STUDIO A","subtitle":"desk@studio.example"}' | grep -q '"subtitle":"desk@studio.example"'
