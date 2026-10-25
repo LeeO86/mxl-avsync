@@ -5,6 +5,7 @@ on:
 env:
   MXL_REF: 218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7
   NMOS_CPP_REF: fe303849527394b03bdedc8f161f377fe458bb62
+  NMOS_TESTING_REF: 90018513758e6fbc096c26d7ef001f700b28b510
 jobs:
   dockerfile:
     runs-on: ubuntu-24.04
@@ -120,3 +121,31 @@ jobs:
           ./tests/integration/settings.sh
           ./tests/integration/nmos.sh
           ./tests/integration/nmos-registry.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: nmos-testing ${{ env.NMOS_TESTING_REF }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/nmos-testing"
+          curl -fsSL "https://codeload.github.com/AMWA-TV/nmos-testing/tar.gz/$NMOS_TESTING_REF" |
+            tar xz -C "$RUNNER_TEMP/nmos-testing" --strip-components=1
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q --disable-pip-version-check -r "$RUNNER_TEMP/nmos-testing/requirements.txt"
+      - name: Kernel TAI offset
+        run: sudo tests/nmos/set-tai-offset.py 37
+      - name: AMWA IS-04-01 IS-04-02 IS-05-01 IS-05-02
+        run: tests/nmos/amwa.sh off build/mxl-avsync
+        env:
+          LD_LIBRARY_PATH: /opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib
+          NMOS_TESTING_DIR: ${{ runner.temp }}/nmos-testing
+          NMOS_TESTING_PYTHON: ${{ runner.temp }}/venv/bin/python
+          AMWA_OUT: ${{ runner.temp }}/amwa
+      - name: AMWA summary
+        if: always()
+        run: cat "$RUNNER_TEMP/amwa/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: amwa
+          path: ${{ runner.temp }}/amwa
+          if-no-files-found: ignore

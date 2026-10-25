@@ -33,6 +33,7 @@
 #include "nmos/node_resource.h"
 #include "nmos/node_resources.h"
 #include "nmos/node_server.h"
+#include "nmos/resources.h"
 #include "nmos/server.h"
 #include "nmos/settings.h"
 #include "nmos/transfer_characteristic.h"
@@ -473,6 +474,28 @@ void NmosNode::start()
                     listed = false;
                 }
                 impl_->registered.store(listed);
+            }
+            if (!config.nmos_registry_address.empty()) {
+                const auto host = config.nmos_query_address.empty() ? config.nmos_registry_address : config.nmos_query_address;
+                const int port = config.nmos_query_port > 0 ? config.nmos_query_port : config.nmos_registry_port + 1;
+                {
+                    auto lock = node_model.write_lock();
+                    nmos::erase_resource(node_model.node_resources, us(ids.node));
+                    node_model.notify();
+                }
+                for (int attempt = 0; attempt < 50; ++attempt) {
+                    try {
+                        web::http::client::http_client_config client_config;
+                        client_config.set_timeout(std::chrono::milliseconds(500));
+                        web::http::client::http_client client(us("http://" + host + ":" + std::to_string(port)), client_config);
+                        const auto response = client.request(web::http::methods::GET, us("/x-nmos/query/v1.3/nodes/" + ids.node)).get();
+                        if (response.status_code() == 404) {
+                            break;
+                        }
+                    } catch (const std::exception&) {
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
             }
             {
                 auto lock = node_model.write_lock();

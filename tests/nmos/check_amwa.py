@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Compare nmos-testing results with the expected non-pass results.
+
+    check_amwa.py <results-dir> <expected.json>
+
+A result of Pass, Not Applicable, Test Disabled, Could Not Test, Manual or
+Not Implemented is accepted. Any other state must be listed in the expected
+file with its reason. A listed test that now ends differently fails too.
+Writes <results-dir>/summary.md.
+"""
+import json
+import pathlib
+import sys
+from collections import Counter
+
+
+def main():
+    out = pathlib.Path(sys.argv[1])
+    expected = json.loads(pathlib.Path(sys.argv[2]).read_text())
+    problems = []
+    lines = ["| Suite | Results |", "| --- | --- |"]
+    for suite, listed in expected.items():
+        if suite.startswith("_"):
+            continue
+        path = out / f"{suite}.json"
+        if not path.exists():
+            problems.append(f"{suite}: no results ({path})")
+            continue
+        results = json.loads(path.read_text())["results"]
+        counts = Counter(r["state"] for r in results)
+        lines.append(f"| {suite} | {', '.join(f'{k} {v}' for k, v in sorted(counts.items()))} |")
+        seen = set()
+        for result in results:
+            name, state = result["name"], result["state"]
+            seen.add(name)
+            want = listed.get(name)
+            if want is None:
+                if state not in {"Pass", "Not Applicable", "Test Disabled", "Could Not Test", "Manual", "Not Implemented"}:
+                    problems.append(f"{suite} {name}: {state}: {result.get('description', '')} | {result.get('detail', '')}")
+            elif want["state"] != state:
+                problems.append(f"{suite} {name}: expected {want['state']} ({want['reason']}), got {state}: {result.get('detail', '')}")
+        for name in listed:
+            if name not in seen:
+                problems.append(f"{suite} {name}: listed but not run")
+    summary = "\n".join(lines)
+    (out / "summary.md").write_text(summary + "\n")
+    print(summary)
+    if problems:
+        print("\nUnexpected results:")
+        for problem in problems:
+            print(" " + problem)
+        sys.exit(1)
+    print("\nAll results are Pass or expected.")
+
+
+if __name__ == "__main__":
+    main()
