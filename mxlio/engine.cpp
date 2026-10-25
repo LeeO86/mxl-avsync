@@ -243,9 +243,12 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 
 struct ResultCaption {
     std::mutex mu;
-    std::string line = "NO EVENTS";
+    std::string number;
+    std::string sentence;
     std::string grade = "invalid";
     std::string state = "WAITING";
+    std::string age;
+    std::vector<double> trend;
     double event_ms = 0;
 };
 
@@ -268,35 +271,6 @@ bool result_format_of(const Config& config, VideoFormat* format)
         return true;
     }
     return false;
-}
-
-void paint_result(Yuv422p10& frame, const std::string& line, const std::string& grade, const std::string& state)
-{
-    uint16_t y = 180;
-    uint16_t cb = kYNeutralChroma;
-    uint16_t cr = kYNeutralChroma;
-    if (grade == "pass") {
-        y = 520;
-        cb = 360;
-        cr = 400;
-    } else if (grade == "warn") {
-        y = 640;
-        cb = 420;
-        cr = 640;
-    } else if (grade == "fail") {
-        y = 420;
-        cb = 480;
-        cr = 720;
-    }
-    std::fill(frame.y.begin(), frame.y.end(), y);
-    std::fill(frame.cb.begin(), frame.cb.end(), cb);
-    std::fill(frame.cr.begin(), frame.cr.end(), cr);
-    LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
-    draw_text(view, 24, 28, "AV SYNC", 2, kYWhite);
-    const std::string shown = line.size() > 42 ? line.substr(0, 42) : line;
-    draw_text(view, 24, 80, shown, 2, kYWhite);
-    draw_text(view, 24, 140, grade, 2, kYWhite);
-    draw_text(view, 24, 190, state, 2, kYWhite);
 }
 
 void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, ResultCaption& caption)
@@ -343,29 +317,34 @@ void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, Result
         }
         const auto now = std::chrono::steady_clock::now();
         if (now - last_draw >= std::chrono::milliseconds(200)) {
-            std::string line;
-            std::string grade;
-            std::string state;
+            ResultPicture shown;
             {
                 std::lock_guard lock(caption.mu);
-                line = caption.line;
-                grade = caption.grade;
-                state = caption.state;
+                shown.number = caption.number;
+                shown.sentence = caption.sentence;
+                shown.grade = caption.grade;
+                shown.state = caption.state;
+                shown.trend_ms = caption.trend;
                 const Config live = callbacks.copy_config();
                 if (caption.event_ms > 0) {
-                    const double age_s = (static_cast<double>(tai_now()) / 1e6 - caption.event_ms) / 1000.0;
+                    const double age_s = std::max(0.0, (static_cast<double>(tai_now()) / 1e6 - caption.event_ms) / 1000.0);
                     if (age_s > live.stale_s) {
-                        grade = "invalid";
+                        shown.grade = "invalid";
+                        shown.state = "NO SIGNAL";
+                        shown.number.clear();
                         std::ostringstream aged;
                         aged.setf(std::ios::fixed);
                         aged.precision(0);
                         aged << std::lround(age_s) << " s ago";
-                        line = aged.str();
-                        state = "NO SIGNAL";
+                        shown.sentence = aged.str();
+                    } else if (!caption.number.empty()) {
+                        std::ostringstream aged;
+                        aged << std::lround(age_s) << " s";
+                        shown.age = aged.str();
                     }
                 }
             }
-            paint_result(picture, line, grade, state);
+            paint_result_picture(picture, shown);
             pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format.width, format.height, format.width, packed.data());
             last_draw = now;
         }
@@ -461,6 +440,21 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 
     while (!stop.load()) {
         const Config config = callbacks.copy_config();
+        {
+            std::lock_guard lock(caption.mu);
+            if (status.state == "no_signal") {
+                caption.state = "NO SIGNAL";
+            } else if (status.state == "not_routed") {
+                caption.state = "NOT ROUTED";
+            } else if (status.state == "waiting" || status.state.empty()) {
+                caption.state = "WAITING";
+            } else if (status.state == "running") {
+                caption.state = caption.number.empty() ? "NO EVENTS" : "RUNNING";
+            }
+            if (caption.state != "RUNNING") {
+                caption.number.clear();
+            }
+        }
         if (!video_domain.is_open() || !audio_domain.is_open()) {
             video = {};
             audio = {};
@@ -748,9 +742,21 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 {
                     std::lock_guard lock(caption.mu);
                     caption.grade = event.grade;
-                    caption.state = event.grade == "invalid" ? "NO EVENTS" : "RUNNING";
-                    caption.line = event.av_offset_ms ? describe_offset(*event.av_offset_ms).line : event.reason;
-                    caption.event_ms = event.video_time_ms;
+                    caption.state = event.grade == "invalid" || !event.av_offset_ms ? "NO EVENTS" : "RUNNING";
+                    if (event.av_offset_ms && event.grade != "invalid") {
+                        const OffsetWords words = describe_offset(*event.av_offset_ms);
+                        caption.number = words.number;
+                        caption.sentence = words.sentence;
+                        caption.event_ms = event.video_time_ms;
+                        caption.trend.push_back(*event.av_offset_ms);
+                        if (caption.trend.size() > 120) {
+                            caption.trend.erase(caption.trend.begin());
+                        }
+                    } else {
+                        caption.number.clear();
+                        caption.sentence = event.reason;
+                        caption.event_ms = event.video_time_ms;
+                    }
                 }
                 callbacks.add_event(event);
             }

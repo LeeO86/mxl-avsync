@@ -3,6 +3,7 @@
 
 #include "picture.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -25,6 +26,66 @@ int square_x(int frame, int period, double period_ms, const FrameGeometry& geome
 }
 
 } // namespace
+
+TEST_CASE("result picture states")
+{
+    auto ink_rows = [](const Yuv422p10& frame, int y0, int y1) {
+        int rows = 0;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = 0; x < frame.width; ++x) {
+                if (frame.y[static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)] > 800) {
+                    ++rows;
+                    break;
+                }
+            }
+        }
+        return rows;
+    };
+    auto ink_span = [](const Yuv422p10& frame, int y0, int y1) {
+        int left = frame.width;
+        int right = -1;
+        for (int y = y0; y < y1; ++y) {
+            for (int x = 0; x < frame.width; ++x) {
+                if (frame.y[static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)] > 800) {
+                    left = std::min(left, x);
+                    right = std::max(right, x);
+                }
+            }
+        }
+        return std::pair<int, int>{left, right};
+    };
+    for (const char* state : {"NO SIGNAL", "WAITING", "NOT ROUTED", "NO EVENTS"}) {
+        Yuv422p10 frame;
+        frame.resize(640, 360);
+        ResultPicture picture;
+        picture.state = state;
+        picture.grade = "invalid";
+        paint_result_picture(frame, picture);
+        const int band0 = 360 * 20 / 100;
+        const int band1 = 360 * 45 / 100;
+        CHECK(ink_rows(frame, band0, band1) > 8);
+        const auto span = ink_span(frame, band0, band1);
+        const int mid = (span.first + span.second) / 2;
+        CHECK(std::abs(mid - 320) < 40);
+    }
+    Yuv422p10 live;
+    live.resize(640, 360);
+    ResultPicture picture;
+    picture.number = "+35.0 ms";
+    picture.sentence = "audio 35 ms after video";
+    picture.grade = "warn";
+    picture.state = "RUNNING";
+    picture.age = "2 s";
+    picture.trend_ms = {0, 10, 35, 35, 20};
+    paint_result_picture(live, picture);
+    const int number0 = 360 * 20 / 100;
+    const int number1 = 360 * 45 / 100;
+    CHECK(ink_rows(live, number0, number1) > 20);
+    const auto number = ink_span(live, number0, number1);
+    CHECK(std::abs((number.first + number.second) / 2 - 320) < 40);
+    CHECK(ink_rows(live, number1, 360 * 60 / 100) > 4);
+    CHECK(ink_rows(live, 360 * 2 / 3, 360) > 2);
+}
 
 TEST_CASE("source stills keep transparency and gif frames follow time")
 {

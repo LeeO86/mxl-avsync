@@ -589,4 +589,114 @@ std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int h
     return barcode.text();
 }
 
+namespace {
+
+bool full_picture_state(const std::string& state)
+{
+    return state == "NO SIGNAL" || state == "WAITING" || state == "NOT ROUTED" || state == "NO EVENTS";
+}
+
+int scale_for(std::string_view text, int target_px, int max_width)
+{
+    int chosen = 1;
+    for (int scale = 1; scale <= 40; ++scale) {
+        if (text_px_height(scale) > target_px) {
+            break;
+        }
+        if (!text.empty() && text_px_width(text, scale) > max_width) {
+            break;
+        }
+        chosen = scale;
+    }
+    return chosen;
+}
+
+void paint_trend(LumaView view, const std::vector<double>& trend)
+{
+    if (trend.size() < 2) {
+        return;
+    }
+    const int top = view.height * 2 / 3;
+    const int mid = top + (view.height - top) / 2;
+    const int half = std::max(4, (view.height - top) / 2 - 4);
+    for (int x = 0; x < view.width; ++x) {
+        view.data[static_cast<size_t>(mid) * static_cast<size_t>(view.stride) + static_cast<size_t>(x)] = 800;
+    }
+    for (size_t i = 1; i < trend.size(); ++i) {
+        const int x0 = static_cast<int>((i - 1) * static_cast<size_t>(view.width - 1) / (trend.size() - 1));
+        const int x1 = static_cast<int>(i * static_cast<size_t>(view.width - 1) / (trend.size() - 1));
+        const auto y_of = [&](double ms) {
+            const double clamped = std::max(-100.0, std::min(100.0, ms));
+            return mid - static_cast<int>(std::lround(clamped / 100.0 * half));
+        };
+        int y0 = y_of(trend[i - 1]);
+        int y1 = y_of(trend[i]);
+        const int steps = std::max(1, std::abs(x1 - x0));
+        for (int step = 0; step <= steps; ++step) {
+            const int x = x0 + (x1 - x0) * step / steps;
+            const int y = y0 + (y1 - y0) * step / steps;
+            if (x >= 0 && x < view.width && y >= top && y < view.height) {
+                view.data[static_cast<size_t>(y) * static_cast<size_t>(view.stride) + static_cast<size_t>(x)] = 940;
+            }
+        }
+    }
+}
+
+} // namespace
+
+void paint_result_picture(Yuv422p10& frame, const ResultPicture& picture)
+{
+    uint16_t y = 180;
+    uint16_t cb = 512;
+    uint16_t cr = 512;
+    if (!full_picture_state(picture.state) && picture.grade == "pass") {
+        y = 520;
+        cb = 360;
+        cr = 400;
+    } else if (!full_picture_state(picture.state) && picture.grade == "warn") {
+        y = 640;
+        cb = 420;
+        cr = 640;
+    } else if (!full_picture_state(picture.state) && picture.grade == "fail") {
+        y = 420;
+        cb = 480;
+        cr = 720;
+    }
+    std::fill(frame.y.begin(), frame.y.end(), y);
+    std::fill(frame.cb.begin(), frame.cb.end(), cb);
+    std::fill(frame.cr.begin(), frame.cr.end(), cr);
+    if (frame.width < 16 || frame.height < 16) {
+        return;
+    }
+    LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
+    const int margin = std::max(4, frame.width / 40);
+    const bool full = full_picture_state(picture.state) || picture.number.empty();
+    const std::string headline = full ? picture.state : picture.number;
+    const int number_px = std::max(8, frame.height * 32 / 100);
+    const int number_scale = scale_for(headline, number_px, frame.width - 2 * margin);
+    const int number_w = text_px_width(headline, number_scale);
+    const int number_h = text_px_height(number_scale);
+    const int number_x = std::max(margin, (frame.width - number_w) / 2);
+    const int number_y = std::max(margin, frame.height * 32 / 100 - number_h / 2);
+    draw_text(view, number_x, number_y, headline, number_scale, 940);
+    if (!full && !picture.sentence.empty()) {
+        const int sentence_px = std::max(8, frame.height * 65 / 1000);
+        const int sentence_scale = scale_for(picture.sentence, sentence_px, frame.width - 2 * margin);
+        const int sentence_w = text_px_width(picture.sentence, sentence_scale);
+        const int sentence_x = std::max(margin, (frame.width - sentence_w) / 2);
+        const int sentence_y = number_y + number_h + std::max(4, frame.height / 80);
+        draw_text(view, sentence_x, sentence_y, picture.sentence, sentence_scale, 940);
+    }
+    if (!full) {
+        const int status_scale = scale_for(picture.state, std::max(8, frame.height / 18), frame.width / 2);
+        draw_text(view, margin, margin, picture.state, status_scale, 940);
+        if (!picture.age.empty()) {
+            const int age_scale = scale_for(picture.age, std::max(8, frame.height / 18), frame.width / 3);
+            const int age_w = text_px_width(picture.age, age_scale);
+            draw_text(view, std::max(margin, frame.width - margin - age_w), margin, picture.age, age_scale, 940);
+        }
+        paint_trend(view, picture.trend_ms);
+    }
+}
+
 } // namespace avsync
