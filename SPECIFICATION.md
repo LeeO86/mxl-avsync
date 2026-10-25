@@ -721,7 +721,7 @@ Family look: header with label, role, state and registration pills, version; tab
 | GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate |
 | POST | `/api/v1/generator/stop`, `/start` | gen | §11 |
 | GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics |
-| GET | `/api/v1/events?since=<seq>&limit=` | ana | event records (§8.1) |
+| GET | `/api/v1/events?since=<seq>&limit=` | ana | the newest matching event records, newest first, plus `total` |
 | GET | `/api/v1/statistics` | ana | window and since-start statistics (§8.2) |
 | POST | `/api/v1/statistics/reset` | ana | new statistics epoch (the event log keeps everything) |
 | GET/PATCH | `/api/v1/grading` | ana | the four window edges, `AVSYNC_GRADE_EVENTS` |
