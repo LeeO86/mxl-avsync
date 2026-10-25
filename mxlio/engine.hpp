@@ -22,6 +22,7 @@ struct MediaStatus {
     int width = 0;
     int height = 0;
     int grain_rows = 0;
+    double rate_fps = 0;
     bool interlaced = false;
 };
 

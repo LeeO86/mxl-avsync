@@ -146,7 +146,7 @@ Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measur
 
 **LIVE without MXL** (the phone app, §12, and a recording made elsewhere). Only the AV offset is measured. A phone's system time (NTP, mobile network) is coarse wall-clock metadata, not a reference; it never turns an AV-offset measurement into a latency.
 
-**Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. The process cannot see the node's PTP lock itself. `sync_state` is `unknown` unless `AVSYNC_PTP_STATUS_URL` is an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. A missing URL, any other scheme, or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
+**Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. Without a URL, `sync_state` comes from the kernel clock (`adjtimex(2)`: `locked` when STA_UNSYNC is clear, the TAI offset is set and `esterror` ≤ `AVSYNC_CLOCK_MAX_ERROR_US`; else `unlocked`; the kernel cannot tell PTP from NTP). `AVSYNC_PTP_STATUS_URL`, when set, overrides that: an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. With a URL set, any other scheme or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
 
 ### 3.4 Resolution
 
@@ -524,7 +524,8 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_RESULT_FORMAT` | `960x540` | flow | even width and height, ≤ 1920×1080 |
 | `AVSYNC_RESULT_RATE` | 25 | flow | rate token |
 | `AVSYNC_HOLD_MS` | 1000 | live | `no_signal` after this long without a new grain |
-| `AVSYNC_PTP_STATUS_URL` | empty | restart | `http://` JSON `{"sync_state","accuracy_ns"}`. Latency is filled only when `sync_state` is `locked` and an arrival time was measured |
+| `AVSYNC_CLOCK_MAX_ERROR_US` | 100 | restart | Largest kernel `esterror` (µs) that still counts as `locked` |
+| `AVSYNC_PTP_STATUS_URL` | empty | restart | Optional override of the kernel clock check: `http://` JSON `{"sync_state","accuracy_ns"}`. Latency is filled only when `sync_state` is `locked` and an arrival time was measured |
 
 ### 10.4 Platform settings (same names and meaning as the siblings)
 
@@ -909,7 +910,7 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 3. **Chirp level.** −12 dBFS peak is clearly audible in a control room. *Recommendation:* −12, with mute in the widget; lower it if operators complain.
 4. **Result raster.** 960×540 at 25 Hz is 0.7 MB per grain. *Recommendation:* yes; 1920×1080 only on request.
 5. **Event log retention.** 7 days or 100 MB on `/config`. *Recommendation:* as written; the platform's state save does not archive it (only `config.json`, `routes.json`).
-6. **PTP state.** The process cannot see the node's PTP lock. The platform exposes it by serving the JSON in §3.3 at `AVSYNC_PTP_STATUS_URL`. Until that URL is set, `sync_state` is `unknown` and latency is not reported.
+6. **PTP state.** Default: the kernel clock check of §3.3 (it cannot tell PTP from NTP). A platform that wants PTP specifically serves the JSON in §3.3 at `AVSYNC_PTP_STATUS_URL`, which overrides the kernel check.
 7. **Calibration rig** for the phone: who builds it and from what parts. Decided at M-P1.
 8. **Tolerances per use** beyond the default windows (draft question 9): per-production overrides through the analyzer's values. *Recommendation:* add `passMinMs` … to the catalog values once a production needs it.
 

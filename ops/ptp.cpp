@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/timex.h>
 #include <unistd.h>
 
 #include <cstring>
@@ -67,6 +68,21 @@ bool http_get(const std::string& host, const std::string& port, const std::strin
 }
 
 } // namespace
+
+KernelClock read_kernel_clock()
+{
+    KernelClock clock;
+    timex tx{};
+    tx.modes = 0;
+    if (adjtimex(&tx) < 0) {
+        return clock;
+    }
+    clock.read_ok = true;
+    clock.unsynced = (tx.status & STA_UNSYNC) != 0;
+    clock.esterror_us = tx.esterror;
+    clock.tai_offset_s = tx.tai;
+    return clock;
+}
 
 PtpReading read_ptp_status(const std::string& url, int timeout_ms)
 {

@@ -113,6 +113,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     status.height = format->height;
     status.grain_rows = grain_rows;
     status.interlaced = format->interlaced;
+    status.rate_fps = static_cast<double>(format->frame.num) / static_cast<double>(format->frame.den);
     callbacks.set_status(status);
 
     const Rate audio_rate{48000, 1};
@@ -577,6 +578,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 status.height = video.height;
                 status.grain_rows = grain_rows;
                 status.interlaced = video.interlaced;
+                status.rate_fps = video.rate.den > 0 ? static_cast<double>(video.rate.num) / static_cast<double>(video.rate.den) : 0;
                 callbacks.set_status(status);
                 luma.assign(static_cast<size_t>(video.width) * static_cast<size_t>(grain_rows), kYBlack);
             } else {

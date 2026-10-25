@@ -237,3 +237,26 @@ TEST_CASE("sync square steps one frame at a time across ±240 ms at 1080p50")
     CHECK(geo.qr_x + geo.qr_size <= geo.marker_x - 4);
     CHECK(geo.qr_y + geo.qr_size <= geo.sweep_y - 4);
 }
+
+#include "avsync/clock.hpp"
+
+TEST_CASE("kernel clock maps to sync_state")
+{
+    KernelClock clock;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unknown");
+    clock.read_ok = true;
+    clock.unsynced = false;
+    clock.esterror_us = 20;
+    clock.tai_offset_s = 37;
+    auto state = classify_kernel_clock(clock, 100);
+    CHECK(state.sync_state == "locked");
+    CHECK(state.accuracy_ns == 20000);
+    clock.esterror_us = 500;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+    clock.esterror_us = 20;
+    clock.tai_offset_s = 0;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+    clock.tai_offset_s = 37;
+    clock.unsynced = true;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+}

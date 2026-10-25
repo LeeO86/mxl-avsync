@@ -1,6 +1,10 @@
 # Changelog
 
-## 1.0.0
+## 1.0.0 (2026-10-25)
+
+- Clock check without an external URL: `sync_state` comes from the kernel clock (`adjtimex(2)`, read-only, no privilege). `locked` needs STA_UNSYNC clear, a TAI offset and `esterror` ≤ `AVSYNC_CLOCK_MAX_ERROR_US` (default 100). It cannot tell PTP from NTP. `AVSYNC_PTP_STATUS_URL` stays as an override. New gauges `mxl_avsync_clock_synchronized`, `mxl_avsync_clock_esterror_seconds`, `mxl_avsync_clock_tai_offset_seconds`; `/api/v1/status` `ptp` has `clock_synchronized` and `tai_offset_s`.
+- Web UI: the Measurement tab shows every measurement value as labelled cards next to the result picture. Events show UTC ISO time and offsets at 0.1 ms. The header, tabs, cards and colours follow the sibling functions, with a light theme. `/api/v1/status` has `video_rate_fps`.
+- The generator's audio flow has a proper description, like the video flow.
 
 - Event model, chirp synthesis and matched-filter detection, marker and Gray strip, pairing, grading and statistics in `avsync-core`.
 - `mxl-avsync generate`, `analyze`, `validate` and `merge`. Default file is MOV + ProRes 422 HQ + PCM 24-bit. Container time bases are checked.
