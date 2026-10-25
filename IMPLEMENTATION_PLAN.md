@@ -431,6 +431,36 @@ Host for that run: 4 CPUs, `Intel(R) Xeon(R) Processor`, analyzer user time 0.11
 
 `docker/docker-compose.demo.yaml` and `deploy/k8s/avsync.yaml` start both roles on a shared memory volume with NMOS and DNS-SD off. They were not started: this machine has no Docker and no cluster.
 
+## Content time against the grain timestamp (2026-10-25)
+
+`mxlGrainInfo` at this pin carries the grain time as `index`. `mxlIndexToTimestamp` turns that field into the grain's TAI timestamp. The audio value is the same call on the chirp's sample index. No other clock is used.
+
+Live results name:
+
+- `video_content_vs_grain_ms` — QR `T_k` minus the video grain timestamp
+- `audio_content_vs_grain_ms` — chirp time minus that sample's MXL timestamp
+- `content_vs_grain_av_ms` — the video difference minus the audio difference
+
+These three are reported when `sync_state` is unknown. Arrival latency stays absent then. When the clock is locked, the result also names `video_content_vs_grain_vs_latency_ms`, `audio_content_vs_grain_vs_latency_ms`, `video_content_vs_grain_vs_index_shift_ms`, `audio_content_vs_grain_vs_index_shift_ms`, and `content_vs_grain_av_vs_arrival_ms`.
+
+Command:
+
+```
+/tmp/avsync-qr/avsync-core-tests -tc='*content versus grain*'
+LD_LIBRARY_PATH=/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  BIN=/tmp/avsync-qr/mxl-avsync SAMPLE=/tmp/avsync-qr/avsync-sample-flow \
+  VCPKG_LIB_DIR=/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  bash tests/integration/live.sh
+```
+
+The unit case passed 20 assertions. With no PTP URL the closed loop printed:
+
+```
+content vs grain 3585808608 0.0 0.0 0.0
+```
+
+That is seq, `video_content_vs_grain_ms`, `audio_content_vs_grain_ms`, `content_vs_grain_av_ms`. The same run's offset line was `3585808608 35.0 warn`, and `live.sh` ended `live.sh ok`. Arrival fields were absent.
+
 ## Next step
 
 Left on purpose: the AMWA suite (no Docker, and no mDNS registry on this host), a separate interlaced file mux (the plan does not ask for one), stage 4 (per-channel sequences, programme lip-sync, IS-07), the phone on a device, the LED/piezo rig, and the ST 2110 hour run.

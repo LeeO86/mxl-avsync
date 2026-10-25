@@ -126,6 +126,28 @@ curl -sf "$AAPI/api/v1/status"
 echo
 echo -n "offset 35: "
 wait_offset 35 0
+python3 - "$AAPI" <<'PY'
+import json, sys, urllib.request
+api = sys.argv[1]
+last = None
+since = 0
+while True:
+    with urllib.request.urlopen(f"{api}/api/v1/events?limit=100&since={since}") as response:
+        events = json.load(response).get("events", [])
+    good = [e for e in events if e.get("video_content_vs_grain_ms") is not None and e.get("audio_content_vs_grain_ms") is not None and e.get("content_vs_grain_av_ms") is not None and e.get("grade") != "invalid"]
+    if good:
+        last = good[-1]
+    if len(events) < 100:
+        break
+    since = int(events[-1]["seq"]) + 1
+if last is None:
+    sys.exit("closed loop event has no content-versus-grain fields")
+for key in ("video_latency_ms", "audio_latency_ms", "video_index_shift_ms", "audio_index_shift_ms", "av_offset_arrival_ms",
+            "video_content_vs_grain_vs_latency_ms", "content_vs_grain_av_vs_arrival_ms"):
+    if key in last:
+        sys.exit(f"{key} was reported without a locked clock")
+print("content vs grain", last["seq"], last["video_content_vs_grain_ms"], last["audio_content_vs_grain_ms"], last["content_vs_grain_av_ms"])
+PY
 wait_jpeg() {
   local url="$1" out="$2" code=""
   for _ in $(seq 1 25); do

@@ -556,7 +556,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 
         const uint64_t want = !have_cursor || cursor + 1 < head ? head : cursor + 1;
         bool flow_invalid = false;
-        if (!video_domain.copy_grain(want, 40000000, grain_rows, video.width, grain_count, &packed, &flow_invalid) || flow_invalid) {
+        uint64_t grain_index = 0;
+        if (!video_domain.copy_grain(want, 40000000, grain_rows, video.width, grain_count, &packed, &flow_invalid, &grain_index) || flow_invalid) {
             if (flow_invalid) {
                 callbacks.count_resync();
                 close_readers();
@@ -592,6 +593,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (observation.event) {
             observation.have_arrival = true;
             observation.arrival_ms = static_cast<double>(video_arrived_ns) / 1e6;
+            observation.have_grain_time = true;
+            observation.grain_tai_ns = static_cast<int64_t>(time_of_index(pace, grain_index));
             if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) {
                 if (auto qr = parse_qr_payload(*text)) {
                     if (qr->k == observation.seq) {
@@ -656,6 +659,9 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     heard_hit.ambiguous = hit.ambiguous;
                     heard_hit.have_arrival = true;
                     heard_hit.arrival_ms = audio_arrived_ms;
+                    const auto sample_index = static_cast<uint64_t>(std::llround(std::max(0.0, hit.sample_pos)));
+                    heard_hit.have_grain_time = true;
+                    heard_hit.grain_tai_ns = static_cast<int64_t>(time_of_index(Rate{48000, 1}, sample_index));
                     pairer->observe_audio(heard_hit);
                 }
                 audio_cursor += static_cast<uint64_t>(frames);

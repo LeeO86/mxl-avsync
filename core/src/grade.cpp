@@ -366,6 +366,35 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
             m.av_offset_arrival_ms = audio->arrival_ms - pending.video.arrival_ms;
         }
     }
+    if (pending.video.have_set_time && pending.video.have_grain_time) {
+        const double content_ms = static_cast<double>(pending.video.set_tai_ns) / 1e6;
+        const double grain_ms = static_cast<double>(pending.video.grain_tai_ns) / 1e6;
+        m.video_content_vs_grain_ms = content_ms - grain_ms;
+    }
+    if (audio->have_grain_time) {
+        const double grain_ms = static_cast<double>(audio->grain_tai_ns) / 1e6;
+        m.audio_content_vs_grain_ms = audio->time_ms - grain_ms;
+    }
+    if (m.video_content_vs_grain_ms && m.audio_content_vs_grain_ms) {
+        m.content_vs_grain_av_ms = *m.video_content_vs_grain_ms - *m.audio_content_vs_grain_ms;
+    }
+    if (reference_.sync_state == "locked") {
+        if (m.video_content_vs_grain_ms && m.video_latency_ms) {
+            m.video_content_vs_grain_vs_latency_ms = *m.video_content_vs_grain_ms - *m.video_latency_ms;
+        }
+        if (m.audio_content_vs_grain_ms && m.audio_latency_ms) {
+            m.audio_content_vs_grain_vs_latency_ms = *m.audio_content_vs_grain_ms - *m.audio_latency_ms;
+        }
+        if (m.video_content_vs_grain_ms && m.video_index_shift_ms) {
+            m.video_content_vs_grain_vs_index_shift_ms = *m.video_content_vs_grain_ms - *m.video_index_shift_ms;
+        }
+        if (m.audio_content_vs_grain_ms && m.audio_index_shift_ms) {
+            m.audio_content_vs_grain_vs_index_shift_ms = *m.audio_content_vs_grain_ms - *m.audio_index_shift_ms;
+        }
+        if (m.content_vs_grain_av_ms && m.av_offset_arrival_ms) {
+            m.content_vs_grain_av_vs_arrival_ms = *m.content_vs_grain_av_ms - *m.av_offset_arrival_ms;
+        }
+    }
     (void)has_flag;
     return m;
 }

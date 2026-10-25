@@ -416,6 +416,63 @@ TEST_CASE("locked ptp fills latency and an unknown clock does not")
     CHECK(!dark.av_offset_arrival_ms);
 }
 
+TEST_CASE("content versus grain does not need a locked clock")
+{
+    GradeWindows windows;
+    auto run = [&windows](const char* sync) {
+        ReferenceInfo reference;
+        reference.type = "tai-ptp";
+        reference.sync_state = sync;
+        Pairer pairer(500, windows, reference, "LIVE", "TEST");
+        VideoObservation video;
+        video.event = true;
+        video.seq = 4;
+        video.time_ms = 5000;
+        video.quality = "good";
+        video.have_arrival = true;
+        video.arrival_ms = 5012;
+        video.have_set_time = true;
+        video.set_tai_ns = 5000000000LL;
+        video.have_grain_time = true;
+        video.grain_tai_ns = 5001000000LL;
+        pairer.observe_video(video, 0);
+        AudioObservation audio;
+        audio.chirp_id = 0;
+        audio.time_ms = 5000;
+        audio.have_arrival = true;
+        audio.arrival_ms = 5015;
+        audio.have_grain_time = true;
+        audio.grain_tai_ns = 4998000000LL;
+        audio.correlation = 0.99;
+        audio.quality = "good";
+        audio.level_dbfs = -12;
+        pairer.observe_audio(audio);
+        pairer.finish();
+        REQUIRE(pairer.results().size() == 1);
+        return pairer.results().front();
+    };
+    const Measurement unknown = run("unknown");
+    REQUIRE(unknown.video_content_vs_grain_ms);
+    REQUIRE(unknown.audio_content_vs_grain_ms);
+    REQUIRE(unknown.content_vs_grain_av_ms);
+    CHECK(*unknown.video_content_vs_grain_ms == doctest::Approx(-1.0));
+    CHECK(*unknown.audio_content_vs_grain_ms == doctest::Approx(2.0));
+    CHECK(*unknown.content_vs_grain_av_ms == doctest::Approx(-3.0));
+    CHECK(!unknown.video_latency_ms);
+    CHECK(!unknown.audio_latency_ms);
+    CHECK(!unknown.video_content_vs_grain_vs_latency_ms);
+    CHECK(!unknown.content_vs_grain_av_vs_arrival_ms);
+    const Measurement locked = run("locked");
+    REQUIRE(locked.video_latency_ms);
+    REQUIRE(locked.video_content_vs_grain_vs_latency_ms);
+    REQUIRE(locked.audio_content_vs_grain_vs_latency_ms);
+    REQUIRE(locked.video_content_vs_grain_vs_index_shift_ms);
+    REQUIRE(locked.audio_content_vs_grain_vs_index_shift_ms);
+    REQUIRE(locked.content_vs_grain_av_vs_arrival_ms);
+    CHECK(*locked.video_content_vs_grain_vs_latency_ms == doctest::Approx(-1.0 - 12.0));
+    CHECK(*locked.content_vs_grain_av_vs_arrival_ms == doctest::Approx(-3.0 - 3.0));
+}
+
 TEST_CASE("statistics withhold percentiles and keep outliers")
 {
     std::vector<Measurement> events;
