@@ -24,6 +24,7 @@
 - Demo Compose file and Kubernetes pod run both roles on a shared memory volume with NMOS and DNS-SD off. No registry.
 - QR decode is zxing-cpp 2.3.0, the decoder named in the spec. Encode stays Nayuki. The earlier quirc decoder is gone.
 - Metrics are exported from process start, at 0 until something happens. The names are `mxl_avsync_info`, `mxl_avsync_generator_active`, `mxl_avsync_generator_audio_muted`, `mxl_avsync_generator_events_total`, `mxl_avsync_output_frames_total`, `mxl_avsync_output_frames_late_total`, `mxl_avsync_output_frames_missed_total`, `mxl_avsync_input_state`, `mxl_avsync_input_resyncs_total`, `mxl_avsync_events_total`, `mxl_avsync_grade`, `mxl_avsync_av_offset_ms`, `mxl_avsync_av_offset_deviation_ms`, `mxl_avsync_av_offset_seconds`, `mxl_avsync_video_drops_total`, `mxl_avsync_video_duplicates_total`, `mxl_avsync_audio_correlation`, `mxl_avsync_audio_level_dbfs`, `mxl_avsync_reference_sync`, `mxl_avsync_nmos_registry_up`, `mxl_avsync_nmos_activations_total`. `mxl_avsync_video_latency_ms` and `mxl_avsync_audio_latency_ms` are not exported.
+- The image `HEALTHCHECK` calls `/livez` on `WEB_PORT` (default 8180).
 - Image `ghcr.io/leeo86/mxl-avsync`. The runtime user is 1000:1000. The build stage runs the unit tests. `cap_sys_nice` is not set.
 
 ## 1.1 / 2.0

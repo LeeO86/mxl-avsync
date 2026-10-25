@@ -12,7 +12,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Check the Dockerfile
-        run: docker buildx build --check --file docker/Dockerfile .
+        run: |
+          grep -q '^HEALTHCHECK' docker/Dockerfile
+          grep -q '/livez' docker/Dockerfile
+          docker buildx build --check --file docker/Dockerfile .
 
   image:
     runs-on: ubuntu-24.04

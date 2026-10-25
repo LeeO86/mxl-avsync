@@ -79,5 +79,7 @@ USER 1000:1000
 ENV AVSYNC_STATE_DIR=/config \
     AVSYNC_WEB_ROOT=/usr/local/share/mxl-avsync/web
 EXPOSE 8180 3332
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${WEB_PORT:-8180}/livez" || exit 1
 ENTRYPOINT ["/usr/local/bin/mxl-avsync"]
 CMD ["serve"]
