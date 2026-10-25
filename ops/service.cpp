@@ -181,16 +181,54 @@ std::string metrics_text(Runtime& rt)
     os << "# TYPE mxl_avsync_av_offset_deviation_ms gauge\n";
     os << "mxl_avsync_av_offset_ms " << offset << "\nmxl_avsync_av_offset_deviation_ms 0\n";
     os << "# TYPE mxl_avsync_av_offset_seconds histogram\n";
-    for (const char* le : {"-0.5", "-0.2", "-0.1", "-0.06", "-0.04", "-0.015", "-0.005", "0.005", "0.015", "0.04", "0.06", "0.1", "0.2", "0.5", "+Inf"}) {
-        os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << le << "\"} 0\n";
+    {
+        const double edges[] = {-0.5, -0.2, -0.1, -0.06, -0.04, -0.015, -0.005, 0.005, 0.015, 0.04, 0.06, 0.1, 0.2, 0.5};
+        const char* labels[] = {"-0.5", "-0.2", "-0.1", "-0.06", "-0.04", "-0.015", "-0.005", "0.005", "0.015", "0.04", "0.06", "0.1", "0.2", "0.5"};
+        int cumulative[14] = {};
+        double sum = 0;
+        int count = 0;
+        if (ana) {
+            for (const auto& event : rt.events) {
+                if (!event.av_offset_ms || event.grade == "invalid") {
+                    continue;
+                }
+                const double seconds = *event.av_offset_ms / 1000.0;
+                sum += seconds;
+                ++count;
+                for (int i = 0; i < 14; ++i) {
+                    if (seconds <= edges[i]) {
+                        ++cumulative[i];
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < 14; ++i) {
+            os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << labels[i] << "\"} " << cumulative[i] << "\n";
+        }
+        os << "mxl_avsync_av_offset_seconds_bucket{le=\"+Inf\"} " << count << "\n";
+        os << "mxl_avsync_av_offset_seconds_sum " << sum << "\nmxl_avsync_av_offset_seconds_count " << count << "\n";
     }
-    os << "mxl_avsync_av_offset_seconds_sum 0\nmxl_avsync_av_offset_seconds_count 0\n";
     os << "# TYPE mxl_avsync_video_drops_total counter\n";
     os << "# TYPE mxl_avsync_video_duplicates_total counter\n";
     os << "mxl_avsync_video_drops_total 0\nmxl_avsync_video_duplicates_total 0\n";
+    double correlation = 0;
+    double level_dbfs = 0;
+    if (ana) {
+        for (auto it = rt.events.rbegin(); it != rt.events.rend(); ++it) {
+            if (it->correlation) {
+                correlation = *it->correlation;
+            }
+            if (it->audio_level_dbfs) {
+                level_dbfs = *it->audio_level_dbfs;
+            }
+            if (it->correlation && it->audio_level_dbfs) {
+                break;
+            }
+        }
+    }
     os << "# TYPE mxl_avsync_audio_correlation gauge\n";
     os << "# TYPE mxl_avsync_audio_level_dbfs gauge\n";
-    os << "mxl_avsync_audio_correlation 0\nmxl_avsync_audio_level_dbfs 0\n";
+    os << "mxl_avsync_audio_correlation " << correlation << "\nmxl_avsync_audio_level_dbfs " << level_dbfs << "\n";
     os << "# TYPE mxl_avsync_reference_sync gauge\n";
     for (const char* state : {"locked", "unlocked", "unknown"}) {
         const int on = ana && rt.ptp_sync_state == state ? 1 : 0;

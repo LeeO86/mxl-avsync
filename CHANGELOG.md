@@ -16,6 +16,7 @@
 - An IS-05 `master_enable: false`, or a change of domain or flow id, closes the analyzer readers on the next loop. `input_state` becomes `not_routed` (or `waiting` when the new flow is not in the scan path yet) and `/readyz` is not ready. Paired events stop until the new route is open.
 - `PATCH /api/v1/generator` and `PUT /api/v1/config` change a live key such as `AVSYNC_AV_OFFSET_MS` on a running process, including when that variable was set in the environment at start. The next events use the new offset. Import still skips env-set keys.
 - The current grade, the grade metric and the result picture become `invalid` after `AVSYNC_STALE_S` without a new valid event. The measurement then names the age and does not repeat the in-sync sentence.
+- The offset histogram, `mxl_avsync_audio_correlation`, `mxl_avsync_audio_level_dbfs` and the analyzer's `mxl_avsync_output_frames_total{essence="video"}` follow the live events and the result writer.
 - A generator that finds a leftover domain with a different id names `MXL_OUTPUT_DOMAIN_ID` and `NMOS_SEED` in the status detail and fails `/livez`. It does not delete that directory.
 - Demo Compose file and Kubernetes pod run both roles on a shared memory volume with NMOS and DNS-SD off. No registry.
 - QR decode is zxing-cpp 2.3.0, the decoder named in the spec. Encode stays Nayuki. The earlier quirc decoder is gone.
