@@ -8,6 +8,7 @@
 #include "uuid.hpp"
 
 #ifdef AVSYNC_WITH_MXL
+#include "domain.hpp"
 #include "engine.hpp"
 #include "preview.hpp"
 #endif
@@ -33,6 +34,15 @@ namespace {
 std::atomic<bool> g_stop{false};
 
 void on_signal(int) { g_stop = true; }
+
+double measurement_now_ms()
+{
+#ifdef AVSYNC_WITH_MXL
+    return static_cast<double>(tai_now()) / 1e6;
+#else
+    return 0;
+#endif
+}
 
 struct Runtime {
     Config config;
@@ -156,7 +166,8 @@ std::string metrics_text(Runtime& rt)
     std::string grade = "invalid";
     if (ana) {
         grade = current_grade(rt.events, rt.config.grade_events,
-            GradeWindows{rt.config.pass_min_ms, rt.config.pass_max_ms, rt.config.warn_min_ms, rt.config.warn_max_ms}, 0, rt.config.stale_s);
+            GradeWindows{rt.config.pass_min_ms, rt.config.pass_max_ms, rt.config.warn_min_ms, rt.config.warn_max_ms},
+            measurement_now_ms(), rt.config.stale_s);
     }
     os << "# TYPE mxl_avsync_grade gauge\n";
     for (const char* name : {"pass", "warn", "fail", "invalid"}) {
@@ -364,12 +375,31 @@ void install_web(HttpServer& http, Runtime& rt)
     http.add("GET", "/api/v1/measurement", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
         GradeWindows windows{rt.config.pass_min_ms, rt.config.pass_max_ms, rt.config.warn_min_ms, rt.config.warn_max_ms};
-        const std::string grade = current_grade(rt.events, rt.config.grade_events, windows, 0, rt.config.stale_s);
-        std::string sentence = "no measurement";
-        if (!rt.events.empty() && rt.events.back().av_offset_ms) {
-            sentence = describe_offset(*rt.events.back().av_offset_ms).line;
+        const double now_ms = measurement_now_ms();
+        const std::string grade = current_grade(rt.events, rt.config.grade_events, windows, now_ms, rt.config.stale_s);
+        const Measurement* last = nullptr;
+        for (auto it = rt.events.rbegin(); it != rt.events.rend(); ++it) {
+            if (it->av_offset_ms && it->grade != "invalid") {
+                last = &(*it);
+                break;
+            }
         }
-        return json_response({{"grade", grade}, {"sentence", sentence}, {"input_state", rt.input_state}, {"events", rt.events.size()}});
+        nlohmann::json body = {{"grade", grade}, {"sentence", "no measurement"}, {"input_state", rt.input_state}, {"events", rt.events.size()}};
+        if (last != nullptr) {
+            const double age_ms = now_ms - last->video_time_ms;
+            body["age_ms"] = age_ms;
+            body["offset_ms"] = *last->av_offset_ms;
+            if (grade == "invalid") {
+                std::ostringstream sentence;
+                sentence.setf(std::ios::fixed);
+                sentence.precision(1);
+                sentence << "last event " << (age_ms / 1000.0) << " s ago";
+                body["sentence"] = sentence.str();
+            } else {
+                body["sentence"] = describe_offset(*last->av_offset_ms).sentence;
+            }
+        }
+        return json_response(body);
     });
     http.add("GET", "/api/v1/events", [&](const HttpRequest& request) {
         std::lock_guard lock(rt.mu);
