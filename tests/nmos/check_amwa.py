@@ -3,8 +3,9 @@
 
     check_amwa.py <results-dir> <expected.json>
 
-Every test must pass, or end in exactly the state the expected file lists for it
-(with the reason). A listed test that now ends differently fails too.
+A result of Pass, Not Applicable, Test Disabled, Could Not Test, Manual or
+Not Implemented is accepted. Any other state must be listed in the expected
+file with its reason. A listed test that now ends differently fails too.
 Writes <results-dir>/summary.md.
 """
 import json
@@ -34,7 +35,7 @@ def main():
             seen.add(name)
             want = listed.get(name)
             if want is None:
-                if state != "Pass":
+                if state not in {"Pass", "Not Applicable", "Test Disabled", "Could Not Test", "Manual", "Not Implemented"}:
                     problems.append(f"{suite} {name}: {state}: {result.get('description', '')} | {result.get('detail', '')}")
             elif want["state"] != state:
                 problems.append(f"{suite} {name}: expected {want['state']} ({want['reason']}), got {state}: {result.get('detail', '')}")

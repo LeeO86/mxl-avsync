@@ -1,7 +1,7 @@
 {
   "label": "mxl-avsync-ci-registry",
   "logging_level": 0,
-  "pri": 100,
+  "pri": 0,
   "registration_port": 8010,
   "query_port": 8011,
   "query_ws_port": 8012,

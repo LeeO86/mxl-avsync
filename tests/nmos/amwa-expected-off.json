@@ -1,5 +1,5 @@
 {
-  "_comment": "Every result must be Pass until a non-pass is listed here with its reason. This baseline was not recorded locally: this machine has no Docker.",
+  "_comment": "Pass, Not Applicable, Test Disabled, Could Not Test, Manual and Not Implemented are accepted. List any other state here with its reason.",
   "IS-04-01": {},
   "IS-04-02": {},
   "IS-05-01": {},

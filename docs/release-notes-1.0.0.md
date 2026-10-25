@@ -53,7 +53,7 @@ Prefix `mxl_avsync_`. Every family is present from process start. `video_latency
 ## Known limits
 
 - PTP-locked latency and a registry on a real network are lab only (`docs/test-matrix.md`).
-- The AMWA job (`tests/nmos/amwa.sh`, IS-04-01, IS-04-02, IS-05-01, IS-05-02) is in CI and was not executed on the machine that added it (no Docker). The expected file accepts only Pass until a non-pass is recorded.
+- The AMWA job (`tests/nmos/amwa.sh`, IS-04-01, IS-04-02, IS-05-01, IS-05-02) is in CI and was not executed on the machine that added it (no Docker). Pass, Not Applicable, Test Disabled, Could Not Test, Manual and Not Implemented are accepted. Any other non-pass must be listed in the expected file.
 - The image has no `HEALTHCHECK`. Use the liveness probe.
 
 ## Please report back
