@@ -15,6 +15,14 @@
   header img { width:32px; height:32px; border-radius:6px; }
   h1 { font-size:16px; margin:0; letter-spacing:.04em; }
   .pill { border-radius:999px; padding:2px 10px; background:#243040; color:var(--muted); font-size:12px; }
+  .pill.ok { background:#143322; color:#b7ebc8; }
+  .pill.bad { background:#3a1714; color:#ffb4a8; }
+  .grid { display:grid; gap:12px; }
+  @media (min-width:900px) { .grid.wide { grid-template-columns:1fr 1fr; } }
+  .kv { display:grid; grid-template-columns:9rem 1fr; gap:4px 12px; margin:0; }
+  .kv dt { color:var(--muted); }
+  .kv dd { margin:0; overflow-wrap:anywhere; }
+  .note { color:var(--muted); font-size:13px; }
   nav { display:flex; gap:8px; padding:10px 20px; }
   nav a, button.tab { color:var(--ink); background:transparent; border:1px solid transparent; border-radius:8px; padding:6px 10px; text-decoration:none; cursor:pointer; }
   nav a.on, button.tab.on { border-color:var(--line); background:var(--panel); }
@@ -37,7 +45,9 @@
     <span class="pill">{{ info.role || '…' }}</span>
     <span class="pill">{{ info.label || '' }}</span>
     <span class="pill">{{ info.version || '' }}</span>
-    <span class="pill">{{ nmos }}</span>
+    <span class="pill" :class="nmosPill==='registered' ? 'ok' : ''">{{ nmosPill }}</span>
+    <span class="pill" :class="health==='live' ? 'ok' : 'bad'">{{ health }}</span>
+    <span class="pill">{{ status.input_state || '…' }}</span>
   </header>
   <nav>
     <button class="tab" :class="{on:tab==t}" v-for="t in tabs" :key="t" @click="tab=t">{{ t }}</button>
@@ -66,12 +76,78 @@
         <button @click="toggleRun">{{ stopped ? 'Start' : 'Stop' }}</button>
       </div>
     </section>
-    <section v-if="tab=='Input' || tab=='Status' || tab=='NMOS'">
-      <pre>{{ JSON.stringify(status, null, 2) }}</pre>
+    <section v-if="tab=='Input'">
+      <div class="grid wide">
+        <div v-for="row in essences" :key="row.essence">
+          <h3>{{ row.essence }} <span class="pill">{{ status.input_state || '…' }}</span></h3>
+          <dl class="kv">
+            <dt>Detail</dt><dd>{{ status.detail || '–' }}</dd>
+            <dt>Flow</dt><dd>{{ row.flow || '–' }}</dd>
+            <dt>Format</dt><dd>{{ status.width ? status.width + '×' + status.height + (status.interlaced ? ' i' : ' p') : '–' }}</dd>
+            <dt>Grain rows</dt><dd>{{ status.grain_rows || '–' }}</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+    <section v-if="tab=='NMOS'">
+      <h3>Node <span class="pill">{{ nmosPill }}</span></h3>
+      <p v-if="nmosError" class="note">{{ nmosError }}</p>
+      <dl v-if="nmosView" class="kv">
+        <dt>Label</dt><dd>{{ nmosView.label }}</dd>
+        <dt>Hostname</dt><dd>{{ nmosView.hostname }}</dd>
+        <dt>Node</dt><dd>{{ nmosView.id }}</dd>
+        <dt>Port</dt><dd>{{ status.nmos_port }}</dd>
+      </dl>
+      <table v-if="nmosView">
+        <tr><th>resource</th><th>id</th><th>master_enable</th><th>flow</th></tr>
+        <tr v-for="item in nmosView.resources" :key="item.id">
+          <td>{{ item.label }}</td>
+          <td>{{ item.id }}</td>
+          <td>{{ item.master_enable }}</td>
+          <td>{{ item.flow }}</td>
+        </tr>
+      </table>
+      <p v-if="role==='analyzer' && nmosView" class="note">IS-05 on this node. Disable stops the reader.</p>
+      <button v-if="role==='analyzer' && nmosView" @click="disableRoute">Disable route</button>
+    </section>
+    <section v-if="tab=='Status'">
+      <div class="grid wide">
+        <div>
+          <h3>Probes</h3>
+          <dl class="kv">
+            <dt>Live</dt><dd>{{ health }}</dd>
+            <dt>Ready</dt><dd>{{ readyText }}</dd>
+            <dt>Registered</dt><dd>{{ nmosPill }}</dd>
+            <dt>PTP</dt><dd>{{ (status.ptp && status.ptp.sync_state) || 'unknown' }} <span v-if="status.ptp">{{ status.ptp.accuracy_ns }}</span></dd>
+          </dl>
+          <p class="note"><a href="/metrics">/metrics</a> · <a href="/api/v1/status">/api/v1/status</a> · <a href="/api/v1/info">/api/v1/info</a></p>
+        </div>
+        <div>
+          <h3>Version</h3>
+          <dl class="kv">
+            <dt>App</dt><dd>{{ info.version }}</dd>
+            <dt>Core</dt><dd>{{ info.core_version }}</dd>
+            <dt>MXL</dt><dd>{{ info.mxl_revision }}</dd>
+            <dt>Role</dt><dd>{{ info.role }}</dd>
+          </dl>
+        </div>
+      </div>
     </section>
     <section v-if="tab=='Events'">
-      <table><tr><th>event</th><th>offset</th><th>grade</th></tr>
-        <tr v-for="ev in events" :key="ev.event_id"><td>{{ ev.event_id }}</td><td>{{ ev.av_offset_ms }}</td><td>{{ ev.grade }}</td></tr>
+      <p><a :href="eventsHref">Download JSON</a></p>
+      <label>since <input v-model="eventsSince" @change="refresh"/></label>
+      <table>
+        <tr><th>time</th><th>seq</th><th>offset</th><th>uncertainty</th><th>grade</th><th>flags</th><th>correlation</th><th>audio level</th></tr>
+        <tr v-for="ev in newestEvents" :key="ev.event_id">
+          <td>{{ ev.video_event_time }}</td>
+          <td>{{ ev.seq }}</td>
+          <td>{{ ev.av_offset_ms }}</td>
+          <td>{{ ev.uncertainty_ms != null ? ev.uncertainty_ms : ev.uncertainty_status }}</td>
+          <td>{{ ev.grade }}</td>
+          <td>{{ flagText(ev) }}</td>
+          <td>{{ ev.correlation }}</td>
+          <td>{{ ev.audio_level_dbfs }}</td>
+        </tr>
       </table>
     </section>
     <section v-if="tab=='Settings'">
@@ -94,7 +170,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[] }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[] }; },
   computed: {
     role() { return this.info.role || ''; },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
@@ -110,7 +186,20 @@ createApp({
       const used = new Set(groups.flatMap((group) => group[1]));
       const restart = Object.keys(this.config).filter((key) => !used.has(key));
       return groups.map(([name, keys]) => ({name, keys: keys.filter((key) => key in this.config)})).concat([{name:'Restart', keys: restart}]);
-    }
+    },
+    nmosPill() {
+      if (this.status && this.status.nmos_enable === false) return 'off';
+      if (this.status && this.status.nmos_registered) return 'registered';
+      return 'not registered';
+    },
+    essences() {
+      return [
+        { essence:'video', flow:this.status.video_flow },
+        { essence:'audio', flow:this.status.audio_flow }
+      ];
+    },
+    newestEvents() { return [...this.events].sort((a, b) => Number(b.seq) - Number(a.seq)); },
+    eventsHref() { return '/api/v1/events?limit=1000' + (this.eventsSince ? '&since=' + encodeURIComponent(this.eventsSince) : ''); }
   },
   async mounted() {
     this.info = await (await fetch('/api/v1/info')).json();
@@ -123,7 +212,11 @@ createApp({
     async refresh() {
       this.previewTick = Date.now();
       this.status = await (await fetch('/api/v1/status')).json();
-      this.nmos = this.status.nmos_enable ? (this.status.nmos_registered ? 'registered' : 'not registered') : 'off';
+      const live = await fetch('/livez');
+      this.health = live.ok ? 'live' : 'not live';
+      const ready = await fetch('/readyz');
+      this.readyText = ready.ok ? 'ready' : 'not ready';
+      if (this.tab === 'NMOS') await this.loadNmos();
       if (this.role === 'generator') {
         const g = await (await fetch('/api/v1/generator')).json();
         this.offset = g.offset_ms; this.level = g.level_dbfs; this.title = g.title || '';
@@ -134,12 +227,48 @@ createApp({
         this.audioOn = !g.muted; this.stopped = !!g.stopped;
       } else {
         this.measurement = await (await fetch('/api/v1/measurement')).json();
-        const ev = await (await fetch('/api/v1/events?limit=20')).json();
+        const since = this.eventsSince ? '&since=' + encodeURIComponent(this.eventsSince) : '';
+        const ev = await (await fetch('/api/v1/events?limit=20' + since)).json();
         this.events = ev.events || [];
         this.grading = await (await fetch('/api/v1/grading')).json();
       }
     },
-    onImage(ev) { this.imageFile = (ev.target.files && ev.target.files[0]) || null; },
+    flagText(ev) {
+      const flags = ev.flags;
+      if (!flags) return '';
+      return Array.isArray(flags) ? flags.join(' ') : String(flags);
+    },
+    async loadNmos() {
+      this.nmosError = '';
+      if (!this.status.nmos_enable) { this.nmosView = null; return; }
+      const base = location.protocol + '//' + location.hostname + ':' + this.status.nmos_port;
+      try {
+        const self = await (await fetch(base + '/x-nmos/node/v1.3/self')).json();
+        const kind = this.role === 'generator' ? 'senders' : 'receivers';
+        const list = await (await fetch(base + '/x-nmos/node/v1.3/' + kind)).json();
+        const resources = [];
+        for (const item of list) {
+          const conn = await (await fetch(base + '/x-nmos/connection/v1.2/single/' + kind + '/' + item.id + '/active')).json();
+          const params = (conn.transport_params && conn.transport_params[0]) || {};
+          resources.push({ label: item.label, id: item.id, master_enable: conn.master_enable, flow: params.mxl_flow_id || '' });
+        }
+        this.nmosView = { label: self.label, hostname: self.hostname, id: self.id, resources };
+      } catch (err) {
+        this.nmosView = null;
+        this.nmosError = err.message || String(err);
+      }
+    },
+    async disableRoute() {
+      if (!this.nmosView) return;
+      const base = location.protocol + '//' + location.hostname + ':' + this.status.nmos_port;
+      for (const item of this.nmosView.resources) {
+        await fetch(base + '/x-nmos/connection/v1.2/single/receivers/' + item.id + '/staged', {
+          method: 'PATCH', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ master_enable: false, activation: { mode: 'activate_immediate' } })
+        });
+      }
+      await this.loadNmos();
+    },
     async saveGenerator() {
       await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle})});

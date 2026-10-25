@@ -23,6 +23,7 @@
 - Settings groups the keys from `GET /api/v1/config`, applies them with `PUT`, shows validation errors and `restart_required`, keeps env-set keys read-only, and exports and imports the document. Grading windows are in that form.
 - The `avsync` widget shows the signed offset, the sentence and the grade colour, the latency only when a measurement has one, and a trend from the statistics series. Grey is the invalid state. The `generator` widget shows TEST SIGNAL ACTIVE, the set offset, and mute and stop controls.
 - The result picture keeps text inside a 5% margin, uses a luma step of at least 300 against the grade colour, names the latency or `reference: unknown`, the routed sender ids, a timestamp and the event count.
+- The web page has Input, NMOS, Status and Events tabs, and header pills for role, label, version, NMOS (`registered`, `not registered` or `off`), health and input state. `/api/v1/status` includes `nmos_enable` and `nmos_port`.
 - A generator that finds a leftover domain with a different id names `MXL_OUTPUT_DOMAIN_ID` and `NMOS_SEED` in the status detail and fails `/livez`. It does not delete that directory.
 - Demo Compose file and Kubernetes pod run both roles on a shared memory volume with NMOS and DNS-SD off. No registry.
 - QR decode is zxing-cpp 2.3.0, the decoder named in the spec. Encode stays Nayuki. The earlier quirc decoder is gone.

@@ -151,6 +151,20 @@ start_ana 0
 wait_http "$AAPI/livez"
 wait_ready "$AAPI/readyz"
 echo "analyzer ready"
+curl -sf "$AAPI/" | python3 -c '
+import sys
+page = sys.stdin.read()
+for word in ("Input", "Events", "NMOS", "Status", "registered", "not registered", "off", "Download JSON"):
+    if word not in page:
+        sys.exit("page missing " + word)
+print("ui tabs present")
+'
+curl -sf "$AAPI/api/v1/status" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert "nmos_enable" in d and "nmos_port" in d
+print("status nmos", d["nmos_enable"], d["nmos_port"], d["input_state"])
+'
 curl -sf "$AAPI/api/v1/status"
 echo
 echo -n "offset 35: "
