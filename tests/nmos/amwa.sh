@@ -115,7 +115,7 @@ EOF
 
 declare -A ARGS=(
   [IS-04-01]="--host $HOST_IP --port $NODE_PORT --version v1.3"
-  [IS-04-02]="--host $HOST_IP --port $NODE_PORT --version v1.3"
+  [IS-04-02]="--host $HOST_IP $HOST_IP --port $REG_PORT $QUERY_PORT --version v1.3 v1.3"
   [IS-05-01]="--host $HOST_IP --port $NODE_PORT --version v1.2"
   [IS-05-02]="--host $HOST_IP $HOST_IP --port $NODE_PORT $NODE_PORT --version v1.3 v1.2"
 )
@@ -133,9 +133,15 @@ for suite in IS-04-01 IS-04-02 IS-05-01 IS-05-02; do
 done
 
 node_id=$(python3 -c "import uuid; print(uuid.uuid5(uuid.UUID('6ba7b811-9dad-11d1-80b4-00c04fd430c8'), 'mxl-avsync/amwa-ci/node'))")
-code=$(curl -s -o /dev/null -w '%{http_code}' "http://$HOST_IP:$QUERY_PORT/x-nmos/query/v1.3/nodes/$node_id")
-devices=$(curl -fsS "http://$HOST_IP:$QUERY_PORT/x-nmos/query/v1.3/devices" |
-  python3 -c "import json,sys; print(sum(d.get('node_id') == sys.argv[1] for d in json.load(sys.stdin)))" "$node_id")
+code=""
+devices=""
+for _ in $(seq 1 75); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://$HOST_IP:$QUERY_PORT/x-nmos/query/v1.3/nodes/$node_id")
+  devices=$(curl -fsS "http://$HOST_IP:$QUERY_PORT/x-nmos/query/v1.3/devices" |
+    python3 -c "import json,sys; print(sum(d.get('node_id') == sys.argv[1] for d in json.load(sys.stdin)))" "$node_id")
+  [[ "$code" == 404 && "$devices" == 0 ]] && break
+  sleep 0.2
+done
 log "after SIGTERM: Query API node $node_id -> HTTP $code, devices left: $devices"
 [[ "$code" == 404 && "$devices" == 0 ]] || { log "FAIL: the node did not deregister"; exit 1; }
 
