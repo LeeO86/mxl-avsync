@@ -154,7 +154,7 @@ echo "analyzer ready"
 curl -sf "$AAPI/" | python3 -c '
 import sys
 page = sys.stdin.read()
-for word in ("Input", "Events", "NMOS", "Status", "registered", "not registered", "off", "Download JSON", "hashchange"):
+for word in ("Input", "Events", "NMOS", "Status", "registered", "not registered", "off", "Download JSON", "hashchange", "formatEventTime", "TAI "):
     if word not in page:
         sys.exit("page missing " + word)
 print("ui tabs present")

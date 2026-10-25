@@ -55,3 +55,4 @@ H.264 and G.711 rows below are FFmpeg test aids. They are not live SRT or SIP in
 | Phone on a real device | `PhoneSession` and the Expo UI are in the tree; iOS/Android SDKs and the LED/piezo rig are not |
 | PTP-locked latency (`video_latency_ms`, `audio_latency_ms`, index shifts, `av_offset_arrival_ms`) | lab only. This VM does not lock PTP, so those fields stay absent |
 | A registry on a real network | lab only. Registration here is a local stand-in, or the AMWA job's registry container |
+| Crosspoint-driven routing | lab only. This VM does not drive an IS-05 crosspoint |
