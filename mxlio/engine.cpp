@@ -551,7 +551,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (head == stall_head) {
             if (stall_since == 0) {
                 stall_since = now_ns;
-            } else if (now_ns > stall_since && now_ns - stall_since >= 1000000000ULL) {
+            } else if (now_ns > stall_since && now_ns - stall_since >= static_cast<uint64_t>(std::max(config.hold_ms, 0)) * 1000000ULL) {
                 if (!quiet_stall) {
                     callbacks.count_resync();
                     quiet_stall = true;
