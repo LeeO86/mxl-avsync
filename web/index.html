@@ -50,7 +50,7 @@
     <span class="pill">{{ status.input_state || '…' }}</span>
   </header>
   <nav>
-    <button class="tab" :class="{on:tab==t}" v-for="t in tabs" :key="t" @click="tab=t">{{ t }}</button>
+    <button class="tab" :class="{on:tab==t}" v-for="t in tabs" :key="t" @click="selectTab(t)">{{ t }}</button>
   </nav>
   <main>
     <div v-if="role=='generator' && audioOn && !stopped" class="banner">TEST SIGNAL ACTIVE</div>
@@ -203,12 +203,22 @@ createApp({
   },
   async mounted() {
     this.info = await (await fetch('/api/v1/info')).json();
-    this.tab = this.tabs[0];
+    const fromHash = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    this.tab = this.tabs.includes(fromHash) ? fromHash : this.tabs[0];
+    if (!location.hash) location.hash = this.tab;
+    window.addEventListener('hashchange', () => {
+      const next = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+      if (this.tabs.includes(next)) this.tab = next;
+    });
     await this.loadConfig();
     await this.refresh();
     this.timer = setInterval(() => this.refresh(), 1000);
   },
   methods: {
+    selectTab(name) {
+      this.tab = name;
+      location.hash = name;
+    },
     async refresh() {
       this.previewTick = Date.now();
       this.status = await (await fetch('/api/v1/status')).json();
