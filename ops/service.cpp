@@ -444,13 +444,17 @@ void install_web(HttpServer& http, Runtime& rt)
         const auto query = query_map(request.query);
         uint64_t since = query.count("since") ? std::strtoull(query.at("since").c_str(), nullptr, 10) : 0;
         int limit = query.count("limit") ? std::atoi(query.at("limit").c_str()) : 100;
-        nlohmann::json list = nlohmann::json::array();
-        for (const auto& event : rt.events) {
-            if (event.seq < since) continue;
-            list.push_back(measurement_to_json(event));
-            if (static_cast<int>(list.size()) >= limit) break;
+        if (limit < 1) {
+            limit = 1;
         }
-        return json_response({{"events", list}});
+        nlohmann::json list = nlohmann::json::array();
+        for (auto it = rt.events.rbegin(); it != rt.events.rend() && static_cast<int>(list.size()) < limit; ++it) {
+            if (it->seq < since) {
+                continue;
+            }
+            list.push_back(measurement_to_json(*it));
+        }
+        return json_response({{"events", list}, {"total", rt.events.size()}});
     });
     http.add("GET", "/api/v1/statistics", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);

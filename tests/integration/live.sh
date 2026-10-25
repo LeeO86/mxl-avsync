@@ -71,19 +71,13 @@ newest_offset() {
   python3 - "$AAPI" "$since" <<'PY'
 import json, sys, urllib.request
 api, since = sys.argv[1], int(sys.argv[2])
-last = None
-while True:
-    with urllib.request.urlopen(f"{api}/api/v1/events?limit=100&since={since}") as response:
-        events = json.load(response).get("events", [])
-    good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid"]
-    if good:
-        last = good[-1]
-    if len(events) < 100:
-        break
-    since = int(events[-1]["seq"]) + 1
-if last is None or int(last["seq"]) < int(sys.argv[2]):
+with urllib.request.urlopen(f"{api}/api/v1/events?limit=100&since={since}") as response:
+    body = json.load(response)
+events = body.get("events", [])
+good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid" and int(e["seq"]) >= since]
+if not good or int(good[0]["seq"]) < since:
     sys.exit(2)
-print(last["seq"], last["av_offset_ms"], last["grade"])
+print(good[0]["seq"], good[0]["av_offset_ms"], good[0]["grade"])
 PY
 }
 
@@ -162,25 +156,33 @@ echo
 echo -n "offset 35: "
 wait_offset 35 0
 python3 - "$AAPI" <<'PY'
-import json, sys, urllib.request
+import json, sys, time, urllib.request
 api = sys.argv[1]
-last = None
-since = 0
-while True:
-    with urllib.request.urlopen(f"{api}/api/v1/events?limit=100&since={since}") as response:
-        events = json.load(response).get("events", [])
-    good = [e for e in events if e.get("video_content_vs_grain_ms") is not None and e.get("audio_content_vs_grain_ms") is not None and e.get("content_vs_grain_av_ms") is not None and e.get("grade") != "invalid"]
-    if good:
-        last = good[-1]
-    if len(events) < 100:
+body = {}
+for _ in range(40):
+    with urllib.request.urlopen(api + "/api/v1/events?limit=3") as response:
+        body = json.load(response)
+    if int(body.get("total", 0)) >= 3 and len(body.get("events", [])) == 3:
         break
-    since = int(events[-1]["seq"]) + 1
-if last is None:
-    sys.exit("closed loop event has no content-versus-grain fields")
+    time.sleep(0.25)
+events = body.get("events", [])
+if len(events) != 3 or int(body.get("total", 0)) < 3:
+    sys.exit("expected 3 newest events, got %s total %s" % (len(events), body.get("total")))
+seqs = [int(e["seq"]) for e in events]
+if seqs != sorted(seqs, reverse=True):
+    sys.exit("events are not newest first: " + str(seqs))
+with urllib.request.urlopen(api + "/api/v1/events?limit=100") as response:
+    wide = json.load(response).get("events", [])
+if int(wide[0]["seq"]) != seqs[0]:
+    sys.exit("limit=3 did not start at the newest event")
+print("newest events", seqs, "total", body["total"])
+last = next(e for e in events if e.get("video_content_vs_grain_ms") is not None)
 for key in ("video_latency_ms", "audio_latency_ms", "video_index_shift_ms", "audio_index_shift_ms", "av_offset_arrival_ms",
             "video_content_vs_grain_vs_latency_ms", "content_vs_grain_av_vs_arrival_ms"):
     if key in last:
         sys.exit(f"{key} was reported without a locked clock")
+if last.get("audio_content_vs_grain_ms") is None or last.get("content_vs_grain_av_ms") is None:
+    sys.exit("closed loop event has no content-versus-grain fields")
 print("content vs grain", last["seq"], last["video_content_vs_grain_ms"], last["audio_content_vs_grain_ms"], last["content_vs_grain_av_ms"])
 PY
 wait_jpeg() {
