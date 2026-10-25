@@ -436,6 +436,15 @@ void install_web(HttpServer& http, Runtime& rt)
             } else {
                 body["sentence"] = describe_offset(*last->av_offset_ms).sentence;
             }
+            if (!last->reason.empty()) {
+                body["reason"] = last->reason;
+            }
+            if (last->video_latency_ms) {
+                body["video_latency_ms"] = *last->video_latency_ms;
+            }
+            if (last->audio_latency_ms) {
+                body["audio_latency_ms"] = *last->audio_latency_ms;
+            }
         }
         return json_response(body);
     });
@@ -580,8 +589,10 @@ void install_web(HttpServer& http, Runtime& rt)
             }
         }
         std::lock_guard lock(rt.mu);
-        const std::string html = widget_html(rt, "avsync", query.count("latency") ? query.at("latency") != "false" : true,
-            query.count("trend") ? query.at("trend") != "false" : true);
+        const auto off = [](const std::map<std::string, std::string>& query, const char* key) {
+            return query.count(key) && (query.at(key) == "false" || query.at(key) == "0");
+        };
+        const std::string html = widget_html(rt, "avsync", !off(query, "latency"), !off(query, "trend"));
         return HttpResponse{200, "text/html; charset=utf-8", html, widget_headers(rt.config)};
     });
     http.add("GET", "/widget/generator", [&](const HttpRequest& request) {
@@ -618,23 +629,52 @@ std::map<std::string, std::string> widget_headers(const Config& config)
 
 std::string widget_html(Runtime& rt, const std::string& id, bool latency, bool trend)
 {
+    const bool avsync = id == "avsync";
     std::ostringstream html;
-    html << "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/><style>body{margin:0;font:14px sans-serif;background:#111;color:#eee}"
-            ".band{padding:12px}button{margin-right:8px}</style></head><body><div class=\"band\" id=\"root\"></div><script>"
-            "parent.postMessage({type:'widget-ready',id:'"
-         << id << "'},'*');parent.postMessage({type:'widget-size',width:240,height:" << (id == "avsync" ? 120 : 80)
-         << "},'*');";
-    if (id == "avsync") {
-        html << "document.getElementById('root').textContent=" << nlohmann::json("NO EVENTS").dump() << ";";
-        (void)latency;
-        (void)trend;
-    } else {
-        html << "const muted=" << (!rt.config.audio_enable ? "true" : "false") << ";const stopped=" << (rt.stopped ? "true" : "false")
-             << ";document.getElementById('root').innerHTML='<b>TEST SIGNAL ACTIVE</b><div>offset '+"
-             << rt.config.offset_ms
-             << "+' ms</div><button onclick=\"fetch(\\'/api/v1/generator\\',{method:\\'PATCH\\',headers:{\\'Content-Type\\':\\'application/json\\'},body:\\'{\\\\\\\"muted\\\\\\\":true}\\'})\">Mute</button><button onclick=\"fetch(\\'/api/v1/generator/stop\\',{method:\\'POST\\'})\">Stop</button>';";
-    }
-    html << "</script></body></html>";
+    html << "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>"
+            "<style>html,body{margin:0;height:100%;font:14px/1.3 ui-sans-serif,sans-serif}"
+            "body{background:#6b7280;color:#fff}.band{min-height:100%;padding:8px 10px;box-sizing:border-box}"
+            ".offset{font-size:28px;font-weight:700}canvas{width:100%;height:36px;display:block}"
+            "button{margin-right:6px}</style></head><body><div class=\"band\" id=\"root\">"
+            "<div id=\"view\"></div><canvas id=\"trend\"></canvas></div><script>"
+            "const kind=" << (avsync ? "\"avsync\"" : "\"generator\"") << ";"
+            "const latency=" << (latency ? "true" : "false") << ";"
+            "const trend=" << (trend ? "true" : "false") << ";"
+            "function post(message){parent.postMessage(message,'*');}"
+            "post({type:'widget-ready',id:kind});"
+            "post({type:'widget-size',width:kind==='avsync'?240:80,height:kind==='avsync'?120:80});"
+            "const colours={pass:'#1f8a4c',warn:'#d9822b',fail:'#c4392a',invalid:'#6b7280'};"
+            "async function tick(){"
+            "if(kind==='generator'){"
+            "const g=await (await fetch('/api/v1/generator')).json();"
+            "const banner=(!g.muted&&!g.stopped)?'<b>TEST SIGNAL ACTIVE</b>':'';"
+            "document.getElementById('view').innerHTML=banner+'<div class=\"offset\">offset '+g.offset_ms+' ms</div>'"
+            "+'<button id=\"mute\">'+(g.muted?'Unmute':'Mute')+'</button><button id=\"stop\">'+(g.stopped?'Start':'Stop')+'</button>';"
+            "document.getElementById('trend').style.display='none';"
+            "document.getElementById('mute').onclick=async()=>{await fetch('/api/v1/generator',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({muted:!g.muted})});tick();};"
+            "document.getElementById('stop').onclick=async()=>{await fetch(g.stopped?'/api/v1/generator/start':'/api/v1/generator/stop',{method:'POST'});tick();};"
+            "return;}"
+            "const m=await (await fetch('/api/v1/measurement')).json();"
+            "const grade=m.grade||'invalid';"
+            "document.body.style.background=colours[grade]||colours.invalid;"
+            "let line=grade==='invalid'?'<div>'+(m.sentence||m.reason||'no measurement')+'</div>':'<div class=\"offset\">'+(m.sentence||'')+'</div>';"
+            "if(latency&&grade!=='invalid'&&(m.video_latency_ms!=null||m.audio_latency_ms!=null)){"
+            "line+='<div>video '+(m.video_latency_ms==null?'–':m.video_latency_ms)+' ms · audio '+(m.audio_latency_ms==null?'–':m.audio_latency_ms)+' ms</div>';}"
+            "document.getElementById('view').innerHTML=line;"
+            "const canvas=document.getElementById('trend');"
+            "if(!trend||grade==='invalid'){canvas.style.display='none';return;}"
+            "canvas.style.display='block';"
+            "const stats=await (await fetch('/api/v1/statistics')).json();"
+            "const series=((stats.window&&stats.window.series)||[]).slice(-120);"
+            "const ctx=canvas.getContext('2d');"
+            "const w=canvas.width=canvas.clientWidth||240;const h=canvas.height=36;"
+            "ctx.clearRect(0,0,w,h);ctx.strokeStyle='#fff';ctx.beginPath();"
+            "series.forEach((value,index)=>{const x=series.length<2?0:index*(w-1)/(series.length-1);"
+            "const y=h/2-Math.max(-40,Math.min(40,value))/40*(h/2-2);if(index===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});"
+            "ctx.stroke();}"
+            "tick();setInterval(tick,1000);"
+            "</script></body></html>";
+    (void)rt;
     return html.str();
 }
 
