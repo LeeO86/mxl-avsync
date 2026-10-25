@@ -34,6 +34,17 @@ for _ in $(seq 1 80); do
 done
 SELF=$(curl -sf "http://127.0.0.1:$NPORT/x-nmos/node/v1.3/self")
 echo "$SELF" | grep -q '"description":"mxl-avsync"'
+python3 - "$SELF" <<'PY'
+import json, sys
+self = json.loads(sys.argv[1])
+host = self["hostname"]
+label = self["label"]
+if "." in host:
+    sys.exit("hostname has a domain suffix: " + host)
+if "generator" not in label:
+    sys.exit("node label has no role: " + label)
+print("node", label, host)
+PY
 NODE=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$SELF")
 python3 -c 'import hashlib,sys,uuid; name=sys.argv[1]; ns=uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8"); print(uuid.uuid5(ns, name))' "mxl-avsync/nmos-gen/node" | grep -q "$NODE"
 echo "node id $NODE"
@@ -43,6 +54,35 @@ echo "$SENDERS" | grep -q 'AVSync Test Video'
 FLOWS=$(curl -sf "http://127.0.0.1:$NPORT/x-nmos/node/v1.3/flows")
 echo "$FLOWS" | grep -q 'video/v210'
 echo "$FLOWS" | grep -q 'audio/float32'
+python3 - "$SELF" "$FLOWS" "$SENDERS" <<'PY'
+import json, sys
+self = json.loads(sys.argv[1])
+flows = json.loads(sys.argv[2])
+senders = json.loads(sys.argv[3])
+video = next(f for f in flows if f.get("media_type") == "video/v210" and "Result" not in f.get("label", ""))
+description = video.get("description", "")
+if "50/s" not in description or "offset 0 ms" not in description:
+    sys.exit("video flow description: " + description)
+for resource in flows + senders:
+    tags = resource.get("tags", {})
+    if tags.get("urn:x-mxl:tag:test-signal/v1.0") != ["mxl-avsync"]:
+        sys.exit("missing test-signal tag on " + resource.get("label", ""))
+    if resource in senders and not resource.get("interface_bindings"):
+        sys.exit("empty interface_bindings on " + resource.get("label", ""))
+print("generator content", description, senders[0].get("interface_bindings"))
+PY
+DEVICES=$(curl -sf "http://127.0.0.1:$NPORT/x-nmos/node/v1.3/devices")
+python3 - "$SELF" "$DEVICES" <<'PY'
+import json, sys
+self = json.loads(sys.argv[1])
+devices = json.loads(sys.argv[2])
+device = devices[0]
+if device.get("tags", {}).get("urn:x-mxl:tag:test-signal/v1.0") != ["mxl-avsync"]:
+    sys.exit("device has no test-signal tag")
+if device["label"] == self["label"]:
+    sys.exit("node label matches the device")
+print("device", device["label"])
+PY
 VID=$(python3 -c 'import json,sys; flows=json.loads(sys.argv[1]); print(next(f["id"] for f in flows if f.get("media_type")=="video/v210" and "Result" not in f.get("label","")))' "$FLOWS")
 DOM=$(curl -sf "http://127.0.0.1:$NPORT/x-nmos/connection/v1.2/single/senders/$(python3 -c 'import json,sys; ss=json.loads(sys.argv[1]); print(next(s["id"] for s in ss if s.get("label")=="AVSync Test Video"))' "$SENDERS")/active")
 echo "$DOM" | grep -q '"mxl_flow_id"'
@@ -65,6 +105,28 @@ for _ in $(seq 1 80); do
   sleep 0.1
 done
 RECS=$(curl -sf "http://127.0.0.1:$ANPORT/x-nmos/node/v1.3/receivers")
+python3 - "$RECS" <<'PY'
+import json, sys
+receivers = json.loads(sys.argv[1])
+video = next(r for r in receivers if r.get("label") == "AVSync In Video")
+audio = next(r for r in receivers if r.get("label") == "AVSync In Audio")
+vsets = video.get("caps", {}).get("constraint_sets", [])
+asets = audio.get("caps", {}).get("constraint_sets", [])
+if not any(s.get("urn:x-nmos:cap:format:media_type") == "video/v210" and s.get("urn:x-nmos:cap:format:frame_width") == 1920 for s in vsets):
+    sys.exit("video receiver caps missing 1920 v210")
+audio_set = asets[0] if asets else {}
+if audio_set.get("urn:x-nmos:cap:format:media_type") != "audio/float32":
+    sys.exit("audio receiver caps")
+rate = audio_set.get("urn:x-nmos:cap:format:sample_rate", {})
+if rate.get("numerator") != 48000:
+    sys.exit("audio sample rate")
+channels = audio_set.get("urn:x-nmos:cap:format:channel_count", {})
+if channels.get("minimum") != 1 or channels.get("maximum") != 64:
+    sys.exit("audio channel cap")
+if not video.get("interface_bindings") or not audio.get("interface_bindings"):
+    sys.exit("receiver interface_bindings empty")
+print("receiver caps", len(vsets), audio.get("interface_bindings"))
+PY
 VREC=$(python3 -c 'import json,sys; print(next(r["id"] for r in json.loads(sys.argv[1]) if r.get("label")=="AVSync In Video"))' "$RECS")
 AREC=$(python3 -c 'import json,sys; print(next(r["id"] for r in json.loads(sys.argv[1]) if r.get("label")=="AVSync In Audio"))' "$RECS")
 AFLOW=$(python3 -c 'import json,sys; print(next(f["id"] for f in json.loads(sys.argv[1]) if f.get("media_type")=="audio/float32"))' "$FLOWS")

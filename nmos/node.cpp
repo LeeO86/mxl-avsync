@@ -6,10 +6,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <fstream>
 #include <limits>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -71,6 +73,23 @@ void tag_test(nmos::resource& resource)
         resource.data[U("tags")] = web::json::value::object();
     }
     resource.data[U("tags")][U("urn:x-mxl:tag:test-signal/v1.0")] = web::json::value_of({web::json::value::string(U("mxl-avsync"))});
+}
+
+std::string video_flow_description(int numerator, int denominator, double offset_ms)
+{
+    std::string rate = denominator == 1 ? std::to_string(numerator) : std::to_string(numerator) + "/" + std::to_string(denominator);
+    if (numerator == 60000 && denominator == 1001) {
+        rate = "59.94";
+    }
+    std::ostringstream offset;
+    offset.setf(std::ios::fixed);
+    if (std::abs(offset_ms - std::round(offset_ms)) < 0.05) {
+        offset << std::lround(offset_ms);
+    } else {
+        offset.precision(1);
+        offset << offset_ms;
+    }
+    return "TEST SIGNAL — AV sync, " + rate + "/s, offset " + offset.str() + " ms";
 }
 
 void apply_route(const nmos::resource& connection, const std::string& receiver_id, const NmosIds& ids)
@@ -172,9 +191,10 @@ void NmosNode::start()
             const auto& config = impl_->config;
             const auto& ids = impl_->ids;
             web::json::value settings = web::json::value::object();
-            const auto node_label = config.nmos_label.empty() ? config.host_id : config.nmos_label;
+            const auto node_label = config.label() + " " + config.role;
             settings[U("http_port")] = config.nmos_port;
             settings[U("label")] = web::json::value::string(us(node_label));
+            settings[U("host_name")] = web::json::value::string(us(config.host_id));
             settings[U("description")] = web::json::value::string(U("mxl-avsync"));
             settings[U("seed_id")] = web::json::value::string(us(ids.node));
             settings[U("service_name_prefix")] = web::json::value::string(U("mxl-avsync"));
@@ -231,6 +251,7 @@ void NmosNode::start()
                     const auto interfaces = nmos::experimental::node_interfaces(nmos::get_host_interfaces(node_model.settings));
                     auto node = nmos::make_node(us(ids.node), clocks, nmos::make_node_interfaces(interfaces), node_model.settings);
                     node.data[U("label")] = value::string(us(node_label));
+                    node.data[U("hostname")] = value::string(us(config.host_id));
                     node.data[U("description")] = value::string(U("mxl-avsync"));
                     nmos::insert_resource(node_model.node_resources, std::move(node));
 
@@ -247,6 +268,7 @@ void NmosNode::start()
                     auto device = nmos::make_device(us(ids.device), us(ids.node), senders, receivers, node_model.settings);
                     device.data[U("label")] = value::string(us(config.label() + (generator ? " avsync generator" : " avsync analyzer")));
                     device.data[U("description")] = value::string(U("mxl-avsync"));
+                    tag_test(device);
                     nmos::insert_resource(node_model.node_resources, std::move(device));
 
                     const auto parsed = parse_video_format(config.video_format);
@@ -255,9 +277,17 @@ void NmosNode::start()
                     const unsigned height = parsed ? static_cast<unsigned>(parsed->height) : 1080;
                     const auto interlace = parsed && parsed->interlaced ? nmos::interlace_modes::interlaced_tff : nmos::interlace_modes::progressive;
                     const auto domain = us(config.mxl_output_domain_id.empty() ? ids.domain : config.mxl_output_domain_id);
+                    const auto host_interfaces = nmos::get_host_interfaces(node_model.settings);
+                    std::vector<utility::string_t> bindings;
+                    if (!host_interfaces.empty() && !host_interfaces.front().name.empty()) {
+                        bindings.push_back(host_interfaces.front().name);
+                    } else {
+                        bindings.push_back(U("lo"));
+                    }
 
                     auto add_video_sender = [&](const std::string& source_id, const std::string& flow_id, const std::string& sender_id, const std::string& label,
-                                                const std::string& group, unsigned flow_width, unsigned flow_height, nmos::rational rate, const nmos::interlace_mode& mode) {
+                                                const std::string& group, unsigned flow_width, unsigned flow_height, nmos::rational rate, const nmos::interlace_mode& mode,
+                                                const std::string& description) {
                         auto source = nmos::make_video_source(us(source_id), us(ids.device), nmos::clock_names::clk0, rate, node_model.settings);
                         source.data[U("label")] = value::string(us(label));
                         tag_group(source, group, "Video");
@@ -266,11 +296,11 @@ void NmosNode::start()
                         auto flow = nmos::make_coded_video_flow(us(flow_id), us(source_id), us(ids.device), rate, flow_width, flow_height, mode,
                             nmos::colorspaces::BT709, nmos::transfer_characteristics::SDR, sdp::samplings::YCbCr_4_2_2, 10, nmos::media_types::video_v210, node_model.settings);
                         flow.data[U("label")] = value::string(us(label));
-                        flow.data[U("description")] = value::string(U("TEST SIGNAL — AV sync"));
+                        flow.data[U("description")] = value::string(us(description));
                         tag_group(flow, group, "Video");
                         tag_test(flow);
                         nmos::insert_resource(node_model.node_resources, std::move(flow));
-                        auto sender = nmos::make_sender(us(sender_id), us(flow_id), nmos::transports::mxl, us(ids.device), {}, {}, node_model.settings);
+                        auto sender = nmos::make_sender(us(sender_id), us(flow_id), nmos::transports::mxl, us(ids.device), {}, bindings, node_model.settings);
                         sender.data[U("label")] = value::string(us(label));
                         sender.data[U("subscription")][U("active")] = value::boolean(true);
                         tag_group(sender, group, "Video");
@@ -286,7 +316,8 @@ void NmosNode::start()
                     };
 
                     if (generator) {
-                        add_video_sender(ids.video_source, ids.video_flow, ids.video_sender, "AVSync Test Video", "AVSync Test", width, height, video_rate, interlace);
+                        add_video_sender(ids.video_source, ids.video_flow, ids.video_sender, "AVSync Test Video", "AVSync Test", width, height, video_rate, interlace,
+                            video_flow_description(video_rate.numerator(), video_rate.denominator(), config.offset_ms));
                         std::vector<nmos::channel> channels;
                         for (int channel = 0; channel < config.audio_channels; ++channel) {
                             channels.push_back(nmos::channel{us("Ch" + std::to_string(channel + 1)), channel == 0 ? nmos::channel_symbols::M1 : nmos::channel_symbols::M2});
@@ -309,7 +340,7 @@ void NmosNode::start()
                         tag_group(flow, "AVSync Test", "Audio");
                         tag_test(flow);
                         nmos::insert_resource(node_model.node_resources, std::move(flow));
-                        auto sender = nmos::make_sender(us(ids.audio_sender), us(ids.audio_flow), nmos::transports::mxl, us(ids.device), {}, {}, node_model.settings);
+                        auto sender = nmos::make_sender(us(ids.audio_sender), us(ids.audio_flow), nmos::transports::mxl, us(ids.device), {}, bindings, node_model.settings);
                         sender.data[U("label")] = value::string(U("AVSync Test Audio"));
                         sender.data[U("subscription")][U("active")] = value::boolean(true);
                         tag_group(sender, "AVSync Test", "Audio");
@@ -323,9 +354,31 @@ void NmosNode::start()
                         }
                         nmos::insert_resource(node_model.connection_resources, std::move(connection));
                     } else {
-                        auto receiver = nmos::make_receiver(us(ids.video_receiver), us(ids.device), nmos::transports::mxl, {}, nmos::formats::video,
+                        auto receiver = nmos::make_receiver(us(ids.video_receiver), us(ids.device), nmos::transports::mxl, bindings, nmos::formats::video,
                             {nmos::media_types::video_v210}, node_model.settings);
                         receiver.data[U("label")] = value::string(U("AVSync In Video"));
+                        {
+                            web::json::value sets = web::json::value::array();
+                            auto push_format = [&](int frame_width, int frame_height, int numerator, int denominator, const utility::string_t& interlace_mode) {
+                                web::json::value set = web::json::value::object();
+                                set[U("urn:x-nmos:cap:format:media_type")] = value::string(U("video/v210"));
+                                set[U("urn:x-nmos:cap:format:frame_width")] = frame_width;
+                                set[U("urn:x-nmos:cap:format:frame_height")] = frame_height;
+                                set[U("urn:x-nmos:cap:format:grain_rate")] = web::json::value_of({{U("numerator"), numerator}, {U("denominator"), denominator}});
+                                set[U("urn:x-nmos:cap:format:interlace_mode")] = value::string(interlace_mode);
+                                set[U("urn:x-nmos:cap:format:colorspace")] = value::string(nmos::colorspaces::BT709.name);
+                                set[U("urn:x-nmos:cap:format:color_sampling")] = value::string(U("YCbCr-4:2:2"));
+                                set[U("urn:x-nmos:cap:format:component_depth")] = 10;
+                                web::json::push_back(sets, set);
+                            };
+                            push_format(1920, 1080, 25, 1, nmos::interlace_modes::progressive.name);
+                            push_format(1920, 1080, 50, 1, nmos::interlace_modes::progressive.name);
+                            push_format(1920, 1080, 60000, 1001, nmos::interlace_modes::progressive.name);
+                            push_format(1920, 1080, 25, 1, nmos::interlace_modes::interlaced_tff.name);
+                            push_format(3840, 2160, 50, 1, nmos::interlace_modes::progressive.name);
+                            push_format(1280, 720, 50, 1, nmos::interlace_modes::progressive.name);
+                            receiver.data[U("caps")][U("constraint_sets")] = sets;
+                        }
                         tag_group(receiver, "AVSync In", "Video");
                         nmos::insert_resource(node_model.node_resources, std::move(receiver));
                         auto video_connection = nmos::make_connection_mxl_receiver(us(ids.video_receiver), utility::string_t{});
@@ -335,9 +388,20 @@ void NmosNode::start()
                         video_connection.data[U("active")][U("transport_params")][0][U("mxl_flow_id")] = value::null();
                         nmos::insert_resource(node_model.connection_resources, std::move(video_connection));
 
-                        auto audio_receiver = nmos::make_receiver(us(ids.audio_receiver), us(ids.device), nmos::transports::mxl, {}, nmos::formats::audio,
+                        auto audio_receiver = nmos::make_receiver(us(ids.audio_receiver), us(ids.device), nmos::transports::mxl, bindings, nmos::formats::audio,
                             {nmos::media_types::audio_float32}, node_model.settings);
                         audio_receiver.data[U("label")] = value::string(U("AVSync In Audio"));
+                        {
+                            web::json::value set = web::json::value::object();
+                            set[U("urn:x-nmos:cap:format:media_type")] = value::string(U("audio/float32"));
+                            set[U("urn:x-nmos:cap:format:sample_rate")] = web::json::value_of({{U("numerator"), 48000}, {U("denominator"), 1}});
+                            set[U("urn:x-nmos:cap:format:sample_depth")] = 32;
+                            web::json::value channels = web::json::value::object();
+                            channels[U("minimum")] = 1;
+                            channels[U("maximum")] = 64;
+                            set[U("urn:x-nmos:cap:format:channel_count")] = channels;
+                            audio_receiver.data[U("caps")][U("constraint_sets")] = web::json::value_of({set});
+                        }
                         tag_group(audio_receiver, "AVSync In", "Audio");
                         nmos::insert_resource(node_model.node_resources, std::move(audio_receiver));
                         auto audio_connection = nmos::make_connection_mxl_receiver(us(ids.audio_receiver), utility::string_t{});
@@ -356,7 +420,8 @@ void NmosNode::start()
                             }
                             add_video_sender(ids.result_source, ids.result_flow, ids.result_sender, "AVSync Result Video", "AVSync Result",
                                 static_cast<unsigned>(result.width), static_cast<unsigned>(result.height), nmos::rational{std::max(1, config.result_rate), 1},
-                                nmos::interlace_modes::progressive);
+                                nmos::interlace_modes::progressive,
+                                video_flow_description(std::max(1, config.result_rate), 1, config.offset_ms));
                         }
                     }
 

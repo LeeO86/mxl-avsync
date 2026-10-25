@@ -310,12 +310,12 @@ See §11: the chirps are audible test tones and are muted by one control.
 
 | Resource | Label | Group hint |
 | --- | --- | --- |
-| Node | `NMOS_LABEL`, else `HOST_ID` | — |
+| Node | `NMOS_LABEL` or `HOST_ID`, then a space and the role (`generator` or `analyzer`). This is not the device label | — |
 | Device | `NMOS_LABEL` + ` avsync generator`, else `AVSync Generator` | — |
 | Video source, flow, sender | `AVSync Test Video` | `AVSync Test:Video` |
 | Audio source, flow, sender | `AVSync Test Audio` | `AVSync Test:Audio` |
 
-- Senders, flows and the device carry the tag `urn:x-mxl:tag:test-signal/v1.0` = `["mxl-avsync"]` (`TODO_` confirm the tag namespace with the platform). Flow `description`: `TEST SIGNAL — AV sync, <rate>/s, offset <n> ms`.
+- Senders, flows and the device carry the tag `urn:x-mxl:tag:test-signal/v1.0` = `["mxl-avsync"]` (`TODO_` confirm the tag namespace with the platform). Video flow `description`: `TEST SIGNAL — AV sync, <rate>/s, offset <n> ms`. Sender and receiver `interface_bindings` name the host interface. Node `hostname` is `HOST_ID` with any domain suffix removed.
 - Flows are written in the generator's own output domain (G2). History `MXL_HISTORY_DURATION_NS` (default 200 ms).
 - A change of format, channel count or rate mints new flow ids (flow token, as mxl-scopes); the senders follow.
 
