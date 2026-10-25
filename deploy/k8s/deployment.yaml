@@ -1,0 +1,148 @@
+# One Deployment per role on a Kubernetes production platform.
+# NMOS is on. Point NMOS_REGISTRY_ADDRESS at the platform registry.
+# This file was not applied: this machine has no cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mxl-avsync-generator
+  labels:
+    app: mxl-avsync
+    role: generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mxl-avsync
+      role: generator
+  template:
+    metadata:
+      labels:
+        app: mxl-avsync
+        role: generator
+    spec:
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: generator
+          image: ghcr.io/leeo86/mxl-avsync:1.0.0
+          ports:
+            - {name: http, containerPort: 8180}
+            - {name: nmos, containerPort: 3332}
+          env:
+            - {name: AVSYNC_ROLE, value: generator}
+            - {name: AVSYNC_STATE_DIR, value: /config}
+            - {name: WEB_PORT, value: "8180"}
+            - {name: NMOS_ENABLE, value: "true"}
+            - {name: NMOS_DNS_SD, value: "false"}
+            - {name: NMOS_PORT, value: "3332"}
+            - {name: NMOS_REGISTRY_ADDRESS, value: nmos-registry}
+            - name: NMOS_HOST_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - {name: MXL_DOMAIN_SCAN_PATH, value: /mxl}
+            - {name: MXL_OUTPUT_DOMAIN_DIR, value: /mxl/generator}
+            - {name: MXL_CLEANUP_ON_EXIT, value: "true"}
+            - {name: SHUTDOWN_TIMEOUT_S, value: "10"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+          resources:
+            requests: {cpu: 700m, memory: 256Mi}
+            limits: {cpu: 1500m, memory: 384Mi}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: mxl, mountPath: /mxl}
+            - {name: config, mountPath: /config}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: mxl
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+        - name: config
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mxl-avsync-analyzer
+  labels:
+    app: mxl-avsync
+    role: analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mxl-avsync
+      role: analyzer
+  template:
+    metadata:
+      labels:
+        app: mxl-avsync
+        role: analyzer
+    spec:
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: analyzer
+          image: ghcr.io/leeo86/mxl-avsync:1.0.0
+          ports:
+            - {name: http, containerPort: 8181}
+            - {name: nmos, containerPort: 3334}
+          env:
+            - {name: AVSYNC_ROLE, value: analyzer}
+            - {name: AVSYNC_STATE_DIR, value: /config}
+            - {name: WEB_PORT, value: "8181"}
+            - {name: NMOS_ENABLE, value: "true"}
+            - {name: NMOS_DNS_SD, value: "false"}
+            - {name: NMOS_PORT, value: "3334"}
+            - {name: NMOS_REGISTRY_ADDRESS, value: nmos-registry}
+            - name: NMOS_HOST_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - {name: MXL_DOMAIN_SCAN_PATH, value: /mxl}
+            - {name: MXL_OUTPUT_DOMAIN_DIR, value: /mxl/analyzer}
+            - {name: MXL_CLEANUP_ON_EXIT, value: "true"}
+            - {name: SHUTDOWN_TIMEOUT_S, value: "10"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+          resources:
+            requests: {cpu: 700m, memory: 256Mi}
+            limits: {cpu: 1500m, memory: 384Mi}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: mxl, mountPath: /mxl}
+            - {name: config, mountPath: /config}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: mxl
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+        - name: config
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
