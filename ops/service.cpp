@@ -70,10 +70,14 @@ struct Runtime {
     int frame_width = 0;
     int frame_height = 0;
     bool interlaced_flow = false;
+    double frame_rate_fps = 0;
     std::string source_image_path;
     int source_image_frames = 0;
     std::string ptp_sync_state = "unknown";
     std::string ptp_accuracy_ns = "unknown";
+    bool clock_synchronized = false;
+    double clock_esterror_s = 0;
+    long clock_tai_offset_s = 0;
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
 };
 
@@ -234,6 +238,9 @@ std::string metrics_text(Runtime& rt)
         const int on = ana && rt.ptp_sync_state == state ? 1 : 0;
         os << "mxl_avsync_reference_sync{type=\"tai-ptp\",state=\"" << state << "\"} " << on << "\n";
     }
+    os << "# TYPE mxl_avsync_clock_synchronized gauge\nmxl_avsync_clock_synchronized " << (rt.clock_synchronized ? 1 : 0) << "\n";
+    os << "# TYPE mxl_avsync_clock_esterror_seconds gauge\nmxl_avsync_clock_esterror_seconds " << rt.clock_esterror_s << "\n";
+    os << "# TYPE mxl_avsync_clock_tai_offset_seconds gauge\nmxl_avsync_clock_tai_offset_seconds " << rt.clock_tai_offset_s << "\n";
     os << "# TYPE mxl_avsync_nmos_registry_up gauge\n";
     os << "mxl_avsync_nmos_registry_up " << (rt.nmos_registered ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_nmos_activations_total counter\n";
@@ -296,8 +303,9 @@ void install_web(HttpServer& http, Runtime& rt)
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
-            {"interlaced", rt.interlaced_flow},
-            {"ptp", {{"sync_state", rt.ptp_sync_state}, {"accuracy_ns", rt.ptp_accuracy_ns}}}});
+            {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps},
+            {"ptp", {{"sync_state", rt.ptp_sync_state}, {"accuracy_ns", rt.ptp_accuracy_ns},
+                {"clock_synchronized", rt.clock_synchronized}, {"tai_offset_s", rt.clock_tai_offset_s}}}});
     });
     auto preview_response = [](const std::string& slot) {
 #ifdef AVSYNC_WITH_MXL
@@ -826,15 +834,29 @@ int run_service(Config config)
     std::thread ptp([&] {
         while (!g_stop) {
             std::string url;
+            long max_error_us = 100;
             {
                 std::lock_guard lock(rt.mu);
                 url = rt.config.ptp_status_url;
+                max_error_us = rt.config.clock_max_error_us;
             }
-            const PtpReading reading = read_ptp_status(url, 300);
+            // The kernel clock is the default; a configured URL (a node agent that knows about PTP) overrides it.
+            const KernelClock kernel = read_kernel_clock();
+            PtpReading reading;
+            if (url.empty()) {
+                const ClockState state = classify_kernel_clock(kernel, max_error_us);
+                reading.sync_state = state.sync_state;
+                reading.accuracy_ns = state.accuracy_ns >= 0 ? std::to_string(state.accuracy_ns) : "unknown";
+            } else {
+                reading = read_ptp_status(url, 300);
+            }
             {
                 std::lock_guard lock(rt.mu);
                 rt.ptp_sync_state = reading.sync_state;
                 rt.ptp_accuracy_ns = reading.accuracy_ns;
+                rt.clock_synchronized = kernel.read_ok && !kernel.unsynced;
+                rt.clock_esterror_s = kernel.read_ok ? static_cast<double>(kernel.esterror_us) / 1e6 : 0;
+                rt.clock_tai_offset_s = kernel.read_ok ? kernel.tai_offset_s : 0;
             }
             for (int i = 0; i < 10 && !g_stop; ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -877,6 +899,7 @@ int run_service(Config config)
             rt.frame_width = status.width;
             rt.frame_height = status.height;
             rt.interlaced_flow = status.interlaced;
+            rt.frame_rate_fps = status.rate_fps;
         };
         callbacks.add_event = [&](const Measurement& event) {
             std::lock_guard lock(rt.mu);

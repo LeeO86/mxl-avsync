@@ -341,6 +341,7 @@ void NmosNode::start()
                         auto flow = nmos::make_raw_audio_flow(us(ids.audio_flow), us(ids.audio_source), us(ids.device), audio_rate, nmos::media_types::audio_float32, 32, node_model.settings);
                         flow.data[U("label")] = value::string(U("AVSync Test Audio"));
                         flow.data[U("channel_count")] = config.audio_channels;
+                        flow.data[U("description")] = value::string(U("TEST SIGNAL — AV sync chirps, 48000 Hz float32, " + std::to_string(config.audio_channels) + " ch"));
                         tag_group(flow, "AVSync Test", "Audio");
                         tag_test(flow);
                         nmos::insert_resource(node_model.node_resources, std::move(flow));

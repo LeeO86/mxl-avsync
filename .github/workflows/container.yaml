@@ -18,7 +18,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -77,3 +77,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --title "mxl-avsync $ver" --notes-file "docs/release-notes-$ver.md" --verify-tag

@@ -76,7 +76,7 @@ std::string Config::label() const
 bool is_restart_key(const std::string& key)
 {
     return key == "AVSYNC_ROLE" || key == "AVSYNC_STATE_DIR" || key == "AVSYNC_CONFIG_FILE" || key == "AVSYNC_AUDIO_LEAD_MS"
-        || key == "AVSYNC_AUDIO_WINDOW_MS" || key == "AVSYNC_PTP_STATUS_URL" || key.rfind("MXL_", 0) == 0 || key.rfind("NMOS_", 0) == 0
+        || key == "AVSYNC_AUDIO_WINDOW_MS" || key == "AVSYNC_PTP_STATUS_URL" || key == "AVSYNC_CLOCK_MAX_ERROR_US" || key.rfind("MXL_", 0) == 0 || key.rfind("NMOS_", 0) == 0
         || key.rfind("WEB_", 0) == 0 || key == "HOST_ID" || key == "WIDGET_FRAME_ANCESTORS" || key == "LOG_FORMAT" || key == "SHUTDOWN_TIMEOUT_S";
 }
 
@@ -164,6 +164,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.result_rate = static_cast<int>(num(pick("AVSYNC_RESULT_RATE", "25"), "AVSYNC_RESULT_RATE"));
     config.hold_ms = static_cast<int>(num(pick("AVSYNC_HOLD_MS", "1000"), "AVSYNC_HOLD_MS"));
     config.ptp_status_url = pick("AVSYNC_PTP_STATUS_URL", "");
+    config.clock_max_error_us = static_cast<int>(num(pick("AVSYNC_CLOCK_MAX_ERROR_US", "100"), "AVSYNC_CLOCK_MAX_ERROR_US"));
     config.mxl_domain_scan = pick("MXL_DOMAIN_SCAN_PATH", "/Volumes/mxl");
     config.mxl_output_domain_id = pick("MXL_OUTPUT_DOMAIN_ID", uuid_v5("mxl-avsync/" + config.seed() + "/domain"));
     config.mxl_output_domain_dir = pick("MXL_OUTPUT_DOMAIN_DIR", config.mxl_domain_scan + "/avsync-" + config.mxl_output_domain_id.substr(0, 8));

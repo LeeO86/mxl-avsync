@@ -37,7 +37,7 @@ start_gen() {
 
 start_ana() {
   local offset="$1"
-  AVSYNC_ROLE=analyzer AVSYNC_AV_OFFSET_MS="$offset" AVSYNC_EVENT_RATE=2 \
+  AVSYNC_ROLE=analyzer AVSYNC_AV_OFFSET_MS="$offset" AVSYNC_EVENT_RATE=2 AVSYNC_CLOCK_MAX_ERROR_US=-1 \
     AVSYNC_STATE_DIR="$WORK/astate" NMOS_ENABLE=false NMOS_SEED=live-ana \
     MXL_DOMAIN_SCAN_PATH="$WORK" WEB_PORT="$APORT" \
     "$BIN" serve >"$WORK/ana.log" 2>&1 &

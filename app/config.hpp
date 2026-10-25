@@ -45,6 +45,7 @@ struct Config {
     int result_rate = 25;
     int hold_ms = 1000;
     std::string ptp_status_url;
+    int clock_max_error_us = 100;
     std::string host_id;
     std::string mxl_domain_scan = "/Volumes/mxl";
     std::string mxl_output_domain_dir;

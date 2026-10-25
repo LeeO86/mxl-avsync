@@ -169,10 +169,10 @@ for pid in "${PIDS[@]:1}"; do
 done
 PIDS=("${PIDS[0]}")
 
-echo "empty url:"
+echo "empty url (kernel clock via adjtimex):"
 start_serve analyzer "$WPORT" "" "$WORK/empty"
 wait_http "http://127.0.0.1:$WPORT/livez"
-wait_ptp "http://127.0.0.1:$WPORT/api/v1/status" '"sync_state":"unknown"'
+wait_ptp "http://127.0.0.1:$WPORT/api/v1/status" '"sync_state":"\(locked\|unlocked\)"'
 
 echo "dead url:"
 start_serve analyzer 18781 "http://127.0.0.1:1/ptp.json" "$WORK/dead"
