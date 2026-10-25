@@ -742,7 +742,7 @@ The widget contract of Appendix B.2.
 
 ### 16.4 Probes
 
-- `/livez`: 200 while the media threads' heartbeats are younger than 5 s.
+- `/livez`: 200 while the media threads' heartbeats are younger than 5 s. A generator that finds a leftover output domain whose id is not its own returns 503. Set `MXL_OUTPUT_DOMAIN_ID` or `NMOS_SEED` to keep that id, or remove the leftover directory. The process does not delete a domain with a different id.
 - `/readyz`: 200 when the writers (generator) or the readers and result writer (analyzer) run, the output flows exist and, with a registry and `NMOS_ENABLE=true`, the node is in the Query API. An analyzer input in `waiting` or `no_signal` does not fail readiness.
 
 ### 16.5 Metrics

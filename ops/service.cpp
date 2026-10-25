@@ -38,6 +38,7 @@ struct Runtime {
     std::mutex mu;
     bool stopped = false;
     bool media_ready = false;
+    bool media_live = true;
     bool nmos_registered = false;
     std::string input_state = "not_routed";
     std::vector<Measurement> events;
@@ -209,8 +210,14 @@ void install_web(HttpServer& http, Runtime& rt)
 {
     http.add("GET", "/livez", [&](const HttpRequest&) {
         const auto age = std::chrono::steady_clock::now() - rt.heartbeat;
-        const bool ok = age < std::chrono::seconds(5);
-        return json_response({{"status", ok ? "ok" : "stale"}}, ok ? 200 : 503);
+        bool media_live = true;
+        {
+            std::lock_guard lock(rt.mu);
+            media_live = rt.media_live;
+        }
+        const bool heartbeat_ok = age < std::chrono::seconds(5);
+        const bool ok = heartbeat_ok && media_live;
+        return json_response({{"status", ok ? "ok" : (media_live ? "stale" : "domain")}}, ok ? 200 : 503);
     });
     http.add("GET", "/readyz", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
@@ -715,6 +722,9 @@ int run_service(Config config)
         callbacks.set_status = [&](const MediaStatus& status) {
             std::lock_guard lock(rt.mu);
             rt.media_ready = status.ready && !rt.stopped;
+            if (!status.live) {
+                rt.media_live = false;
+            }
             if (!status.state.empty()) {
                 rt.input_state = status.state;
             }
