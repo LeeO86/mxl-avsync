@@ -292,7 +292,7 @@ void install_web(HttpServer& http, Runtime& rt)
         std::lock_guard lock(rt.mu);
         return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
             {"input_state", rt.input_state}, {"detail", rt.media_detail},
-            {"nmos_enable", rt.config.nmos_enable}, {"nmos_registered", rt.nmos_registered},
+            {"nmos_enable", rt.config.nmos_enable}, {"nmos_port", rt.config.nmos_port}, {"nmos_registered", rt.nmos_registered},
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
