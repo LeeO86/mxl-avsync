@@ -399,6 +399,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     FlowFileId quiet_video{};
     FlowFileId quiet_audio{};
     uint64_t quiet_head = 0;
+    InputRoute bound_video{};
+    InputRoute bound_audio{};
     std::vector<uint8_t> packed;
     std::vector<uint16_t> luma;
     std::vector<float> mono;
@@ -471,6 +473,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     std::this_thread::sleep_for(std::chrono::milliseconds(250));
                     continue;
                 }
+                bound_video = video_route;
+                bound_audio = audio_route;
             } else {
                 const auto own_domain = std::filesystem::absolute(config.mxl_output_domain_dir);
                 for (const auto& flow : scan_flows(config.mxl_domain_scan)) {
@@ -538,6 +542,25 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     callbacks.set_status(status);
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                continue;
+            }
+        }
+
+        if (config.nmos_enable && callbacks.input_route) {
+            const auto video_route = callbacks.input_route(true);
+            const auto audio_route = callbacks.input_route(false);
+            const bool routed = video_route.enable && !video_route.flow_id.empty() && audio_route.enable && !audio_route.flow_id.empty();
+            const bool same = video_route.domain_id == bound_video.domain_id && video_route.flow_id == bound_video.flow_id
+                && audio_route.domain_id == bound_audio.domain_id && audio_route.flow_id == bound_audio.flow_id;
+            if (!routed || !same) {
+                close_readers();
+                quiet_stall = false;
+                status.ready = false;
+                status.state = routed ? "waiting" : "not_routed";
+                status.detail = routed ? "route changed" : "waiting for IS-05";
+                status.video_flow.clear();
+                status.audio_flow.clear();
+                callbacks.set_status(status);
                 continue;
             }
         }

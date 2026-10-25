@@ -84,9 +84,109 @@ done
 test "$code" = 200
 echo "analyzer ready after IS-05"
 curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"running"'
+SEQ=$(python3 - "http://127.0.0.1:$APORT" <<'PY'
+import json, sys, time, urllib.request
+api = sys.argv[1]
+for _ in range(80):
+    with urllib.request.urlopen(api + "/api/v1/events?limit=100") as response:
+        events = json.load(response).get("events", [])
+    good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid"]
+    if good:
+        print(int(good[-1]["seq"]))
+        sys.exit(0)
+    time.sleep(0.25)
+print("events", len(events), file=sys.stderr)
+if events:
+    print(json.dumps(events[-1]), file=sys.stderr)
+sys.exit("no paired event before unroute")
+PY
+)
+echo "paired before unroute $SEQ"
+disable() {
+  local id="$1"
+  curl -sf -X PATCH "http://127.0.0.1:$ANPORT/x-nmos/connection/v1.2/single/receivers/$id/staged" \
+    -H 'Content-Type: application/json' \
+    -d '{"master_enable":false,"activation":{"mode":"activate_immediate"}}' >/dev/null
+}
+disable "$VREC"
+disable "$AREC"
+unrouted=0
+for _ in $(seq 1 20); do
+  if curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"not_routed"'; then
+    unrouted=1
+    break
+  fi
+  sleep 0.1
+done
+test "$unrouted" = 1
+code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APORT/readyz" || true)
+test "$code" != "200"
+sleep 1
+python3 - "http://127.0.0.1:$APORT" "$SEQ" <<'PY'
+import json, sys, urllib.request
+api, seq = sys.argv[1], int(sys.argv[2])
+with urllib.request.urlopen(f"{api}/api/v1/events?limit=100&since={seq+1}") as response:
+    events = json.load(response).get("events", [])
+good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid" and int(e["seq"]) > seq]
+if good:
+    sys.exit("new paired event after unroute " + str(good[-1]["seq"]))
+print("no new events after unroute")
+PY
+echo "unrouted"
+
+kill -TERM "$GPID"
+wait "$GPID" 2>/dev/null || true
+GPID=""
+rm -rf "$WORK/gen2"
+mkdir -p "$WORK/g2" "$WORK/gen2"
+AVSYNC_ROLE=generator AVSYNC_EVENT_RATE=2 AVSYNC_AV_OFFSET_MS=0 NMOS_SEED=nmos-gen-2 \
+  NMOS_ENABLE=true NMOS_DNS_SD=false NMOS_REGISTRY_ADDRESS= \
+  NMOS_HOST_ADDRESS=127.0.0.1 NMOS_PORT=18636 WEB_PORT=18684 \
+  AVSYNC_STATE_DIR="$WORK/g2" MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$WORK/gen2" \
+  "$BIN" serve >"$WORK/gen2.log" 2>&1 &
+GPID=$!
+for _ in $(seq 1 80); do
+  curl -sf "http://127.0.0.1:18636/x-nmos/node/v1.3/flows" >/dev/null && break
+  sleep 0.1
+done
+FLOWS2=$(curl -sf "http://127.0.0.1:18636/x-nmos/node/v1.3/flows")
+SENDERS2=$(curl -sf "http://127.0.0.1:18636/x-nmos/node/v1.3/senders")
+VID2=$(python3 -c 'import json,sys; flows=json.loads(sys.argv[1]); print(next(f["id"] for f in flows if f.get("media_type")=="video/v210" and "Result" not in f.get("label","")))' "$FLOWS2")
+AFLOW2=$(python3 -c 'import json,sys; print(next(f["id"] for f in json.loads(sys.argv[1]) if f.get("media_type")=="audio/float32"))' "$FLOWS2")
+DOM2=$(curl -sf "http://127.0.0.1:18636/x-nmos/connection/v1.2/single/senders/$(python3 -c 'import json,sys; ss=json.loads(sys.argv[1]); print(next(s["id"] for s in ss if s.get("label")=="AVSync Test Video"))' "$SENDERS2")/active")
+DOMAIN2=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["transport_params"][0]["mxl_domain_id"])' "$DOM2")
+test "$VID2" != "$VID"
+activate2() {
+  local id="$1" flow="$2"
+  curl -sf -X PATCH "http://127.0.0.1:$ANPORT/x-nmos/connection/v1.2/single/receivers/$id/staged" \
+    -H 'Content-Type: application/json' \
+    -d "{\"master_enable\":true,\"activation\":{\"mode\":\"activate_immediate\"},\"transport_params\":[{\"mxl_domain_id\":\"$DOMAIN2\",\"mxl_flow_id\":\"$flow\"}]}" >/dev/null
+}
+activate2 "$VREC" "$VID2"
+activate2 "$AREC" "$AFLOW2"
+for _ in $(seq 1 40); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APORT/readyz" || true)
+  [[ "$code" == "200" ]] && break
+  sleep 0.25
+done
+test "$code" = 200
+python3 - "http://127.0.0.1:$APORT" "$SEQ" <<'PY'
+import json, sys, time, urllib.request
+api, seq = sys.argv[1], int(sys.argv[2])
+for _ in range(80):
+    with urllib.request.urlopen(f"{api}/api/v1/events?limit=100&since={seq+1}") as response:
+        events = json.load(response).get("events", [])
+    good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid" and int(e["seq"]) > seq]
+    if good:
+        print("measured new flow", good[-1]["seq"], good[-1]["av_offset_ms"], good[-1]["grade"])
+        sys.exit(0)
+    time.sleep(0.25)
+sys.exit("no measurement on the new flow")
+PY
+echo "rerouted"
 
 set +e
-AVSYNC_ROLE=generator NMOS_ENABLE=true NMOS_DNS_SD=false NMOS_PORT=$NPORT WEB_PORT=18690 AVSYNC_STATE_DIR="$WORK/taken" \
+AVSYNC_ROLE=generator NMOS_ENABLE=true NMOS_DNS_SD=false NMOS_PORT=18636 WEB_PORT=18690 AVSYNC_STATE_DIR="$WORK/taken" \
   "$BIN" serve >"$WORK/taken.log" 2>&1
 taken=$?
 set -e
