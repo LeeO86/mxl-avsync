@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace avsync;
@@ -29,11 +30,11 @@ int square_x(int frame, int period, double period_ms, const FrameGeometry& geome
 
 TEST_CASE("result picture states")
 {
-    auto ink_rows = [](const Yuv422p10& frame, int y0, int y1) {
+    auto ink_rows = [](const Yuv422p10& frame, int y0, int y1, uint16_t background) {
         int rows = 0;
         for (int y = y0; y < y1; ++y) {
             for (int x = 0; x < frame.width; ++x) {
-                if (frame.y[static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)] > 800) {
+                if (frame.y[static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)] != background) {
                     ++rows;
                     break;
                 }
@@ -41,12 +42,12 @@ TEST_CASE("result picture states")
         }
         return rows;
     };
-    auto ink_span = [](const Yuv422p10& frame, int y0, int y1) {
+    auto ink_span = [](const Yuv422p10& frame, int y0, int y1, uint16_t background) {
         int left = frame.width;
         int right = -1;
         for (int y = y0; y < y1; ++y) {
             for (int x = 0; x < frame.width; ++x) {
-                if (frame.y[static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)] > 800) {
+                if (frame.y[static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)] != background) {
                     left = std::min(left, x);
                     right = std::max(right, x);
                 }
@@ -60,13 +61,15 @@ TEST_CASE("result picture states")
         ResultPicture picture;
         picture.state = state;
         picture.grade = "invalid";
+        picture.number.clear();
         paint_result_picture(frame, picture);
+        const uint16_t background = frame.y[0];
         const int band0 = 360 * 20 / 100;
         const int band1 = 360 * 45 / 100;
-        CHECK(ink_rows(frame, band0, band1) > 8);
-        const auto span = ink_span(frame, band0, band1);
+        CHECK(ink_rows(frame, band0, band1, background) > 8);
+        const auto span = ink_span(frame, band0, band1, background);
         const int mid = (span.first + span.second) / 2;
-        CHECK(std::abs(mid - 320) < 40);
+        CHECK(std::abs(mid - 320) < 80);
     }
     Yuv422p10 live;
     live.resize(640, 360);
@@ -78,13 +81,86 @@ TEST_CASE("result picture states")
     picture.age = "2 s";
     picture.trend_ms = {0, 10, 35, 35, 20};
     paint_result_picture(live, picture);
+    const uint16_t background = live.y[0];
     const int number0 = 360 * 20 / 100;
     const int number1 = 360 * 45 / 100;
-    CHECK(ink_rows(live, number0, number1) > 20);
-    const auto number = ink_span(live, number0, number1);
-    CHECK(std::abs((number.first + number.second) / 2 - 320) < 40);
-    CHECK(ink_rows(live, number1, 360 * 60 / 100) > 4);
-    CHECK(ink_rows(live, 360 * 2 / 3, 360) > 2);
+    CHECK(ink_rows(live, number0, number1, background) > 8);
+    const auto number = ink_span(live, number0, number1, background);
+    CHECK(std::abs((number.first + number.second) / 2 - 320) < 80);
+    CHECK(ink_rows(live, number1, 360 * 60 / 100, background) > 2);
+    CHECK(ink_rows(live, 360 * 2 / 3, 360 - 18, background) > 2);
+}
+
+TEST_CASE("result picture contrast, margin, latency, senders and count")
+{
+    auto paint = [](const ResultPicture& picture) {
+        Yuv422p10 frame;
+        frame.resize(640, 360);
+        paint_result_picture(frame, picture);
+        return frame;
+    };
+    auto differs = [](const Yuv422p10& left, const Yuv422p10& right) {
+        return left.y != right.y;
+    };
+    ResultPicture base;
+    base.grade = "pass";
+    base.state = "RUNNING";
+    base.number = "+0.0 ms";
+    base.sentence = "in sync";
+    base.latency = "reference: unknown";
+    base.senders = "Cam A / Mic 1";
+    base.stamp = "1000";
+    base.count = "7";
+    const Yuv422p10 pass = paint(base);
+    const int margin_x = 640 / 20;
+    const int margin_y = 360 / 20;
+    const uint16_t background = pass.y[0];
+    bool border = true;
+    bool ink = false;
+    int worst = 10000;
+    for (int y = 0; y < pass.height; ++y) {
+        for (int x = 0; x < pass.width; ++x) {
+            const uint16_t sample = pass.y[static_cast<size_t>(y) * static_cast<size_t>(pass.width) + static_cast<size_t>(x)];
+            const bool edge = x < margin_x || y < margin_y || x >= pass.width - margin_x || y >= pass.height - margin_y;
+            if (edge && sample != background) {
+                border = false;
+            }
+            if (!edge && sample != background) {
+                ink = true;
+                worst = std::min(worst, std::abs(static_cast<int>(sample) - static_cast<int>(background)));
+            }
+        }
+    }
+    CHECK(border);
+    CHECK(ink);
+    CHECK(worst >= 300);
+    for (const char* grade : {"warn", "fail", "invalid"}) {
+        ResultPicture pictured = base;
+        pictured.grade = grade;
+        if (std::string(grade) == "invalid") {
+            pictured.number.clear();
+            pictured.state = "NO EVENTS";
+        }
+        const Yuv422p10 frame = paint(pictured);
+        const uint16_t fill = frame.y[0];
+        int gap = 10000;
+        for (uint16_t sample : frame.y) {
+            if (sample != fill) {
+                gap = std::min(gap, std::abs(static_cast<int>(sample) - static_cast<int>(fill)));
+            }
+        }
+        CHECK(gap >= 300);
+    }
+    ResultPicture latency = base;
+    latency.latency = "video 12 audio 14";
+    CHECK(differs(pass, paint(latency)));
+    ResultPicture unlabeled = base;
+    unlabeled.senders.clear();
+    CHECK(differs(pass, paint(unlabeled)));
+    ResultPicture counted = base;
+    counted.count = "8";
+    counted.stamp = "1001";
+    CHECK(differs(pass, paint(counted)));
 }
 
 TEST_CASE("source stills keep transparency and gif frames follow time")

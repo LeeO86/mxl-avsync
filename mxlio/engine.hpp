@@ -29,6 +29,7 @@ struct InputRoute {
     bool enable = false;
     std::string domain_id;
     std::string flow_id;
+    std::string sender_id;
 };
 
 struct ClockReading {

@@ -611,32 +611,42 @@ int scale_for(std::string_view text, int target_px, int max_width)
     return chosen;
 }
 
-void paint_trend(LumaView view, const std::vector<double>& trend)
+uint16_t text_on(uint16_t background)
+{
+    return background >= 500 ? 64 : 940;
+}
+
+void paint_trend(LumaView view, const std::vector<double>& trend, int margin_x, int margin_y, uint16_t ink)
 {
     if (trend.size() < 2) {
         return;
     }
-    const int top = view.height * 2 / 3;
-    const int mid = top + (view.height - top) / 2;
-    const int half = std::max(4, (view.height - top) / 2 - 4);
-    for (int x = 0; x < view.width; ++x) {
-        view.data[static_cast<size_t>(mid) * static_cast<size_t>(view.stride) + static_cast<size_t>(x)] = 800;
+    const int top = std::max(view.height * 2 / 3, margin_y);
+    const int bottom = view.height - margin_y;
+    const int mid = top + std::max(1, (bottom - top) / 2);
+    const int half = std::max(4, (bottom - top) / 2 - 4);
+    const int x0_lim = margin_x;
+    const int x1_lim = view.width - margin_x;
+    for (int x = x0_lim; x < x1_lim; ++x) {
+        if (mid >= top && mid < bottom) {
+            view.data[static_cast<size_t>(mid) * static_cast<size_t>(view.stride) + static_cast<size_t>(x)] = ink;
+        }
     }
     for (size_t i = 1; i < trend.size(); ++i) {
-        const int x0 = static_cast<int>((i - 1) * static_cast<size_t>(view.width - 1) / (trend.size() - 1));
-        const int x1 = static_cast<int>(i * static_cast<size_t>(view.width - 1) / (trend.size() - 1));
+        const int x0 = x0_lim + static_cast<int>((i - 1) * static_cast<size_t>(std::max(1, x1_lim - x0_lim - 1)) / (trend.size() - 1));
+        const int x1 = x0_lim + static_cast<int>(i * static_cast<size_t>(std::max(1, x1_lim - x0_lim - 1)) / (trend.size() - 1));
         const auto y_of = [&](double ms) {
             const double clamped = std::max(-100.0, std::min(100.0, ms));
             return mid - static_cast<int>(std::lround(clamped / 100.0 * half));
         };
-        int y0 = y_of(trend[i - 1]);
-        int y1 = y_of(trend[i]);
+        const int y0 = y_of(trend[i - 1]);
+        const int y1 = y_of(trend[i]);
         const int steps = std::max(1, std::abs(x1 - x0));
         for (int step = 0; step <= steps; ++step) {
             const int x = x0 + (x1 - x0) * step / steps;
             const int y = y0 + (y1 - y0) * step / steps;
-            if (x >= 0 && x < view.width && y >= top && y < view.height) {
-                view.data[static_cast<size_t>(y) * static_cast<size_t>(view.stride) + static_cast<size_t>(x)] = 940;
+            if (x >= x0_lim && x < x1_lim && y >= top && y < bottom) {
+                view.data[static_cast<size_t>(y) * static_cast<size_t>(view.stride) + static_cast<size_t>(x)] = ink;
             }
         }
     }
@@ -649,15 +659,16 @@ void paint_result_picture(Yuv422p10& frame, const ResultPicture& picture)
     uint16_t y = 180;
     uint16_t cb = 512;
     uint16_t cr = 512;
-    if (!full_picture_state(picture.state) && picture.grade == "pass") {
+    const bool full = full_picture_state(picture.state) || picture.number.empty();
+    if (!full && picture.grade == "pass") {
         y = 520;
         cb = 360;
         cr = 400;
-    } else if (!full_picture_state(picture.state) && picture.grade == "warn") {
+    } else if (!full && picture.grade == "warn") {
         y = 640;
         cb = 420;
         cr = 640;
-    } else if (!full_picture_state(picture.state) && picture.grade == "fail") {
+    } else if (!full && picture.grade == "fail") {
         y = 420;
         cb = 480;
         cr = 720;
@@ -665,38 +676,53 @@ void paint_result_picture(Yuv422p10& frame, const ResultPicture& picture)
     std::fill(frame.y.begin(), frame.y.end(), y);
     std::fill(frame.cb.begin(), frame.cb.end(), cb);
     std::fill(frame.cr.begin(), frame.cr.end(), cr);
-    if (frame.width < 16 || frame.height < 16) {
+    if (frame.width < 20 || frame.height < 20) {
         return;
     }
+    const int margin_x = std::max(1, frame.width / 20);
+    const int margin_y = std::max(1, frame.height / 20);
+    const uint16_t ink = text_on(y);
     LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
-    const int margin = std::max(4, frame.width / 40);
-    const bool full = full_picture_state(picture.state) || picture.number.empty();
     const std::string headline = full ? picture.state : picture.number;
     const int number_px = std::max(8, frame.height * 32 / 100);
-    const int number_scale = scale_for(headline, number_px, frame.width - 2 * margin);
+    const int number_scale = scale_for(headline, number_px, frame.width - 2 * margin_x);
     const int number_w = text_px_width(headline, number_scale);
     const int number_h = text_px_height(number_scale);
-    const int number_x = std::max(margin, (frame.width - number_w) / 2);
-    const int number_y = std::max(margin, frame.height * 32 / 100 - number_h / 2);
-    draw_text(view, number_x, number_y, headline, number_scale, 940);
+    const int number_x = std::max(margin_x, (frame.width - number_w) / 2);
+    const int number_y = std::max(margin_y, frame.height * 32 / 100 - number_h / 2);
+    draw_text(view, number_x, number_y, headline, number_scale, ink);
+    int next_y = number_y + number_h + std::max(4, frame.height / 80);
     if (!full && !picture.sentence.empty()) {
         const int sentence_px = std::max(8, frame.height * 65 / 1000);
-        const int sentence_scale = scale_for(picture.sentence, sentence_px, frame.width - 2 * margin);
+        const int sentence_scale = scale_for(picture.sentence, sentence_px, frame.width - 2 * margin_x);
         const int sentence_w = text_px_width(picture.sentence, sentence_scale);
-        const int sentence_x = std::max(margin, (frame.width - sentence_w) / 2);
-        const int sentence_y = number_y + number_h + std::max(4, frame.height / 80);
-        draw_text(view, sentence_x, sentence_y, picture.sentence, sentence_scale, 940);
-    }
-    if (!full) {
-        const int status_scale = scale_for(picture.state, std::max(8, frame.height / 18), frame.width / 2);
-        draw_text(view, margin, margin, picture.state, status_scale, 940);
-        if (!picture.age.empty()) {
-            const int age_scale = scale_for(picture.age, std::max(8, frame.height / 18), frame.width / 3);
-            const int age_w = text_px_width(picture.age, age_scale);
-            draw_text(view, std::max(margin, frame.width - margin - age_w), margin, picture.age, age_scale, 940);
+        const int sentence_h = text_px_height(sentence_scale);
+        const int sentence_x = std::max(margin_x, (frame.width - sentence_w) / 2);
+        if (next_y + sentence_h < frame.height - margin_y) {
+            draw_text(view, sentence_x, next_y, picture.sentence, sentence_scale, ink);
+            next_y += sentence_h + 4;
         }
-        paint_trend(view, picture.trend_ms);
     }
+    auto small = [&](const std::string& text, int x, int y) {
+        if (text.empty() || y < margin_y || y + text_px_height(1) > frame.height - margin_y) {
+            return;
+        }
+        draw_text(view, std::max(margin_x, x), y, text, 1, ink);
+    };
+    if (!full) {
+        small(picture.state, margin_x, margin_y);
+        if (!picture.age.empty()) {
+            const int age_w = text_px_width(picture.age, 1);
+            small(picture.age, frame.width - margin_x - age_w, margin_y);
+        }
+        const std::string latency = picture.latency.empty() ? "reference: unknown" : picture.latency;
+        small(latency, margin_x, next_y);
+        next_y += text_px_height(1) + 2;
+        small(picture.senders, margin_x, next_y);
+        paint_trend(view, picture.trend_ms, margin_x, margin_y, ink);
+    }
+    const std::string foot = picture.stamp + (picture.count.empty() ? "" : "  n=" + picture.count);
+    small(foot, margin_x, frame.height - margin_y - text_px_height(1));
 }
 
 } // namespace avsync

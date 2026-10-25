@@ -117,6 +117,9 @@ void apply_route(const nmos::resource& connection, const std::string& receiver_i
     }
     if (!next.enable) {
         next.flow_id.clear();
+        next.sender_id.clear();
+    } else if (active.has_field(U("sender_id")) && !active.at(U("sender_id")).is_null() && active.at(U("sender_id")).is_string()) {
+        next.sender_id = su(active.at(U("sender_id")).as_string());
     }
     set_input_route(receiver_id == ids.video_receiver, next);
 }

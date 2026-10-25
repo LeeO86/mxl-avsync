@@ -923,6 +923,7 @@ int run_service(Config config)
             out.enable = route.enable;
             out.domain_id = route.domain_id;
             out.flow_id = route.flow_id;
+            out.sender_id = route.sender_id;
             return out;
         };
 #endif
