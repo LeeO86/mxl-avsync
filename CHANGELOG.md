@@ -12,6 +12,7 @@
 - `AVSYNC_PTP_STATUS_URL` is polled for `{"sync_state","accuracy_ns"}`. Only `http://` is accepted. A missing URL or a failed read leaves `sync_state` `unknown`. When the clock is `locked` and the QR names the event, live results include `video_latency_ms`, `audio_latency_ms`, the index shifts and `av_offset_arrival_ms`.
 - `mxl-avsync paths` lists `sibling-gateways` instead of `srt-live`, `g711-sip`, `st2110-loop` and `fabrics-cross-node`.
 - Live results include `video_content_vs_grain_ms`, `audio_content_vs_grain_ms` and `content_vs_grain_av_ms` from the QR or chirp time and `mxlGrainInfo.index`. Arrival comparisons are added only when the PTP clock is locked.
+- An IS-05 `master_enable: false`, or a change of domain or flow id, closes the analyzer readers on the next loop. `input_state` becomes `not_routed` (or `waiting` when the new flow is not in the scan path yet) and `/readyz` is not ready. Paired events stop until the new route is open.
 - A generator that finds a leftover domain with a different id names `MXL_OUTPUT_DOMAIN_ID` and `NMOS_SEED` in the status detail and fails `/livez`. It does not delete that directory.
 - Demo Compose file and Kubernetes pod run both roles on a shared memory volume with NMOS and DNS-SD off. No registry.
 - QR decode is zxing-cpp 2.3.0, the decoder named in the spec. Encode stays Nayuki. The earlier quirc decoder is gone.
