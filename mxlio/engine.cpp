@@ -395,6 +395,10 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     uint64_t audio_cursor = 0;
     uint64_t stall_head = 0;
     uint64_t stall_since = 0;
+    bool quiet_stall = false;
+    FlowFileId quiet_video{};
+    FlowFileId quiet_audio{};
+    uint64_t quiet_head = 0;
     std::vector<uint8_t> packed;
     std::vector<uint16_t> luma;
     std::vector<float> mono;
@@ -502,6 +506,17 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     continue;
                 }
                 grain_rows = video.interlaced ? video.height / 2 : video.height;
+                const uint64_t opened_head = video_domain.video_head();
+                if (quiet_stall && video_file == quiet_video && audio_file == quiet_audio && opened_head == quiet_head) {
+                    close_readers();
+                    status.ready = false;
+                    status.state = "no_signal";
+                    status.detail = "head stood still";
+                    callbacks.set_status(status);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    continue;
+                }
+                quiet_stall = false;
                 status.ready = true;
                 status.state = "running";
                 status.detail.clear();
@@ -536,18 +551,26 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (head == stall_head) {
             if (stall_since == 0) {
                 stall_since = now_ns;
-            } else if (now_ns > stall_since && now_ns - stall_since >= 1000000000ULL) {
-                callbacks.count_resync();
+            } else if (now_ns > stall_since && now_ns - stall_since >= static_cast<uint64_t>(std::max(config.hold_ms, 0)) * 1000000ULL) {
+                if (!quiet_stall) {
+                    callbacks.count_resync();
+                    quiet_stall = true;
+                    quiet_video = video_file;
+                    quiet_audio = audio_file;
+                    quiet_head = head;
+                }
                 close_readers();
                 status.state = "no_signal";
                 status.detail = "head stood still";
                 status.ready = false;
                 callbacks.set_status(status);
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
                 continue;
             }
         } else {
             stall_head = head;
             stall_since = now_ns;
+            quiet_stall = false;
         }
         if (missing) {
             callbacks.count_resync();
