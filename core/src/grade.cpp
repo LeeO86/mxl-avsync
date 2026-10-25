@@ -343,11 +343,28 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
         m.uncertainty_status = uncertainty.offset_status;
         m.latency_uncertainty_status = uncertainty.latency_status;
     }
-    if (pending.video.have_arrival && audio->have_arrival) {
-        m.have_arrival = true;
-        m.video_arrival_ms = pending.video.arrival_ms;
-        m.audio_arrival_ms = audio->arrival_ms;
-        m.av_offset_arrival_ms = audio->arrival_ms - pending.video.arrival_ms;
+    // Latency and index shift need the generator's T_k and a locked PTP reading.
+    // Audio's set time is T_k plus the configured offset, so a clean path reports a shift near 0.
+    const bool locked = reference_.sync_state == "locked" && pending.video.have_set_time;
+    if (locked) {
+        m.have_set_time = true;
+        m.set_video_ns = pending.video.set_tai_ns;
+        const double tk_ms = static_cast<double>(pending.video.set_tai_ns) / 1e6;
+        const double audio_set_ms = tk_ms + pending.expected_offset_ms;
+        m.video_index_shift_ms = pending.video.time_ms - tk_ms;
+        m.audio_index_shift_ms = audio->time_ms - audio_set_ms;
+        if (pending.video.have_arrival) {
+            m.video_latency_ms = pending.video.arrival_ms - tk_ms;
+        }
+        if (audio->have_arrival) {
+            m.audio_latency_ms = audio->arrival_ms - audio_set_ms;
+        }
+        if (pending.video.have_arrival && audio->have_arrival) {
+            m.have_arrival = true;
+            m.video_arrival_ms = pending.video.arrival_ms;
+            m.audio_arrival_ms = audio->arrival_ms;
+            m.av_offset_arrival_ms = audio->arrival_ms - pending.video.arrival_ms;
+        }
     }
     (void)has_flag;
     return m;

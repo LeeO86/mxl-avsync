@@ -123,6 +123,9 @@ if [[ "$gen_ready" != 1 || "$ana_ready" != 1 ]]; then
   exit 1
 fi
 
+echo "host:"
+nproc
+grep -m1 'model name' /proc/cpuinfo || true
 echo "event:"
 python3 - "http://127.0.0.1:$APORT" <<'PY'
 import json, sys, time, urllib.request
@@ -131,7 +134,8 @@ last = None
 for _ in range(80):
     with urllib.request.urlopen(api + "/api/v1/events?limit=100") as response:
         events = json.load(response).get("events", [])
-    good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid"]
+    need = ("video_latency_ms", "audio_latency_ms", "video_index_shift_ms", "audio_index_shift_ms", "av_offset_arrival_ms")
+    good = [e for e in events if e.get("av_offset_ms") is not None and e.get("grade") != "invalid" and all(k in e for k in need)]
     if good:
         last = good[-1]
         break
@@ -142,12 +146,19 @@ ref = last["reference"]
 if ref.get("sync_state") != "locked" or ref.get("accuracy_ns") != "80":
     print(json.dumps(last), file=sys.stderr)
     sys.exit(3)
-if "video_latency_ms" in last or "audio_latency_ms" in last:
-    print("latency was reported without an arrival time", file=sys.stderr)
-    print(json.dumps(last), file=sys.stderr)
-    sys.exit(4)
-print(last["seq"], last["av_offset_ms"], last["grade"], ref["sync_state"], ref["accuracy_ns"])
+for key in ("video_latency_ms", "audio_latency_ms", "video_index_shift_ms", "audio_index_shift_ms", "av_offset_arrival_ms"):
+    if not isinstance(last.get(key), (int, float)):
+        print(json.dumps(last), file=sys.stderr)
+        sys.exit(4)
+if abs(last["video_index_shift_ms"]) > 5:
+    print("video index shift", last["video_index_shift_ms"], file=sys.stderr)
+    sys.exit(5)
+print(last["seq"], last["av_offset_ms"], last["grade"], ref["sync_state"], ref["accuracy_ns"],
+      last["video_latency_ms"], last["audio_latency_ms"], last["video_index_shift_ms"],
+      last["audio_index_shift_ms"], last["av_offset_arrival_ms"])
 PY
+clk=$(getconf CLK_TCK)
+awk -v clk="$clk" '{printf "analyzer_utime_s %.3f\n", $14 / clk}' "/proc/${PIDS[2]}/stat"
 
 # Stop the live pair before the short status cases, keeping the document server.
 for pid in "${PIDS[@]:1}"; do

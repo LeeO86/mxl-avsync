@@ -177,8 +177,8 @@ The on-screen sync scale is a moving square, not the configured offset. Each ste
 - No transport code: not ST 2110, not SRT, not SIP, not fabrics, not WebRTC. Sibling repos move those flows onto MXL. This process only reads and writes MXL flows and files.
 - The hour run is a lab through `mxl-st2110-gateway`, not a binary or a CI job here.
 - File-mode H.264 and G.711 measure the detectors. They are not a substitute for a live gateway.
-- Latency is not reported. `AVSYNC_PTP_STATUS_URL` can set `sync_state` to `locked` or `unlocked`; an empty URL or a failed read stays `unknown`. Arrival time is not measured, so a locked clock still does not fill `video_latency_ms`. The closed-loop numbers below are index-time AV offset on one machine.
-- `mxl-avsync paths` still prints the old host-gap names (`srt-live`, `g711-sip`, `st2110-loop`, `fabrics-cross-node`). That command text is code and was left unchanged in this docs pass.
+- Latency is filled only when `sync_state` is `locked` and the QR on the event grain names that event's `T_k`. An unknown or unlocked clock leaves `video_latency_ms`, `audio_latency_ms`, the index shifts and `av_offset_arrival_ms` absent. On this closed loop the generator writes audio `AVSYNC_AUDIO_LEAD_MS` ahead, so `audio_latency_ms` can be negative.
+- `mxl-avsync paths` names `sibling-gateways` for ST 2110, SRT, SIP and fabrics. It does not list `srt-live`, `g711-sip`, `st2110-loop` or `fabrics-cross-node`.
 - The phone UI has not been run on a device. Phone work does not block live MXL.
 
 ## Live MXL (2026-10-24)
@@ -404,6 +404,33 @@ metrics.sh ok
 
 This VM has no Docker, so the image was not built here. `docker buildx build --check` is the `dockerfile` CI job.
 
+## Arrival time when PTP is locked (2026-10-25)
+
+The live QR is refreshed on each event and carries that event's `k` and `tk`. The analyzer reads it on the event grain. With `sync_state` `locked`, the event gains `video_latency_ms` (`t_arr − T_k`), `audio_latency_ms` (`t_arr − (T_k + offset)`), `video_index_shift_ms`, `audio_index_shift_ms` (both against the set time, 0 when the index time matches), and `av_offset_arrival_ms`. An unknown clock does not get those fields. A unit case checks the gate.
+
+Command:
+
+```
+/tmp/avsync-qr/avsync-core-tests -tc='*drawing cost*'
+/tmp/avsync-qr/avsync-core-tests -tc='*locked ptp*'
+LD_LIBRARY_PATH=/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  BIN=/tmp/avsync-qr/mxl-avsync VCPKG_LIB_DIR=/tmp/mxl/build/vcpkg_installed/x64-linux/lib \
+  bash tests/integration/ptp.sh
+/tmp/avsync-qr/mxl-avsync paths
+```
+
+The drawing case was run on its own and printed `draw_1080p_ms=0.206943`. The locked-ptp case passed 17 assertions. The live event line was:
+
+```
+3585774266 0.0 pass locked 80 7.03955078125 -12.231689453125 0.0 0.0 -19.271240234375
+```
+
+That is seq, offset, grade, sync, accuracy, `video_latency_ms`, `audio_latency_ms`, `video_index_shift_ms`, `audio_index_shift_ms`, `av_offset_arrival_ms`. Index shift is 0. Video arrival is 7.0 ms after `T_k`. Audio arrival is 12.2 ms before its set time, which matches the generator writing audio ahead. `paths` prints `sibling-gateways` and does not print the four old names.
+
+Host for that run: 4 CPUs, `Intel(R) Xeon(R) Processor`, analyzer user time 0.110 s for the short closed loop. Catalog CPU requests stay the spec placeholders. This is not a Skylake-SP or 8-core desktop figure.
+
+`docker/docker-compose.demo.yaml` and `deploy/k8s/avsync.yaml` start both roles on a shared memory volume with NMOS and DNS-SD off. They were not started: this machine has no Docker and no cluster.
+
 ## Next step
 
-No separate interlaced file mux.
+Left on purpose: the AMWA suite (no Docker, and no mDNS registry on this host), a separate interlaced file mux (the plan does not ask for one), stage 4 (per-channel sequences, programme lip-sync, IS-07), the phone on a device, the LED/piezo rig, and the ST 2110 hour run.

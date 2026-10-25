@@ -524,7 +524,7 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_RESULT_FORMAT` | `960x540` | flow | even width and height, ≤ 1920×1080 |
 | `AVSYNC_RESULT_RATE` | 25 | flow | rate token |
 | `AVSYNC_HOLD_MS` | 1000 | live | `no_signal` after this long without a new grain |
-| `AVSYNC_PTP_STATUS_URL` | empty | restart | optional source of the node's PTP state (`TODO_`, open question 6) |
+| `AVSYNC_PTP_STATUS_URL` | empty | restart | `http://` JSON `{"sync_state","accuracy_ns"}`. Latency is filled only when `sync_state` is `locked` and an arrival time was measured |
 
 ### 10.4 Platform settings (same names and meaning as the siblings)
 
