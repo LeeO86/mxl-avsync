@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 
+#include <cstdint>
 #include <memory>
 
 namespace avsync {
@@ -13,6 +14,10 @@ public:
     ~NmosNode();
     void start();
     void stop();
+    // True when a configured registry's Query API lists this node.
+    bool registered() const;
+    // IS-05 activations seen since start, including sender and receiver.
+    uint64_t activations() const;
 
 private:
     struct Impl;

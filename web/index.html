@@ -105,7 +105,7 @@ createApp({
     async refresh() {
       this.previewTick = Date.now();
       this.status = await (await fetch('/api/v1/status')).json();
-      this.nmos = this.status.nmos_registered ? 'registered' : 'nmos';
+      this.nmos = this.status.nmos_enable ? (this.status.nmos_registered ? 'registered' : 'not registered') : 'off';
       if (this.role === 'generator') {
         const g = await (await fetch('/api/v1/generator')).json();
         this.offset = g.offset_ms; this.level = g.level_dbfs; this.title = g.title || '';

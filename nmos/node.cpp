@@ -109,6 +109,8 @@ struct NmosNode::Impl {
     Config config;
     NmosIds ids;
     std::atomic<bool> running{false};
+    std::atomic<bool> registered{false};
+    std::atomic<uint64_t> activations{0};
     std::mutex ready_mu;
     std::condition_variable ready_cv;
     bool ready = false;
@@ -143,6 +145,16 @@ void NmosNode::start()
 }
 
 void NmosNode::stop() {}
+
+bool NmosNode::registered() const
+{
+    return impl_->registered.load();
+}
+
+uint64_t NmosNode::activations() const
+{
+    return impl_->activations.load();
+}
 #else
 void NmosNode::start()
 {
@@ -202,6 +214,7 @@ void NmosNode::start()
                 })
                 .on_set_transportfile([](const nmos::resource&, const nmos::resource&, web::json::value& transport_file) { transport_file = web::json::value::null(); })
                 .on_connection_activated([this](const nmos::resource&, const nmos::resource& connection) {
+                    impl_->activations.fetch_add(1);
                     apply_route(connection, impl_->ids.video_receiver, impl_->ids);
                     apply_route(connection, impl_->ids.audio_receiver, impl_->ids);
                 });
@@ -372,8 +385,26 @@ void NmosNode::start()
                 }
                 impl_->running.store(true);
             }
+            int query_ticks = 0;
             while (impl_->running.load()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (config.nmos_registry_address.empty() || ++query_ticks < 10) {
+                    continue;
+                }
+                query_ticks = 0;
+                const auto host = config.nmos_query_address.empty() ? config.nmos_registry_address : config.nmos_query_address;
+                const int port = config.nmos_query_port > 0 ? config.nmos_query_port : config.nmos_registry_port + 1;
+                bool listed = false;
+                try {
+                    web::http::client::http_client_config client_config;
+                    client_config.set_timeout(std::chrono::milliseconds(500));
+                    web::http::client::http_client client(us("http://" + host + ":" + std::to_string(port)), client_config);
+                    const auto response = client.request(web::http::methods::GET, us("/x-nmos/query/v1.3/nodes/" + ids.node)).get();
+                    listed = response.status_code() == 200;
+                } catch (const std::exception&) {
+                    listed = false;
+                }
+                impl_->registered.store(listed);
             }
             {
                 auto lock = node_model.write_lock();
@@ -413,6 +444,16 @@ void NmosNode::start()
     }
     stop();
     throw std::runtime_error("the NMOS Node API on port " + std::to_string(impl_->config.nmos_port) + " does not answer as this node (port taken?)");
+}
+
+bool NmosNode::registered() const
+{
+    return impl_->registered.load();
+}
+
+uint64_t NmosNode::activations() const
+{
+    return impl_->activations.load();
 }
 
 void NmosNode::stop()

@@ -115,3 +115,4 @@ jobs:
           export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./tests/integration/live.sh
           ./tests/integration/nmos.sh
+          ./tests/integration/nmos-registry.sh

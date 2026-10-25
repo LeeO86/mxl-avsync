@@ -19,6 +19,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -40,6 +41,7 @@ struct Runtime {
     bool media_ready = false;
     bool media_live = true;
     bool nmos_registered = false;
+    uint64_t nmos_activations = 0;
     std::string input_state = "not_routed";
     std::vector<Measurement> events;
     int events_epoch = 0;
@@ -186,7 +188,7 @@ std::string metrics_text(Runtime& rt)
     os << "# TYPE mxl_avsync_nmos_registry_up gauge\n";
     os << "mxl_avsync_nmos_registry_up " << (rt.nmos_registered ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_nmos_activations_total counter\n";
-    os << "mxl_avsync_nmos_activations_total 0\n";
+    os << "mxl_avsync_nmos_activations_total " << rt.nmos_activations << "\n";
     return os.str();
 }
 
@@ -221,8 +223,13 @@ void install_web(HttpServer& http, Runtime& rt)
     });
     http.add("GET", "/readyz", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
-        const bool ok = rt.media_ready;
-        return json_response({{"ready", ok}, {"role", rt.config.role}}, ok ? 200 : 503);
+#ifdef AVSYNC_WITH_NMOS
+        const bool want_registry = rt.config.nmos_enable && !rt.config.nmos_registry_address.empty();
+#else
+        const bool want_registry = false;
+#endif
+        const bool ok = rt.media_ready && (!want_registry || rt.nmos_registered);
+        return json_response({{"ready", ok}, {"role", rt.config.role}, {"nmos_registered", rt.nmos_registered}}, ok ? 200 : 503);
     });
     http.add("GET", "/metrics", [&](const HttpRequest&) {
         return HttpResponse{200, "text/plain; version=0.0.4", metrics_text(rt), {}};
@@ -235,7 +242,8 @@ void install_web(HttpServer& http, Runtime& rt)
     http.add("GET", "/api/v1/status", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
         return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
-            {"input_state", rt.input_state}, {"detail", rt.media_detail}, {"nmos_registered", rt.nmos_registered},
+            {"input_state", rt.input_state}, {"detail", rt.media_detail},
+            {"nmos_enable", rt.config.nmos_enable}, {"nmos_registered", rt.nmos_registered},
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
@@ -682,6 +690,15 @@ int run_service(Config config)
     std::thread beat([&] {
         while (!g_stop) {
             rt.heartbeat = std::chrono::steady_clock::now();
+#ifdef AVSYNC_WITH_NMOS
+            if (nmos_node) {
+                const bool registered = nmos_node->registered();
+                const auto activations = nmos_node->activations();
+                std::lock_guard lock(rt.mu);
+                rt.nmos_registered = registered;
+                rt.nmos_activations = activations;
+            }
+#endif
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     });
