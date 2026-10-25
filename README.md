@@ -32,7 +32,7 @@ AVSYNC_ROLE=generator AVSYNC_STATE_DIR=/tmp/avsync ./build/mxl-avsync serve
 - CLI: `mxl-avsync generate` (MOV + ProRes + PCM by default, with a JSON manifest), `analyze`, `validate`, `merge`.
 - Media function: one image, `AVSYNC_ROLE=generator` or `analyzer`; one measuring point (video + audio) per analyzer.
 - Analyzer outputs: REST, WebSocket, `/metrics`, the `avsync` widget, a result video flow for the multiviewer, Grafana alert rules.
-- NMOS IS-04/IS-05 with nmos-cpp when the build has it. DNS-SD is off unless `NMOS_DNS_SD=true`. Transport is `urn:x-nmos:transport:mxl`. `/livez`, `/readyz`, `/metrics`. The image `HEALTHCHECK` calls `/livez` on `WEB_PORT` (default 8180).
+- NMOS IS-04/IS-05 with nmos-cpp when the build has it. DNS-SD is off unless `NMOS_DNS_SD=true`. Transport is `urn:x-nmos:transport:mxl`. An IS-05 receiver PATCH needs `transport_params` (`mxl_domain_id` and `mxl_flow_id`) from the sender's `/active`. A PATCH that carries only `sender_id` increments the activation counter and leaves the analyzer `not_routed`. `/livez`, `/readyz`, `/metrics`. The image `HEALTHCHECK` calls `/livez` on `WEB_PORT` (default 8180).
 - Paths in this repo: file round trips, file-mode H.264 and G.711 as test aids, and MXL flows. The ST 2110 hour run goes through mxl-st2110-gateway. SRT and SIP/G.711 live inputs arrive as MXL flows from the sibling gateways. Stage 2 uses those gateways and tests the matrix; there is no transport code here. Phone app (Expo, iOS and Android) in 2.0.
 
 ## Ports

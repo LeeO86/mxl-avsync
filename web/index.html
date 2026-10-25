@@ -139,13 +139,13 @@
       <table>
         <tr><th>time</th><th>seq</th><th>offset</th><th>uncertainty</th><th>grade</th><th>flags</th><th>correlation</th><th>audio level</th></tr>
         <tr v-for="ev in newestEvents" :key="ev.event_id">
-          <td>{{ ev.video_event_time }}</td>
+          <td>{{ formatEventTime(ev.video_event_time) }}</td>
           <td>{{ ev.seq }}</td>
-          <td>{{ ev.av_offset_ms }}</td>
-          <td>{{ ev.uncertainty_ms != null ? ev.uncertainty_ms : ev.uncertainty_status }}</td>
+          <td>{{ formatOffset(ev.av_offset_ms) }}</td>
+          <td>{{ ev.uncertainty_ms != null ? formatOffset(ev.uncertainty_ms) : ev.uncertainty_status }}</td>
           <td>{{ ev.grade }}</td>
           <td>{{ flagText(ev) }}</td>
-          <td>{{ ev.correlation }}</td>
+          <td>{{ formatCorrelation(ev.correlation) }}</td>
           <td>{{ ev.audio_level_dbfs }}</td>
         </tr>
       </table>
@@ -247,6 +247,28 @@ createApp({
       const flags = ev.flags;
       if (!flags) return '';
       return Array.isArray(flags) ? flags.join(' ') : String(flags);
+    },
+    formatEventTime(value) {
+      if (value == null || value === '') return '';
+      const n = Number(value);
+      if (!Number.isFinite(n)) return String(value);
+      if (Math.abs(n) < 1e12) return n.toFixed(1) + ' ms';
+      const ms = Math.floor(n / 1e6);
+      const d = new Date(ms);
+      const pad = (part, width) => String(part).padStart(width || 2, '0');
+      return 'TAI ' + d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate())
+        + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds())
+        + '.' + pad(Math.floor((n / 1e6) % 1000), 3);
+    },
+    formatOffset(value) {
+      if (value == null || value === '') return '';
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(1) : String(value);
+    },
+    formatCorrelation(value) {
+      if (value == null || value === '') return '';
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(3) : String(value);
     },
     async loadNmos() {
       this.nmosError = '';
