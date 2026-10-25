@@ -1,0 +1,49 @@
+# Generator and analyzer on one machine, sharing a tmpfs MXL root.
+# No registry and no DNS-SD. NMOS stays off so nothing is advertised on the host network.
+#
+#   docker compose -f docker/docker-compose.demo.yaml up
+#
+# Generator UI: http://127.0.0.1:8180/  Analyzer UI: http://127.0.0.1:8181/
+# This file was not started here: this machine has no Docker.
+services:
+  generator:
+    image: ${AVSYNC_IMAGE:-ghcr.io/leeo86/mxl-avsync:nightly-dev}
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:8180:8180"
+    volumes:
+      - mxl:/mxl
+    environment:
+      AVSYNC_ROLE: generator
+      AVSYNC_STATE_DIR: /config
+      NMOS_ENABLE: "false"
+      NMOS_DNS_SD: "false"
+      MXL_DOMAIN_SCAN_PATH: /mxl
+      MXL_OUTPUT_DOMAIN_DIR: /mxl/generator
+      MXL_CLEANUP_ON_EXIT: "true"
+      WEB_PORT: "8180"
+
+  analyzer:
+    image: ${AVSYNC_IMAGE:-ghcr.io/leeo86/mxl-avsync:nightly-dev}
+    user: "1000:1000"
+    depends_on: [generator]
+    ports:
+      - "127.0.0.1:8181:8180"
+    volumes:
+      - mxl:/mxl
+    environment:
+      AVSYNC_ROLE: analyzer
+      AVSYNC_STATE_DIR: /config
+      NMOS_ENABLE: "false"
+      NMOS_DNS_SD: "false"
+      MXL_DOMAIN_SCAN_PATH: /mxl
+      MXL_OUTPUT_DOMAIN_DIR: /mxl/analyzer
+      MXL_CLEANUP_ON_EXIT: "true"
+      WEB_PORT: "8180"
+
+volumes:
+  mxl:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1g,mode=1777

@@ -361,6 +361,61 @@ TEST_CASE("pairing range, missing and grading of the median")
     CHECK(current_grade(series, 10, windows, 20000, 5) == "invalid");
 }
 
+TEST_CASE("locked ptp fills latency and an unknown clock does not")
+{
+    GradeWindows windows;
+    auto one = [&windows](ReferenceInfo reference) {
+        Pairer pairer(500, windows, reference, "LIVE", "TEST");
+        VideoObservation video;
+        video.event = true;
+        video.seq = 4;
+        video.time_ms = 5000;
+        video.tai_ns = 5000000000LL;
+        video.quality = "good";
+        video.have_arrival = true;
+        video.arrival_ms = 5012;
+        video.have_set_time = true;
+        video.set_tai_ns = 5000000000LL;
+        pairer.observe_video(video, 0);
+        AudioObservation audio;
+        audio.chirp_id = 0;
+        audio.time_ms = 5000;
+        audio.tai_ns = 5000000000LL;
+        audio.have_arrival = true;
+        audio.arrival_ms = 5015;
+        audio.correlation = 0.99;
+        audio.quality = "good";
+        audio.level_dbfs = -12;
+        pairer.observe_audio(audio);
+        pairer.finish();
+        REQUIRE(pairer.results().size() == 1);
+        return pairer.results().front();
+    };
+    ReferenceInfo locked;
+    locked.type = "tai-ptp";
+    locked.sync_state = "locked";
+    const Measurement live = one(locked);
+    REQUIRE(live.video_latency_ms);
+    REQUIRE(live.audio_latency_ms);
+    REQUIRE(live.video_index_shift_ms);
+    REQUIRE(live.audio_index_shift_ms);
+    REQUIRE(live.av_offset_arrival_ms);
+    CHECK(*live.video_latency_ms == doctest::Approx(12.0));
+    CHECK(*live.audio_latency_ms == doctest::Approx(15.0));
+    CHECK(*live.video_index_shift_ms == doctest::Approx(0.0));
+    CHECK(*live.audio_index_shift_ms == doctest::Approx(0.0));
+    CHECK(*live.av_offset_arrival_ms == doctest::Approx(3.0));
+    ReferenceInfo unknown;
+    unknown.type = "tai-ptp";
+    unknown.sync_state = "unknown";
+    const Measurement dark = one(unknown);
+    CHECK(!dark.video_latency_ms);
+    CHECK(!dark.audio_latency_ms);
+    CHECK(!dark.video_index_shift_ms);
+    CHECK(!dark.audio_index_shift_ms);
+    CHECK(!dark.av_offset_arrival_ms);
+}
+
 TEST_CASE("statistics withhold percentiles and keep outliers")
 {
     std::vector<Measurement> events;

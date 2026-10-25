@@ -120,7 +120,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     picture.resize(format->width, grain_rows);
     std::vector<uint8_t> packed(v210_line_bytes(format->width) * static_cast<size_t>(grain_rows));
     std::vector<float> samples;
-    int qr_second = -1;
+    uint64_t qr_seq = ~0ULL;
     std::string qr_cached;
 
     while (!stop.load()) {
@@ -144,7 +144,6 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             const int frame_in_period = static_cast<int>(index % static_cast<uint64_t>(std::max(1, period.grains)));
             const int64_t tai_ns = static_cast<int64_t>(time_of_index(pace, index));
             const double ms = static_cast<double>(tai_ns) / 1e6;
-            const int second = static_cast<int>(tai_ns / 1000000000LL);
             PictureInfo info;
             info.title = config.title.empty() ? "TEST SIGNAL" : config.title;
             info.source = config.source;
@@ -161,17 +160,21 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             char timetext[64];
             std::snprintf(timetext, sizeof(timetext), "t %8.1f ms", ms);
             info.time_line = timetext;
-            if (second != qr_second) {
+            const int grains = std::max(1, period.grains);
+            const uint64_t event_index = (index / static_cast<uint64_t>(grains)) * static_cast<uint64_t>(grains);
+            const uint64_t named = index == event_index ? event_index : event_index + static_cast<uint64_t>(grains);
+            const uint64_t named_seq = named / static_cast<uint64_t>(grains);
+            if (named_seq != qr_seq) {
                 QrPayload payload;
                 payload.test_id = config.test_id.empty() ? config.seed() : config.test_id;
                 payload.mode = "LIVE";
-                payload.k = seq;
-                payload.tk = tai_ns;
+                payload.k = named_seq;
+                payload.tk = static_cast<int64_t>(time_of_index(pace, named));
                 payload.offset_ms = config.offset_ms;
                 payload.rate = config.event_rate;
                 payload.format = format->token;
                 qr_cached = qr_payload_json(payload);
-                qr_second = second;
+                qr_seq = named_seq;
             }
             info.qr_json = qr_cached;
             render_picture(picture, info, seq, frame_in_period, period.grains, (seq % 2) != 0);
@@ -564,6 +567,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
         cursor = want;
         have_cursor = true;
+        const uint64_t video_arrived_ns = tai_now();
         note_preview_v210("input", packed.data(), video.width, grain_rows);
         unpack_v210_luma(packed.data(), video.width, grain_rows, luma.data(), video.width);
         VideoFormat tracked;
@@ -584,8 +588,18 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             window_origin = 0;
         }
         const int64_t tai_ns = static_cast<int64_t>(time_of_index(pace, want));
-        const VideoObservation observation = tracker->push(luma.data(), video.width, static_cast<int64_t>(want), static_cast<double>(tai_ns) / 1e6, tai_ns);
+        VideoObservation observation = tracker->push(luma.data(), video.width, static_cast<int64_t>(want), static_cast<double>(tai_ns) / 1e6, tai_ns);
         if (observation.event) {
+            observation.have_arrival = true;
+            observation.arrival_ms = static_cast<double>(video_arrived_ns) / 1e6;
+            if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) {
+                if (auto qr = parse_qr_payload(*text)) {
+                    if (qr->k == observation.seq) {
+                        observation.have_set_time = true;
+                        observation.set_tai_ns = qr->tk;
+                    }
+                }
+            }
             pairer->observe_video(observation, config.offset_ms);
         }
 
@@ -602,6 +616,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             std::vector<float> interleaved;
             if (audio_domain.copy_samples(audio_cursor + static_cast<uint64_t>(frames), frames, audio_channels, 20000000, max_read, &interleaved, &flow_invalid)
                 && !flow_invalid) {
+                const double audio_arrived_ms = static_cast<double>(tai_now()) / 1e6;
                 if (audio_window.empty()) {
                     window_origin = audio_cursor;
                 }
@@ -639,6 +654,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     heard_hit.quality = hit.quality;
                     heard_hit.duplicate = hit.duplicate;
                     heard_hit.ambiguous = hit.ambiguous;
+                    heard_hit.have_arrival = true;
+                    heard_hit.arrival_ms = audio_arrived_ms;
                     pairer->observe_audio(heard_hit);
                 }
                 audio_cursor += static_cast<uint64_t>(frames);

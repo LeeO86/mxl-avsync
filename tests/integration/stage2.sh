@@ -9,7 +9,11 @@ if [[ "${KEEP:-}" != 1 ]]; then
   trap 'rm -rf "$WORK"' EXIT
 fi
 
-"$BIN" paths | grep -q 'srt-live'
+if "$BIN" paths | grep -E 'srt-live|g711-sip|st2110-loop|fabrics-cross-node'; then
+  echo "paths still names a sibling transport as a path of this repo" >&2
+  exit 1
+fi
+"$BIN" paths | grep -q 'sibling-gateways'
 "$BIN" paths | grep -q 'needs the Linux host'
 
 "$BIN" generate --format 720p50 --duration 2 --offset 0 --test-id TEST-stage2 --out "$WORK/src.mov"

@@ -292,6 +292,8 @@ struct VideoObservation {
     bool strip_ok = false;
     bool have_arrival = false;
     double arrival_ms = 0;
+    bool have_set_time = false;
+    int64_t set_tai_ns = 0; // generator T_k from the QR, when that code names this event
 };
 
 class MarkerTracker {
