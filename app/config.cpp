@@ -12,13 +12,22 @@
 namespace avsync {
 namespace {
 
+static std::string short_host(std::string name)
+{
+    const auto dot = name.find('.');
+    if (dot != std::string::npos) {
+        name.resize(dot);
+    }
+    return name.empty() ? std::string("localhost") : name;
+}
+
 static std::string hostname()
 {
     char buf[256] = {};
     if (gethostname(buf, sizeof(buf) - 1) != 0) {
         return "localhost";
     }
-    return buf;
+    return short_host(buf);
 }
 
 std::string env_or(const char* key, const std::string& fallback, std::map<std::string, std::string>& from_env)
@@ -131,7 +140,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.audio_enable = parse_bool(pick("AVSYNC_AUDIO_ENABLE", "true"));
     config.audio_lead_ms = static_cast<int>(num(pick("AVSYNC_AUDIO_LEAD_MS", "20"), "AVSYNC_AUDIO_LEAD_MS"));
     config.qr_period_ms = static_cast<int>(num(pick("AVSYNC_QR_PERIOD_MS", "1000"), "AVSYNC_QR_PERIOD_MS"));
-    config.host_id = pick("HOST_ID", config.host_id);
+    config.host_id = short_host(pick("HOST_ID", config.host_id));
     config.nmos_seed = pick("NMOS_SEED", config.host_id + "-avsync");
     config.test_id = pick("AVSYNC_TEST_ID", config.nmos_seed);
     config.title = pick("AVSYNC_TITLE", "");
