@@ -493,7 +493,16 @@ void install_web(HttpServer& http, Runtime& rt)
     });
     http.add("GET", "/api/v1/config", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
-        return json_response(config_settings(rt.config));
+        std::string env_set;
+        for (const auto& entry : rt.config.from_env) {
+            if (!env_set.empty()) {
+                env_set += ",";
+            }
+            env_set += entry.first;
+        }
+        auto response = json_response(config_settings(rt.config));
+        response.headers["X-Env-Set"] = env_set;
+        return response;
     });
     http.add("PUT", "/api/v1/config", [&](const HttpRequest& request) {
         auto body = nlohmann::json::parse(request.body.empty() ? "{}" : request.body);
