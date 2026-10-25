@@ -75,29 +75,47 @@
       </table>
     </section>
     <section v-if="tab=='Settings'">
-      <label>Pass min <input type="number" v-model.number="grading.pass_min_ms"/></label>
-      <label>Pass max <input type="number" v-model.number="grading.pass_max_ms"/></label>
-      <label>Warn min <input type="number" v-model.number="grading.warn_min_ms"/></label>
-      <label>Warn max <input type="number" v-model.number="grading.warn_max_ms"/></label>
-      <button @click="saveGrading">Save windows</button>
-      <p>Env-set keys are read-only and skipped on import.</p>
+      <p v-if="settingsError" class="banner">{{ settingsError }}</p>
+      <p v-if="restartRequired.length">Restart required: {{ restartRequired.join(', ') }}</p>
+      <p v-if="skipped.length">Import skipped env-set keys: {{ skipped.join(', ') }}</p>
+      <div v-for="group in settingGroups" :key="group.name">
+        <h3>{{ group.name }}</h3>
+        <label v-for="key in group.keys" :key="key">{{ key }}
+          <input v-model="draft[key]" :disabled="envSet.includes(key)"/>
+          <span v-if="envSet.includes(key)">env</span>
+        </label>
+      </div>
+      <button @click="applySettings">Apply</button>
+      <a href="/api/v1/config/export">Export</a>
+      <label>Import <input type="file" accept="application/json,.json" @change="importSettings"/></label>
     </section>
   </main>
 </div>
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos', previewTick:0 }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, nmos:'nmos', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[] }; },
   computed: {
     role() { return this.info.role || ''; },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
     grade() { return (this.measurement.grade || 'invalid').toUpperCase(); },
     gradeColor() { return {pass:'#1f8a4c', warn:'#d9822b', fail:'#c4392a', invalid:'#6b7280'}[this.measurement.grade] || '#6b7280'; },
-    sentence() { return this.measurement.sentence || 'no measurement'; }
+    sentence() { return this.measurement.sentence || 'no measurement'; },
+    settingGroups() {
+      const groups = [
+        ['Grading', ['AVSYNC_PASS_MIN_MS','AVSYNC_PASS_MAX_MS','AVSYNC_WARN_MIN_MS','AVSYNC_WARN_MAX_MS','AVSYNC_GRADE_EVENTS','AVSYNC_STALE_S']],
+        ['Signal', ['AVSYNC_AV_OFFSET_MS','AVSYNC_CHIRP_LEVEL_DBFS','AVSYNC_AUDIO_ENABLE','AVSYNC_EVENT_RATE','AVSYNC_VIDEO_FORMAT','AVSYNC_AUDIO_CHANNELS','AVSYNC_CHIRP_MS','AVSYNC_CHIRP_LOW_HZ','AVSYNC_CHIRP_HIGH_HZ','AVSYNC_TITLE','AVSYNC_SOURCE','AVSYNC_SUBTITLE','AVSYNC_NOTES','AVSYNC_TEST_ID']],
+        ['Measurement', ['AVSYNC_AUDIO_CHANNEL','AVSYNC_AUDIO_THRESHOLD','AVSYNC_QR_RATE','AVSYNC_STATS_WINDOW','AVSYNC_RESULT_ENABLE','LOG_LEVEL']]
+      ];
+      const used = new Set(groups.flatMap((group) => group[1]));
+      const restart = Object.keys(this.config).filter((key) => !used.has(key));
+      return groups.map(([name, keys]) => ({name, keys: keys.filter((key) => key in this.config)})).concat([{name:'Restart', keys: restart}]);
+    }
   },
   async mounted() {
     this.info = await (await fetch('/api/v1/info')).json();
     this.tab = this.tabs[0];
+    await this.loadConfig();
     await this.refresh();
     this.timer = setInterval(() => this.refresh(), 1000);
   },
@@ -137,6 +155,42 @@ createApp({
     },
     async mute() { await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({muted:this.audioOn})}); await this.refresh(); },
     async toggleRun() { await fetch(this.stopped ? '/api/v1/generator/start' : '/api/v1/generator/stop', {method:'POST'}); await this.refresh(); },
+    async loadConfig() {
+      const response = await fetch('/api/v1/config');
+      this.config = await response.json();
+      this.draft = Object.assign({}, this.config);
+      const header = response.headers.get('X-Env-Set') || '';
+      this.envSet = header ? header.split(',').filter(Boolean) : [];
+    },
+    async applySettings() {
+      const body = {};
+      for (const key of Object.keys(this.draft)) {
+        if (this.envSet.includes(key)) continue;
+        if (this.draft[key] !== this.config[key]) body[key] = this.draft[key];
+      }
+      const response = await fetch('/api/v1/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const data = await response.json();
+      if (!response.ok) {
+        this.settingsError = data.error || 'invalid settings';
+        return;
+      }
+      this.settingsError = '';
+      this.restartRequired = data.restart_required || [];
+      await this.loadConfig();
+    },
+    async importSettings(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      const response = await fetch('/api/v1/config/import', {method:'POST', headers:{'Content-Type':'application/json'}, body: await file.text()});
+      const data = await response.json();
+      if (!response.ok) {
+        this.settingsError = data.error || 'import failed';
+        return;
+      }
+      this.settingsError = '';
+      this.skipped = data.skipped || [];
+      await this.loadConfig();
+    },
     async saveGrading() { await fetch('/api/v1/grading', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(this.grading)}); }
   }
 }).mount('#app');

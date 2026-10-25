@@ -727,7 +727,7 @@ Family look: header with label, role, state and registration pills, version; tab
 | GET/PATCH | `/api/v1/grading` | ana | the four window edges, `AVSYNC_GRADE_EVENTS` |
 | GET | `/api/v1/events/ws` | both | WebSocket: state, settings, each event as it is paired |
 | GET | `/widgets`, `/widget/{id}` | both | §16.3 |
-| GET/PUT | `/api/v1/config` | both | flat key update; `restart_required` |
+| GET/PUT | `/api/v1/config` | both | flat key update; `restart_required`. `X-Env-Set` lists keys that came from the environment |
 | GET | `/api/v1/config/export` | both | `version`, `secrets: false`, `settings`, `routes` |
 | POST | `/api/v1/config/import` | both | env-set keys are skipped and listed |
 | GET | `/api/v1/config/env` | both | `KEY=value` text |

@@ -236,9 +236,10 @@ nlohmann::json config_settings(const Config& config)
 
 void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std::string>* skipped_env)
 {
+    Config next = config;
     auto text = [](const nlohmann::json& value) { return value.is_string() ? value.get<std::string>() : value.dump(); };
     for (auto it = flat.begin(); it != flat.end(); ++it) {
-        if (config.from_env.count(it.key())) {
+        if (next.from_env.count(it.key())) {
             if (skipped_env || !is_live_key(it.key())) {
                 if (skipped_env) {
                     skipped_env->push_back(it.key());
@@ -248,42 +249,43 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
         }
         const std::string value = text(it.value());
         const std::string& key = it.key();
-        if (key == "AVSYNC_EVENT_RATE") config.event_rate = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_CHIRP_MS") config.chirp_ms = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_CHIRP_LOW_HZ") config.chirp_low_hz = num(value, key.c_str());
-        else if (key == "AVSYNC_CHIRP_HIGH_HZ") config.chirp_high_hz = num(value, key.c_str());
-        else if (key == "AVSYNC_VIDEO_FORMAT") config.video_format = value;
-        else if (key == "AVSYNC_AUDIO_CHANNELS") config.audio_channels = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_AV_OFFSET_MS") config.offset_ms = num(value, key.c_str());
-        else if (key == "AVSYNC_CHIRP_LEVEL_DBFS") config.chirp_level_dbfs = num(value, key.c_str());
-        else if (key == "AVSYNC_AUDIO_ENABLE") config.audio_enable = parse_bool(value);
-        else if (key == "AVSYNC_TITLE") config.title = value;
-        else if (key == "AVSYNC_SOURCE") config.source = value;
-        else if (key == "AVSYNC_SUBTITLE") config.subtitle = value;
-        else if (key == "AVSYNC_NOTES") config.notes = value;
-        else if (key == "AVSYNC_TEST_ID") config.test_id = value;
-        else if (key == "AVSYNC_PASS_MIN_MS") config.pass_min_ms = num(value, key.c_str());
-        else if (key == "AVSYNC_PASS_MAX_MS") config.pass_max_ms = num(value, key.c_str());
-        else if (key == "AVSYNC_WARN_MIN_MS") config.warn_min_ms = num(value, key.c_str());
-        else if (key == "AVSYNC_WARN_MAX_MS") config.warn_max_ms = num(value, key.c_str());
-        else if (key == "AVSYNC_GRADE_EVENTS") config.grade_events = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_STALE_S") config.stale_s = num(value, key.c_str());
-        else if (key == "AVSYNC_STATS_WINDOW") config.stats_window = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_AUDIO_THRESHOLD") config.audio_threshold = num(value, key.c_str());
-        else if (key == "AVSYNC_AUDIO_CHANNEL") config.audio_channel = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_QR_RATE") config.qr_rate = static_cast<int>(num(value, key.c_str()));
-        else if (key == "AVSYNC_RESULT_ENABLE") config.result_enable = parse_bool(value);
-        else if (key == "LOG_LEVEL") config.log_level = value;
+        if (key == "AVSYNC_EVENT_RATE") next.event_rate = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_CHIRP_MS") next.chirp_ms = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_CHIRP_LOW_HZ") next.chirp_low_hz = num(value, key.c_str());
+        else if (key == "AVSYNC_CHIRP_HIGH_HZ") next.chirp_high_hz = num(value, key.c_str());
+        else if (key == "AVSYNC_VIDEO_FORMAT") next.video_format = value;
+        else if (key == "AVSYNC_AUDIO_CHANNELS") next.audio_channels = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_AV_OFFSET_MS") next.offset_ms = num(value, key.c_str());
+        else if (key == "AVSYNC_CHIRP_LEVEL_DBFS") next.chirp_level_dbfs = num(value, key.c_str());
+        else if (key == "AVSYNC_AUDIO_ENABLE") next.audio_enable = parse_bool(value);
+        else if (key == "AVSYNC_TITLE") next.title = value;
+        else if (key == "AVSYNC_SOURCE") next.source = value;
+        else if (key == "AVSYNC_SUBTITLE") next.subtitle = value;
+        else if (key == "AVSYNC_NOTES") next.notes = value;
+        else if (key == "AVSYNC_TEST_ID") next.test_id = value;
+        else if (key == "AVSYNC_PASS_MIN_MS") next.pass_min_ms = num(value, key.c_str());
+        else if (key == "AVSYNC_PASS_MAX_MS") next.pass_max_ms = num(value, key.c_str());
+        else if (key == "AVSYNC_WARN_MIN_MS") next.warn_min_ms = num(value, key.c_str());
+        else if (key == "AVSYNC_WARN_MAX_MS") next.warn_max_ms = num(value, key.c_str());
+        else if (key == "AVSYNC_GRADE_EVENTS") next.grade_events = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_STALE_S") next.stale_s = num(value, key.c_str());
+        else if (key == "AVSYNC_STATS_WINDOW") next.stats_window = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_AUDIO_THRESHOLD") next.audio_threshold = num(value, key.c_str());
+        else if (key == "AVSYNC_AUDIO_CHANNEL") next.audio_channel = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_QR_RATE") next.qr_rate = static_cast<int>(num(value, key.c_str()));
+        else if (key == "AVSYNC_RESULT_ENABLE") next.result_enable = parse_bool(value);
+        else if (key == "LOG_LEVEL") next.log_level = value;
         else if (is_restart_key(key)) {
             continue;
         } else {
             throw std::runtime_error("unknown setting " + key);
         }
     }
-    require(windows_valid(GradeWindows{config.pass_min_ms, config.pass_max_ms, config.warn_min_ms, config.warn_max_ms}), "grade windows");
-    require(config.offset_ms >= -500 && config.offset_ms <= 500, "AVSYNC_AV_OFFSET_MS");
-    require(config.event_rate == 1 || config.event_rate == 2 || config.event_rate == 4, "AVSYNC_EVENT_RATE");
-    require(parse_video_format(config.video_format).has_value(), "AVSYNC_VIDEO_FORMAT");
+    require(windows_valid(GradeWindows{next.pass_min_ms, next.pass_max_ms, next.warn_min_ms, next.warn_max_ms}), "grade windows");
+    require(next.offset_ms >= -500 && next.offset_ms <= 500, "AVSYNC_AV_OFFSET_MS");
+    require(next.event_rate == 1 || next.event_rate == 2 || next.event_rate == 4, "AVSYNC_EVENT_RATE");
+    require(parse_video_format(next.video_format).has_value(), "AVSYNC_VIDEO_FORMAT");
+    config = std::move(next);
 }
 
 } // namespace avsync

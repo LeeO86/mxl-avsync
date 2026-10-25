@@ -20,6 +20,7 @@
 - `GET /api/v1/events` returns the newest `limit` records, newest first, and a `total` count. `since` still drops older sequence numbers.
 - The result picture draws the signed offset at about a third of the picture height, the sentence under it, a 60 s trend in the bottom third, the input state, the age, and the full-picture states NO SIGNAL, WAITING, NOT ROUTED and NO EVENTS.
 - The node label includes the role and is not the device label. Senders, flows and the device carry `urn:x-mxl:tag:test-signal/v1.0`. Video flow descriptions include the rate and the offset. Receivers publish BCP-004-01 constraint sets. `interface_bindings` names the host interface. Node `hostname` has no domain suffix.
+- Settings groups the keys from `GET /api/v1/config`, applies them with `PUT`, shows validation errors and `restart_required`, keeps env-set keys read-only, and exports and imports the document. Grading windows are in that form.
 - A generator that finds a leftover domain with a different id names `MXL_OUTPUT_DOMAIN_ID` and `NMOS_SEED` in the status detail and fails `/livez`. It does not delete that directory.
 - Demo Compose file and Kubernetes pod run both roles on a shared memory volume with NMOS and DNS-SD off. No registry.
 - QR decode is zxing-cpp 2.3.0, the decoder named in the spec. Encode stays Nayuki. The earlier quirc decoder is gone.
