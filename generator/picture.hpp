@@ -61,6 +61,10 @@ struct ResultPicture {
     std::string state;
     std::string age;
     std::vector<double> trend_ms;
+    std::string latency = "reference: unknown";
+    std::string senders;
+    std::string stamp;
+    std::string count;
 };
 
 void paint_result_picture(Yuv422p10& frame, const ResultPicture& picture);

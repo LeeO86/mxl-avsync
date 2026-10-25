@@ -250,6 +250,10 @@ struct ResultCaption {
     std::string age;
     std::vector<double> trend;
     double event_ms = 0;
+    std::string latency = "reference: unknown";
+    std::string senders;
+    std::string stamp;
+    std::string count;
 };
 
 bool result_format_of(const Config& config, VideoFormat* format)
@@ -325,6 +329,10 @@ void run_result_writer(std::atomic<bool>& stop, LiveCallbacks& callbacks, Result
                 shown.grade = caption.grade;
                 shown.state = caption.state;
                 shown.trend_ms = caption.trend;
+                shown.latency = caption.latency;
+                shown.senders = caption.senders;
+                shown.stamp = caption.stamp;
+                shown.count = caption.count;
                 const Config live = callbacks.copy_config();
                 if (caption.event_ms > 0) {
                     const double age_s = std::max(0.0, (static_cast<double>(tai_now()) / 1e6 - caption.event_ms) / 1000.0);
@@ -440,7 +448,33 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 
     while (!stop.load()) {
         const Config config = callbacks.copy_config();
-        {
+        if (callbacks.input_route) {
+            const auto video_route = callbacks.input_route(true);
+            const auto audio_route = callbacks.input_route(false);
+            std::lock_guard lock(caption.mu);
+            caption.senders.clear();
+            if (!video_route.sender_id.empty()) {
+                caption.senders += video_route.sender_id;
+            }
+            if (!audio_route.sender_id.empty()) {
+                if (!caption.senders.empty()) {
+                    caption.senders += " / ";
+                }
+                caption.senders += audio_route.sender_id;
+            }
+            if (status.state == "no_signal") {
+                caption.state = "NO SIGNAL";
+            } else if (status.state == "not_routed") {
+                caption.state = "NOT ROUTED";
+            } else if (status.state == "waiting" || status.state.empty()) {
+                caption.state = "WAITING";
+            } else if (status.state == "running") {
+                caption.state = caption.number.empty() ? "NO EVENTS" : "RUNNING";
+            }
+            if (caption.state != "RUNNING") {
+                caption.number.clear();
+            }
+        } else {
             std::lock_guard lock(caption.mu);
             if (status.state == "no_signal") {
                 caption.state = "NO SIGNAL";
@@ -757,6 +791,14 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                         caption.sentence = event.reason;
                         caption.event_ms = event.video_time_ms;
                     }
+                    if (event.video_latency_ms || event.audio_latency_ms) {
+                        caption.latency = "video " + (event.video_latency_ms ? std::to_string(*event.video_latency_ms) : std::string("–"))
+                            + " audio " + (event.audio_latency_ms ? std::to_string(*event.audio_latency_ms) : std::string("–"));
+                    } else {
+                        caption.latency = "reference: unknown";
+                    }
+                    caption.stamp = std::to_string(static_cast<long long>(event.video_time_ms));
+                    caption.count = std::to_string(event.seq);
                 }
                 callbacks.add_event(event);
             }
