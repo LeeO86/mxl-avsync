@@ -294,6 +294,8 @@ struct VideoObservation {
     double arrival_ms = 0;
     bool have_set_time = false;
     int64_t set_tai_ns = 0; // generator T_k from the QR, when that code names this event
+    bool have_grain_time = false;
+    int64_t grain_tai_ns = 0; // MXL timestamp of this grain, from its index
 };
 
 class MarkerTracker {
@@ -359,6 +361,8 @@ struct AudioObservation {
     int64_t tai_ns = 0;
     double arrival_ms = 0;
     bool have_arrival = false;
+    bool have_grain_time = false;
+    int64_t grain_tai_ns = 0; // MXL timestamp of the chirp's sample index
     double correlation = 0;
     double level_dbfs = -120;
     bool clipped = false;
@@ -391,6 +395,16 @@ struct Measurement {
     std::optional<double> audio_latency_ms;
     std::optional<double> video_index_shift_ms;
     std::optional<double> audio_index_shift_ms;
+    // Content time minus the MXL timestamp of the grain or sample. Both times are on the grain.
+    std::optional<double> video_content_vs_grain_ms;
+    std::optional<double> audio_content_vs_grain_ms;
+    std::optional<double> content_vs_grain_av_ms;
+    // Present only with a locked clock, next to the arrival fields.
+    std::optional<double> video_content_vs_grain_vs_latency_ms;
+    std::optional<double> audio_content_vs_grain_vs_latency_ms;
+    std::optional<double> video_content_vs_grain_vs_index_shift_ms;
+    std::optional<double> audio_content_vs_grain_vs_index_shift_ms;
+    std::optional<double> content_vs_grain_av_vs_arrival_ms;
     std::string grade = "invalid";
     std::string graded_on = "offset";
     std::optional<double> uncertainty_ms;

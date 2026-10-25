@@ -84,7 +84,8 @@ public:
     void release_audio_reader();
 
     // Copies a valid grain. False when the grain is invalid, short, overwritten, or the flow is gone.
-    bool copy_grain(uint64_t index, uint64_t timeout_ns, int grain_rows, int width, uint32_t grain_count, std::vector<uint8_t>* payload, bool* flow_invalid);
+    // grain_index, when set, receives mxlGrainInfo.index of the copied grain.
+    bool copy_grain(uint64_t index, uint64_t timeout_ns, int grain_rows, int width, uint32_t grain_count, std::vector<uint8_t>* payload, bool* flow_invalid, uint64_t* grain_index = nullptr);
     bool copy_samples(uint64_t end_index, int frames, int channels, uint64_t timeout_ns, size_t max_read, std::vector<float>* interleaved, bool* flow_invalid);
     uint64_t video_head();
     uint64_t audio_head();

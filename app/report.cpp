@@ -54,6 +54,30 @@ nlohmann::json measurement_to_json(const Measurement& m)
     if (m.audio_index_shift_ms) {
         j["audio_index_shift_ms"] = *m.audio_index_shift_ms;
     }
+    if (m.video_content_vs_grain_ms) {
+        j["video_content_vs_grain_ms"] = *m.video_content_vs_grain_ms;
+    }
+    if (m.audio_content_vs_grain_ms) {
+        j["audio_content_vs_grain_ms"] = *m.audio_content_vs_grain_ms;
+    }
+    if (m.content_vs_grain_av_ms) {
+        j["content_vs_grain_av_ms"] = *m.content_vs_grain_av_ms;
+    }
+    if (m.video_content_vs_grain_vs_latency_ms) {
+        j["video_content_vs_grain_vs_latency_ms"] = *m.video_content_vs_grain_vs_latency_ms;
+    }
+    if (m.audio_content_vs_grain_vs_latency_ms) {
+        j["audio_content_vs_grain_vs_latency_ms"] = *m.audio_content_vs_grain_vs_latency_ms;
+    }
+    if (m.video_content_vs_grain_vs_index_shift_ms) {
+        j["video_content_vs_grain_vs_index_shift_ms"] = *m.video_content_vs_grain_vs_index_shift_ms;
+    }
+    if (m.audio_content_vs_grain_vs_index_shift_ms) {
+        j["audio_content_vs_grain_vs_index_shift_ms"] = *m.audio_content_vs_grain_vs_index_shift_ms;
+    }
+    if (m.content_vs_grain_av_vs_arrival_ms) {
+        j["content_vs_grain_av_vs_arrival_ms"] = *m.content_vs_grain_av_vs_arrival_ms;
+    }
     if (m.uncertainty_status == "known" && m.uncertainty_ms) {
         j["uncertainty_ms"] = *m.uncertainty_ms;
     } else {

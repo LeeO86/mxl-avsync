@@ -599,7 +599,7 @@ void Domain::release_audio_reader()
     audio_reader_ = nullptr;
 }
 
-bool Domain::copy_grain(uint64_t index, uint64_t timeout_ns, int grain_rows, int width, uint32_t grain_count, std::vector<uint8_t>* payload, bool* flow_invalid)
+bool Domain::copy_grain(uint64_t index, uint64_t timeout_ns, int grain_rows, int width, uint32_t grain_count, std::vector<uint8_t>* payload, bool* flow_invalid, uint64_t* grain_index)
 {
     auto* reader = static_cast<mxlFlowReader>(video_reader_);
     if (reader == nullptr || payload == nullptr || grain_rows < 1 || width < 2) {
@@ -629,6 +629,9 @@ bool Domain::copy_grain(uint64_t index, uint64_t timeout_ns, int grain_rows, int
         return false;
     }
     payload->assign(grain, grain + expected);
+    if (grain_index != nullptr) {
+        *grain_index = info.index;
+    }
     return true;
 }
 
