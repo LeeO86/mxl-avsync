@@ -14,7 +14,7 @@ AV offset can be measured without a shared clock. Absolute arrival latency needs
 
 A ptp4l reading is locked only when a grandmaster is present, port state is SLAVE or MASTER, and the absolute master offset is at most `AVSYNC_CLOCK_MAX_ERROR_US` (default 100 µs). Accuracy is the absolute offset in ns. Grandmaster MASTER state is valid on the grandmaster node itself.
 
-The socket is optional and unset by default. The service does not start ptp4l or change its configuration. A read-only hostPath mount avoids filesystem modification; Unix datagram communication still requires the socket's own permissions to allow uid 1000. Use the host's permitted group via `supplementalGroups`; do not make the socket world-writable.
+The socket is optional and unset by default. If the daemon provides a dedicated read-only management endpoint such as `/var/run/ptp4lro`, prefer that endpoint; the GET subset works with it. The service does not start ptp4l or change its configuration. A read-only hostPath mount avoids filesystem modification; Unix datagram communication still requires the socket's own permissions to allow uid 1000. Use the host's permitted group via `supplementalGroups`; do not make the socket world-writable.
 
 The client uses an abstract Linux Unix-domain reply endpoint. Abstract endpoints are scoped to the network namespace, so this optional direct-socket mode requires **host networking**, in addition to mounting the socket. A socket file mount alone in an isolated pod does not provide a usable reply path; failed queries fall back to the kernel. Host networking is not required for the default kernel mode or the URL override.
 
@@ -44,7 +44,7 @@ For Docker use the host network, mount the socket read-only, and add the permitt
 
 ## Kernel PTP and NTP
 
-Kernel lock needs `STA_UNSYNC` clear and TAI−UTC greater than zero. If `esterror` **and** `maxerror` are both at least 16000000 µs (the kernel default phase limit), the error is not reported: accuracy is unknown (`accuracy_ns=-1` internally), and the reason says `error not reported (PTP discipline)`. This supports a host disciplined by ptp4l/phc2sys without treating the default 16-second estimate as a measured error. It does not turn unknown accuracy into a numerical guarantee.
+Kernel lock needs `STA_UNSYNC` clear and TAI−UTC greater than zero. If `esterror` **and** `maxerror` are both at least 16000000 µs (the kernel default phase limit), the error is not reported: accuracy is unknown (`accuracy_ns=-1`, serialized as the string `"-1"` in the existing string-valued API field), and the reason says `error not reported (PTP discipline)`. This supports a host disciplined by ptp4l/phc2sys without treating the default 16-second estimate as a measured error. It does not turn unknown accuracy into a numerical guarantee.
 
 When the kernel reports a real estimated error, such as with chrony or ntpd, the configured `AVSYNC_CLOCK_MAX_ERROR_US` limit is enforced. An unsynchronized kernel or missing TAI offset is unlocked with an explicit reason. Kernel state alone cannot identify the disciplining daemon.
 

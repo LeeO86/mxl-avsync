@@ -51,6 +51,8 @@ jobs:
         run: ./tests/integration/api.sh
       - name: metrics
         run: ./tests/integration/metrics.sh
+      - name: clock source API
+        run: ./tests/integration/clock.sh
       - name: file
         run: ./tests/integration/file.sh
       - name: stage 2 file paths
@@ -123,6 +125,7 @@ jobs:
           ./tests/integration/no-signal.sh
           ./tests/integration/settings.sh
           ./tests/integration/ptp.sh
+          ./tests/integration/clock.sh
           ./tests/integration/nmos.sh
           ./tests/integration/nmos-registry.sh
       - uses: actions/setup-python@v5

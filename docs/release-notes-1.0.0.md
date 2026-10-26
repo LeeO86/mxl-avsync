@@ -1,6 +1,6 @@
 # mxl-avsync 1.0.0
 
-For the revised readiness contract, see [1.0.1 (unreleased)](release-notes-1.0.1.md). The descriptions below record 1.0.0 behaviour.
+For the revised readiness contract, see [1.0.1](release-notes-1.0.1.md). The descriptions below record 1.0.0 behaviour.
 
 The first release. One image is a generator or an analyzer of lip-sync on MXL: the generator writes a `video/v210` test picture and `audio/float32` chirps, and the analyzer reads them and grades the offset. ST 2110, SRT, SIP and fabrics stay in the sibling gateways. The changes are listed in CHANGELOG.md under "1.0.0".
 
