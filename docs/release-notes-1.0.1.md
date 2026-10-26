@@ -31,6 +31,10 @@ See [clock deployment requirements](clock-reference.md) for the read-only socket
 
 Signal and Settings fields now keep local drafts during status and JPEG polling. Unsaved changes, Apply and Discard make adoption explicit. Failed saves retain input, and a successful save cannot erase a newer edit typed while that request was pending. Discard reads current server values. Image/status polling does not reconstruct the settings form.
 
+## Embedded test-picture recognition
+
+Expanded validation reproduced a 1.0.0 bug in `stage2.sh`: on a scaled and padded signal, the locator could select QR/text squares instead of all four picture corners. The fix preserves spatial corner candidates, refines them locally, checks geometry/reference strip/parity, and rectifies to a stable 640×360 raster. The unchanged Stage-2 integration passes; a full-renderer regression checks three sequences, both marker states and all corner coordinates (54 assertions). This is a digital file-path recognition fix, not a claim of calibrated phone-camera accuracy.
+
 ## Validation and limits
 
 Regression coverage includes readiness before routing, unroute/reroute, signal loss and Query API disappearance; exact node labels for both roles; kernel classification, management-message encoding/decoding, fake UDS source selection and URL override; form polling, Apply persistence, failed writes and edits during a pending save. A real-browser test uses an isolated service, waits through at least three status polls while typing, and checks Apply/Discard.

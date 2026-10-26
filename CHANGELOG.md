@@ -2,6 +2,8 @@
 
 ## 1.0.1 (2026-10-26)
 
+- Fixed a pre-existing `--locate` failure on scaled, padded full-renderer signals: QR/text squares could displace real corners. Spatial candidate retention, local ring refinement, strip/geometry checks and stable 640×360 rectification now recover the full picture. Regression coverage checks actual corner coordinates and multiple marker sequences/states.
+
 - NMOS node labels equal `NMOS_LABEL` exactly, with the role on the device label; sender and receiver labels are unchanged.
 - Clock source selection: explicit URL override, optional read-only ptp4l management queries, then kernel fallback, with `sync_source`, reasons and PTP grandmaster/offset diagnostics in status, UI and metrics. Unreported kernel PTP error defaults no longer prevent lock; NTP still requires a configured TAI offset and reported error within the limit.
 - Web Signal and Settings forms preserve local edits during periodic status/preview refreshes. Apply/Discard and Unsaved changes are explicit; failed saves and edits made during an in-flight save are retained.
