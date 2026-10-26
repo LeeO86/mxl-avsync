@@ -69,6 +69,14 @@ target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-param
 enable_testing()
 add_test(NAME core COMMAND avsync-core-tests)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(avsync-clock-tests tests/unit/test_clock.cpp ops/ptp.cpp)
+    target_include_directories(avsync-clock-tests PRIVATE core/include ops third_party third_party/doctest)
+    target_link_libraries(avsync-clock-tests PRIVATE pthread)
+    target_compile_options(avsync-clock-tests PRIVATE -Wall -Wextra)
+    add_test(NAME clock COMMAND avsync-clock-tests)
+endif()
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
 if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)

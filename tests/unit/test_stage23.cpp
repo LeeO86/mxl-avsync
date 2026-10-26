@@ -260,3 +260,32 @@ TEST_CASE("kernel clock maps to sync_state")
     clock.unsynced = true;
     CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
 }
+
+TEST_CASE("kernel unreported PTP errors are unknown accuracy, not a 16 second estimate")
+{
+    KernelClock clock;
+    clock.read_ok = true;
+    clock.unsynced = false;
+    clock.tai_offset_s = 37;
+    clock.esterror_us = clock.maxerror_us = 16000000;
+    auto state = classify_kernel_clock(clock, 100);
+    CHECK(state.sync_state == "locked");
+    CHECK(state.accuracy_ns == -1);
+    CHECK(state.reason == "error not reported (PTP discipline)");
+    clock.unsynced = true;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+    clock.unsynced = false;
+    clock.tai_offset_s = 0;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+    CHECK(classify_kernel_clock(clock, 100).reason == "TAI offset is not set");
+    clock.tai_offset_s = 37;
+    clock.maxerror_us = 1000; // only one sentinel must not bypass the NTP limit
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+    clock.esterror_us = 200;
+    clock.maxerror_us = 16000000;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+    CHECK(classify_kernel_clock(clock, 100).accuracy_ns == 200000);
+    clock.esterror_us = 100;
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "locked");
+    CHECK(classify_kernel_clock(clock, 100).accuracy_ns == 100000);
+}
