@@ -1,11 +1,14 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 #include "ptp.hpp"
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <climits>
 #include <cstring>
+#include <cctype>
+#include <fstream>
 #include <functional>
 #include <poll.h>
 #include <sstream>
@@ -22,10 +25,12 @@ namespace {
 
 std::vector<uint8_t> hex(const char* text)
 {
-    std::istringstream input(text);
+    std::string digits;
+    for (const char* p = text; *p; ++p) if (!std::isspace(static_cast<unsigned char>(*p))) digits += *p;
+    if (digits.size() % 2) throw std::runtime_error("odd hex fixture");
     std::vector<uint8_t> bytes;
-    unsigned value;
-    while (input >> std::hex >> value) bytes.push_back(value);
+    for (size_t offset = 0; offset < digits.size(); offset += 2)
+        bytes.push_back(std::stoul(digits.substr(offset, 2), nullptr, 16));
     return bytes;
 }
 
@@ -322,4 +327,37 @@ TEST_CASE("successful explicit URL and malformed JSON values remain authoritativ
     CHECK(result.sync_source == "url");
     CHECK(result.sync_state == "unknown");
     CHECK(daemon.requests == 0);
+}
+
+TEST_CASE("recorded linuxptp 4.2 replies interoperate with the native codec")
+{
+    std::ifstream stream(std::string(AVSYNC_FIXTURE_DIR) + "/ptp4l-4.2-management.json");
+    REQUIRE(stream.good());
+    const auto fixture = nlohmann::json::parse(stream);
+    auto identity = hex(fixture.at("client_identity").get<std::string>().c_str());
+    REQUIRE(identity.size() == 10);
+    ptp::Identity recorded_client{};
+    std::copy(identity.begin(), identity.end(), recorded_client.begin());
+    std::optional<ptp::Reply> time_status;
+    uint8_t state = 0;
+    REQUIRE(fixture.at("records").size() == 2);
+    for (const auto& record : fixture.at("records")) {
+        const uint16_t id = record.at("management_id");
+        const uint16_t sequence = record.at("sequence");
+        const auto request = hex(record.at("request").get<std::string>().c_str());
+        CHECK(ptp::management_get(id, sequence, recorded_client) == request);
+        const auto bytes = hex(record.at("response").get<std::string>().c_str());
+        auto reply = ptp::management_reply(bytes, id, sequence, recorded_client);
+        REQUIRE(reply);
+        if (id == ptp::time_status_np) time_status = reply;
+        else state = reply->data[10];
+    }
+    REQUIRE(time_status);
+    const auto result = ptp::classify_status(time_status->data, state, 100);
+    CHECK(result.sync_source == "ptp4l");
+    CHECK(result.sync_state == "unlocked");
+    CHECK(result.gm_identity == "0200000000000001");
+    CHECK_FALSE(result.gm_present);
+    CHECK(result.port_state == "LISTENING");
+    CHECK(result.master_offset_ns == 0);
 }
