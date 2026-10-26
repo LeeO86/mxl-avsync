@@ -79,6 +79,11 @@ wait_ready "$GAPI/readyz"
 start_ana "$APORT" "$WORK/astate"
 wait_http "$AAPI/livez"
 wait_ready "$AAPI/readyz"
+for _ in $(seq 1 100); do
+  curl -sf "$AAPI/api/v1/status" | grep -q '"input_state":"running"' && break
+  sleep 0.1
+done
+curl -sf "$AAPI/api/v1/status" | grep -q '"input_state":"running"'
 echo "running before kill:"
 curl -sf "$AAPI/api/v1/status"
 echo
@@ -107,7 +112,7 @@ PY
 set +e
 ready_code=$(curl -s -o /dev/null -w '%{http_code}' "$AAPI/readyz" || true)
 set -e
-test "$ready_code" != "200"
+test "$ready_code" = "200"
 curl -sf "$AAPI/metrics" | grep -q 'mxl_avsync_input_state{essence="video",state="no_signal"} 1'
 curl -sf "$AAPI/metrics" | grep -q 'mxl_avsync_input_state{essence="video",state="running"} 0'
 first=$(resyncs "$APORT")
@@ -136,4 +141,5 @@ if status.get("media_ready") is not False:
     sys.exit("late media_ready stayed true")
 print("late no_signal")
 PY
+curl -sf "http://127.0.0.1:18994/readyz" >/dev/null
 echo "no-signal.sh ok"

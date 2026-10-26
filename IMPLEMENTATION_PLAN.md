@@ -464,3 +464,9 @@ That is seq, `video_content_vs_grain_ms`, `audio_content_vs_grain_ms`, `content_
 ## Next step
 
 Left on purpose: the AMWA suite (no Docker, and no mDNS registry on this host), a separate interlaced file mux (the plan does not ask for one), stage 4 (per-channel sequences, programme lip-sync, IS-07), the phone on a device, the LED/piezo rig, and the ST 2110 hour run.
+
+## Route-independent readiness (1.0.1 unreleased)
+
+Supersedes the original §16.4 media-dependent readiness contract: an analyzer is deployment-ready before routing and remains ready on unroute or signal loss. Process/HTTP health and configured Query API registration are still required. The generator also waits for creation of both output flows. Media readiness and input state remain diagnostics, now also included together in `/statusz`. Heartbeat reads/writes share the runtime mutex.
+
+Regression scripts cover an analyzer started before its generator, readiness before first IS-05 routing and after unroute/reroute, no-signal readiness including a late-started analyzer, and Query API disappearance for both roles. Signal-loss regression now runs in the live CI job. Historical 1.0.0 release notes are preserved with a link to the new contract.

@@ -104,6 +104,18 @@ for _ in $(seq 1 80); do
   curl -sf "http://127.0.0.1:$ANPORT/x-nmos/node/v1.3/receivers" >/dev/null && break
   sleep 0.1
 done
+# A platform may wait for this before sending its first IS-05 activation.
+for _ in $(seq 1 50); do
+  curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null && break
+  sleep 0.1
+done
+curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null
+curl -sf "http://127.0.0.1:$APORT/statusz" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+assert s["input_state"]=="not_routed" and s["media_ready"] is False, s
+'
+echo "analyzer ready before IS-05, input not_routed"
 RECS=$(curl -sf "http://127.0.0.1:$ANPORT/x-nmos/node/v1.3/receivers")
 python3 - "$RECS" <<'PY'
 import json, sys
@@ -139,11 +151,11 @@ activate() {
 activate "$VREC" "$VID"
 activate "$AREC" "$AFLOW"
 for _ in $(seq 1 40); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APORT/readyz" || true)
-  [[ "$code" == "200" ]] && break
+  curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"running"' && break
   sleep 0.25
 done
-test "$code" = 200
+curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null
+curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"running"'
 echo "analyzer ready after IS-05"
 curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"running"'
 SEQ=$(python3 - "http://127.0.0.1:$APORT" <<'PY'
@@ -182,7 +194,7 @@ for _ in $(seq 1 20); do
 done
 test "$unrouted" = 1
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APORT/readyz" || true)
-test "$code" != "200"
+test "$code" = "200"
 sleep 1
 python3 - "http://127.0.0.1:$APORT" "$SEQ" <<'PY'
 import json, sys, urllib.request
@@ -227,11 +239,11 @@ activate2() {
 activate2 "$VREC" "$VID2"
 activate2 "$AREC" "$AFLOW2"
 for _ in $(seq 1 40); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APORT/readyz" || true)
-  [[ "$code" == "200" ]] && break
+  curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"running"' && break
   sleep 0.25
 done
-test "$code" = 200
+curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null
+curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"input_state":"running"'
 python3 - "http://127.0.0.1:$APORT" "$SEQ" <<'PY'
 import json, sys, time, urllib.request
 api, seq = sys.argv[1], int(sys.argv[2])

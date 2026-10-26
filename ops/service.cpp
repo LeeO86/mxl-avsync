@@ -267,12 +267,9 @@ nlohmann::json nmos_node(const Config& config)
 void install_web(HttpServer& http, Runtime& rt)
 {
     http.add("GET", "/livez", [&](const HttpRequest&) {
+        std::lock_guard lock(rt.mu);
         const auto age = std::chrono::steady_clock::now() - rt.heartbeat;
-        bool media_live = true;
-        {
-            std::lock_guard lock(rt.mu);
-            media_live = rt.media_live;
-        }
+        const bool media_live = rt.media_live;
         const bool heartbeat_ok = age < std::chrono::seconds(5);
         const bool ok = heartbeat_ok && media_live;
         return json_response({{"status", ok ? "ok" : (media_live ? "stale" : "domain")}}, ok ? 200 : 503);
@@ -284,7 +281,13 @@ void install_web(HttpServer& http, Runtime& rt)
 #else
         const bool want_registry = false;
 #endif
-        const bool ok = rt.media_ready && (!want_registry || rt.nmos_registered);
+        // Controllers may wait for deployment readiness before connecting receivers.
+        // Route and signal health belong in status/metrics, outside this gate.
+        const bool process_up = !g_stop && rt.media_live
+            && std::chrono::steady_clock::now() - rt.heartbeat < std::chrono::seconds(5);
+        const bool outputs_created = rt.config.role != "generator"
+            || (!rt.video_flow.empty() && !rt.audio_flow.empty());
+        const bool ok = process_up && outputs_created && (!want_registry || rt.nmos_registered);
         return json_response({{"ready", ok}, {"role", rt.config.role}, {"nmos_registered", rt.nmos_registered}}, ok ? 200 : 503);
     });
     http.add("GET", "/metrics", [&](const HttpRequest&) {
@@ -626,7 +629,8 @@ void install_web(HttpServer& http, Runtime& rt)
 HttpResponse http_status_alias(Runtime& rt)
 {
     std::lock_guard lock(rt.mu);
-    return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready}});
+    return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
+        {"input_state", rt.input_state}, {"detail", rt.media_detail}});
 }
 
 std::map<std::string, std::string> widget_headers(const Config& config)
@@ -818,7 +822,10 @@ int run_service(Config config)
     });
     std::thread beat([&] {
         while (!g_stop) {
-            rt.heartbeat = std::chrono::steady_clock::now();
+            {
+                std::lock_guard lock(rt.mu);
+                rt.heartbeat = std::chrono::steady_clock::now();
+            }
 #ifdef AVSYNC_WITH_NMOS
             if (nmos_node) {
                 const bool registered = nmos_node->registered();

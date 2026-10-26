@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1 (unreleased)
+
+- Readiness no longer waits for analyzer routes, input flows or signal, preventing a deployment deadlock when controllers route only ready pods. `/readyz` checks process/HTTP health and configured NMOS Query API registration; the generator also waits for output-flow creation. Media state remains visible through `/statusz`, metrics and the UI. Regression coverage includes startup before routing, unroute/reroute, signal loss and registry disappearance.
+
 ## 1.0.0 (2026-10-25)
 
 - Clock check without an external URL: `sync_state` comes from the kernel clock (`adjtimex(2)`, read-only, no privilege). `locked` needs STA_UNSYNC clear, a TAI offset and `esterror` ≤ `AVSYNC_CLOCK_MAX_ERROR_US` (default 100). It cannot tell PTP from NTP. `AVSYNC_PTP_STATUS_URL` stays as an override. New gauges `mxl_avsync_clock_synchronized`, `mxl_avsync_clock_esterror_seconds`, `mxl_avsync_clock_tai_offset_seconds`; `/api/v1/status` `ptp` has `clock_synchronized` and `tai_offset_s`.
