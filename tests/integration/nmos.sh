@@ -22,7 +22,7 @@ APORT=18682
 ANPORT=18634
 mkdir -p "$WORK/g" "$WORK/a" "$WORK/gen"
 
-AVSYNC_ROLE=generator AVSYNC_EVENT_RATE=2 AVSYNC_AV_OFFSET_MS=0 NMOS_SEED=nmos-gen \
+AVSYNC_ROLE=generator AVSYNC_EVENT_RATE=2 AVSYNC_AV_OFFSET_MS=0 NMOS_SEED=nmos-gen NMOS_LABEL="AV sync test label" \
   NMOS_ENABLE=true NMOS_DNS_SD=false NMOS_REGISTRY_ADDRESS= \
   NMOS_HOST_ADDRESS=127.0.0.1 NMOS_PORT=$NPORT WEB_PORT=$GPORT \
   AVSYNC_STATE_DIR="$WORK/g" MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$WORK/gen" \
@@ -41,8 +41,8 @@ host = self["hostname"]
 label = self["label"]
 if "." in host:
     sys.exit("hostname has a domain suffix: " + host)
-if "generator" not in label:
-    sys.exit("node label has no role: " + label)
+if label != "AV sync test label":
+    sys.exit("node label is not NMOS_LABEL verbatim: " + label)
 print("node", label, host)
 PY
 NODE=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$SELF")
@@ -79,8 +79,8 @@ devices = json.loads(sys.argv[2])
 device = devices[0]
 if device.get("tags", {}).get("urn:x-mxl:tag:test-signal/v1.0") != ["mxl-avsync"]:
     sys.exit("device has no test-signal tag")
-if device["label"] == self["label"]:
-    sys.exit("node label matches the device")
+if device["label"] != self["label"] + " generator":
+    sys.exit("device label lacks the role: " + device["label"])
 print("device", device["label"])
 PY
 VID=$(python3 -c 'import json,sys; flows=json.loads(sys.argv[1]); print(next(f["id"] for f in flows if f.get("media_type")=="video/v210" and "Result" not in f.get("label","")))' "$FLOWS")
@@ -94,7 +94,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-AVSYNC_ROLE=analyzer AVSYNC_EVENT_RATE=2 AVSYNC_AV_OFFSET_MS=0 NMOS_SEED=nmos-ana \
+AVSYNC_ROLE=analyzer AVSYNC_EVENT_RATE=2 AVSYNC_AV_OFFSET_MS=0 NMOS_SEED=nmos-ana NMOS_LABEL="AV sync test label" \
   NMOS_ENABLE=true NMOS_DNS_SD=false NMOS_REGISTRY_ADDRESS= \
   NMOS_HOST_ADDRESS=127.0.0.1 NMOS_PORT=$ANPORT WEB_PORT=$APORT \
   AVSYNC_STATE_DIR="$WORK/a" MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$WORK/ana-out" \
@@ -104,6 +104,14 @@ for _ in $(seq 1 80); do
   curl -sf "http://127.0.0.1:$ANPORT/x-nmos/node/v1.3/receivers" >/dev/null && break
   sleep 0.1
 done
+python3 - "$ANPORT" <<'PY'
+import json,sys,urllib.request
+base="http://127.0.0.1:"+sys.argv[1]+"/x-nmos/node/v1.3/"
+node=json.load(urllib.request.urlopen(base+"self"))
+device=json.load(urllib.request.urlopen(base+"devices"))[0]
+assert node["label"] == "AV sync test label", node
+assert device["label"] == "AV sync test label analyzer", device
+PY
 # A platform may wait for this before sending its first IS-05 activation.
 for _ in $(seq 1 50); do
   curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null && break
