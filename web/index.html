@@ -47,6 +47,7 @@
   input[type=file] { border:none; padding-left:0; }
   button { background:var(--accent); color:#fff; border:none; border-radius:5px; padding:.45rem .9rem; font-size:.85rem; font-weight:600; cursor:pointer; font-family:inherit; margin:.5rem .4rem 0 0; }
   nav button.tab { margin:0; font-weight:400; }
+  button:disabled { opacity:.5; cursor:default; }
   a { color:var(--accent); }
   table { width:100%; border-collapse:collapse; font-size:.82rem; }
   th { color:var(--muted); text-align:left; font-weight:500; padding:.35rem .5rem; border-bottom:1px solid var(--border); white-space:nowrap; }
@@ -93,12 +94,14 @@
           <dt>Flags</dt><dd>{{ flagText(last) || '–' }}</dd>
         </dl></div>
         <div class="card"><h3>Latency</h3>
-          <p v-if="!ptpLocked" class="note">needs PTP lock (sync_state {{ syncState }})</p>
+          <p v-if="!ptpLocked" class="note">needs clock lock (sync_state {{ syncState }})</p>
           <dl v-else class="kv">
             <dt>Video latency</dt><dd>{{ ms1(measurement.video_latency_ms) }}</dd>
             <dt>Audio latency</dt><dd>{{ ms1(measurement.audio_latency_ms) }}</dd>
           </dl>
-          <dl class="kv"><dt>sync_state</dt><dd>{{ syncState }}</dd></dl>
+          <dl class="kv"><dt>sync_state</dt><dd>{{ syncState }}</dd>
+            <dt>Clock source</dt><dd>{{ status.ptp?.sync_source || 'unknown' }}</dd>
+            <dt>Clock detail</dt><dd>{{ status.ptp?.reason || '–' }}</dd></dl>
         </div>
         <div class="card"><h3>Input</h3><dl class="kv">
           <dt>Input state</dt><dd><span class="pill" :class="inputKind">{{ status.input_state || '–' }}</span></dd>
@@ -119,7 +122,10 @@
       <h3>Preview</h3>
       <img :src="'/api/v1/preview/input.jpg?t=' + previewTick" alt="input" style="max-height:180px;background:#111;margin-right:8px"/>
       <img :src="'/api/v1/preview/generated.jpg?t=' + previewTick" alt="generated" style="max-height:180px;background:#111"/>
-      <div v-if="role=='generator'">
+      <div v-if="role=='generator' && generatorBaseline" data-testid="signal-form"
+        v-memo="[generatorBaseline, signalDirty, signalSaving, signalError, imageFile, imageSet, imageFrames, imageUrl, audioOn, stopped]">
+        <p v-if="signalError" class="banner" role="alert">{{ signalError }}</p>
+        <p v-if="signalDirty" role="status">Unsaved changes</p>
         <label>Set offset (ms, + audio late) <input type="number" v-model.number="offset" min="-500" max="500"/></label>
         <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
         <label>Title <input v-model="title" maxlength="80"/></label>
@@ -130,7 +136,8 @@
         </label>
         <p v-if="imageSet">Source picture stored{{ imageFrames > 1 ? ' (' + imageFrames + ' frames)' : '' }}.</p>
         <img v-if="imageSet" :src="imageUrl" alt="" style="height:72px;background:#222;margin-top:8px"/>
-        <button @click="saveGenerator">Apply</button>
+        <button @click="saveGenerator" :disabled="!generatorBaseline || !signalDirty || signalSaving">{{ signalSaving ? 'Saving…' : 'Apply' }}</button>
+        <button @click="discardGenerator" :disabled="!generatorBaseline || signalSaving">Discard</button>
         <button @click="mute">{{ audioOn ? 'Mute' : 'Unmute' }}</button>
         <button @click="toggleRun">{{ stopped ? 'Start' : 'Stop' }}</button>
       </div>
@@ -178,7 +185,14 @@
             <dt>Live</dt><dd>{{ health }}</dd>
             <dt>Ready</dt><dd>{{ readyText }}</dd>
             <dt>Registered</dt><dd>{{ nmosPill }}</dd>
-            <dt>PTP</dt><dd>{{ (status.ptp && status.ptp.sync_state) || 'unknown' }} <span v-if="status.ptp">{{ status.ptp.accuracy_ns }}</span></dd>
+            <dt>Clock state</dt><dd>{{ syncState }}</dd>
+            <dt>Clock source</dt><dd>{{ status.ptp?.sync_source || 'unknown' }}</dd>
+            <dt>Accuracy (ns)</dt><dd>{{ status.ptp?.accuracy_ns ?? 'unknown' }}</dd>
+            <dt>Clock detail</dt><dd>{{ status.ptp?.reason || '–' }}</dd>
+            <dt>Grandmaster</dt><dd>{{ status.ptp?.gm_identity || '–' }}</dd>
+            <dt>Grandmaster present</dt><dd>{{ status.ptp?.gm_present ?? false }}</dd>
+            <dt>PTP port state</dt><dd>{{ status.ptp?.port_state || 'unknown' }}</dd>
+            <dt>Master offset (ns)</dt><dd>{{ status.ptp?.master_offset_ns ?? '–' }}</dd>
           </dl>
           <p class="note"><a href="/metrics">/metrics</a> · <a href="/api/v1/status">/api/v1/status</a> · <a href="/api/v1/info">/api/v1/info</a></p>
         </div>
@@ -210,7 +224,8 @@
         </tr>
       </table></div>
     </section>
-    <section v-if="tab=='Settings'">
+    <section v-if="tab=='Settings'" data-testid="settings-form"
+      v-memo="[tab, config, draft, envSet, settingsDirty, settingsError, restartRequired, skipped, settingsSaving]">
       <p v-if="settingsError" class="banner">{{ settingsError }}</p>
       <p v-if="restartRequired.length">Restart required: {{ restartRequired.join(', ') }}</p>
       <p v-if="skipped.length">Import skipped env-set keys: {{ skipped.join(', ') }}</p>
@@ -221,18 +236,22 @@
           <span v-if="envSet.includes(key)">env</span>
         </label>
       </div>
-      <button @click="applySettings">Apply</button>
+      <p v-if="settingsDirty" role="status">Unsaved changes</p>
+      <button @click="applySettings" :disabled="!settingsDirty || settingsSaving">{{ settingsSaving ? 'Saving…' : 'Apply' }}</button>
+      <button @click="discardSettings" :disabled="settingsSaving">Discard</button>
       <a href="/api/v1/config/export">Export</a>
-      <label>Import <input type="file" accept="application/json,.json" @change="importSettings"/></label>
+      <label>Import <input type="file" accept="application/json,.json" :disabled="settingsSaving" @change="importSettings"/></label>
     </section>
   </main>
 </div>
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[] }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
   computed: {
     role() { return this.info.role || ''; },
+    signalDirty() { return !!this.generatorBaseline && (this.imageFile !== null || !this.sameDraft(this.generatorDraft(), this.generatorBaseline)); },
+    settingsDirty() { return Object.keys(this.draft).some(key => !this.envSet.includes(key) && this.draft[key] !== this.config[key]); },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
     grade() { return (this.measurement.grade || 'invalid').toUpperCase(); },
     gradeKind() { return {pass:'ok', warn:'warn', fail:'bad'}[this.measurement.grade] || ''; },
@@ -298,9 +317,7 @@ createApp({
       if (this.tab === 'NMOS') await this.loadNmos();
       if (this.role === 'generator') {
         const g = await (await fetch('/api/v1/generator')).json();
-        this.offset = g.offset_ms; this.level = g.level_dbfs; this.title = g.title || '';
-        this.source = g.source || '';
-        this.subtitle = g.subtitle || '';
+        if (!this.generatorBaseline) this.adoptGenerator(g);
         this.imageSet = !!g.source_image; this.imageFrames = g.source_image_frames || 0;
         if (this.imageSet && !this.imageUrl) this.imageUrl = '/api/v1/generator/source-image';
         this.audioOn = !g.muted; this.stopped = !!g.stopped;
@@ -383,43 +400,83 @@ createApp({
       }
       await this.loadNmos();
     },
-    async saveGenerator() {
-      await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle})});
-      if (this.imageFile) {
-        const bytes = await this.imageFile.arrayBuffer();
-        const type = this.imageFile.type || (this.imageFile.name.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png');
-        const saved = await fetch('/api/v1/generator/source-image', {method:'POST', headers:{'Content-Type': type}, body: bytes});
-        if (!saved.ok) return;
-        this.imageUrl = '/api/v1/generator/source-image?t=' + Date.now();
-        this.imageFile = null;
+    generatorDraft() {
+      return {offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle};
+    },
+    sameDraft(a, b) { return Object.keys(a).every(key => a[key] === b[key]) && Object.keys(a).length === Object.keys(b).length; },
+    adoptGenerator(g, submitted = null) {
+      const accept = !submitted || this.sameDraft(this.generatorDraft(), submitted);
+      this.generatorBaseline = {offset_ms:g.offset_ms, level_dbfs:g.level_dbfs, title:g.title || '', source:g.source || '', subtitle:g.subtitle || ''};
+      if (accept) {
+        this.offset = this.generatorBaseline.offset_ms; this.level = this.generatorBaseline.level_dbfs;
+        this.title = this.generatorBaseline.title; this.source = this.generatorBaseline.source; this.subtitle = this.generatorBaseline.subtitle;
       }
-      await this.refresh();
+    },
+    async discardGenerator() {
+      try {
+        const response = await fetch('/api/v1/generator');
+        if (!response.ok) throw new Error('Could not reload signal settings');
+        this.adoptGenerator(await response.json());
+        this.imageFile = null;
+        this.signalError = '';
+      } catch (err) { this.signalError = err.message || String(err); }
+    },
+    async saveGenerator() {
+      if (this.signalSaving) return;
+      this.signalSaving = true;
+      const submitted = this.generatorDraft();
+      const image = this.imageFile;
+      try {
+        const response = await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(submitted)});
+        if (!response.ok) throw new Error((await response.json()).error || 'Could not save signal settings');
+        if (image) {
+          const bytes = await image.arrayBuffer();
+          const type = image.type || (image.name.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png');
+          const saved = await fetch('/api/v1/generator/source-image', {method:'POST', headers:{'Content-Type': type}, body: bytes});
+          if (!saved.ok) throw new Error((await saved.json()).error || 'Could not save source picture');
+          this.imageUrl = '/api/v1/generator/source-image?t=' + Date.now();
+          if (this.imageFile === image) this.imageFile = null;
+        }
+        const current = await fetch('/api/v1/generator');
+        if (!current.ok) throw new Error('Saved, but could not reload signal settings');
+        this.adoptGenerator(await current.json(), submitted);
+        this.signalError = '';
+        await this.refresh();
+      } catch (err) { this.signalError = err.message || String(err); }
+      finally { this.signalSaving = false; }
     },
     async mute() { await fetch('/api/v1/generator', {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({muted:this.audioOn})}); await this.refresh(); },
     async toggleRun() { await fetch(this.stopped ? '/api/v1/generator/start' : '/api/v1/generator/stop', {method:'POST'}); await this.refresh(); },
-    async loadConfig() {
+    async loadConfig(submitted = null) {
       const response = await fetch('/api/v1/config');
+      if (!response.ok) throw new Error('Could not reload settings');
+      const accept = !submitted || this.sameDraft(this.draft, submitted);
       this.config = await response.json();
-      this.draft = Object.assign({}, this.config);
+      if (accept) this.draft = Object.assign({}, this.config);
       const header = response.headers.get('X-Env-Set') || '';
       this.envSet = header ? header.split(',').filter(Boolean) : [];
     },
+    async discardSettings() {
+      try { await this.loadConfig(); this.settingsError = ''; }
+      catch (err) { this.settingsError = err.message || String(err); }
+    },
     async applySettings() {
+      if (this.settingsSaving) return;
+      this.settingsSaving = true;
+      const submitted = Object.assign({}, this.draft);
       const body = {};
-      for (const key of Object.keys(this.draft)) {
-        if (this.envSet.includes(key)) continue;
-        if (this.draft[key] !== this.config[key]) body[key] = this.draft[key];
+      for (const key of Object.keys(submitted)) {
+        if (!this.envSet.includes(key) && submitted[key] !== this.config[key]) body[key] = submitted[key];
       }
-      const response = await fetch('/api/v1/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-      const data = await response.json();
-      if (!response.ok) {
-        this.settingsError = data.error || 'invalid settings';
-        return;
-      }
-      this.settingsError = '';
-      this.restartRequired = data.restart_required || [];
-      await this.loadConfig();
+      try {
+        const response = await fetch('/api/v1/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'invalid settings');
+        this.restartRequired = data.restart_required || [];
+        await this.loadConfig(submitted);
+        this.settingsError = '';
+      } catch (err) { this.settingsError = err.message || String(err); }
+      finally { this.settingsSaving = false; }
     },
     async importSettings(ev) {
       const file = ev.target.files && ev.target.files[0];

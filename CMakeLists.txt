@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(mxl-avsync VERSION 1.0.0 LANGUAGES C CXX)
+project(mxl-avsync VERSION 1.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -68,6 +68,15 @@ target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-param
 
 enable_testing()
 add_test(NAME core COMMAND avsync-core-tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(avsync-clock-tests tests/unit/test_clock.cpp ops/ptp.cpp)
+    target_include_directories(avsync-clock-tests PRIVATE core/include ops third_party third_party/doctest)
+    target_compile_definitions(avsync-clock-tests PRIVATE AVSYNC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+    target_link_libraries(avsync-clock-tests PRIVATE pthread)
+    target_compile_options(avsync-clock-tests PRIVATE -Wall -Wextra)
+    add_test(NAME clock COMMAND avsync-clock-tests)
+endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)

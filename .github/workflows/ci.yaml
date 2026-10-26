@@ -46,15 +46,19 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
       - name: unit
-        run: ./build/avsync-core-tests && ./build/avsync-picture-tests
+        run: ctest --test-dir build --output-on-failure
       - name: api
         run: ./tests/integration/api.sh
       - name: metrics
         run: ./tests/integration/metrics.sh
+      - name: clock source API
+        run: ./tests/integration/clock.sh
       - name: file
         run: ./tests/integration/file.sh
       - name: stage 2 file paths
         run: ./tests/integration/stage2.sh
+      - name: web form draft rules
+        run: node --test tests/web/*.test.cjs
       - name: phone display rules
         run: node --test mobile-app/src/display.test.mjs
 
@@ -113,12 +117,15 @@ jobs:
             -DAVSYNC_WITH_NMOS=ON -DNMOS_CPP_DIR=/tmp/nmos-cpp/Development
           cmake --build build -j"$(nproc)"
       - name: unit
-        run: ./build/avsync-core-tests && ./build/avsync-picture-tests
+        run: ctest --test-dir build --output-on-failure
       - name: live
         run: |
           export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./tests/integration/live.sh
+          ./tests/integration/no-signal.sh
           ./tests/integration/settings.sh
+          ./tests/integration/ptp.sh
+          ./tests/integration/clock.sh
           ./tests/integration/nmos.sh
           ./tests/integration/nmos-registry.sh
       - uses: actions/setup-python@v5

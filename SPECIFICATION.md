@@ -146,7 +146,7 @@ Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measur
 
 **LIVE without MXL** (the phone app, §12, and a recording made elsewhere). Only the AV offset is measured. A phone's system time (NTP, mobile network) is coarse wall-clock metadata, not a reference; it never turns an AV-offset measurement into a latency.
 
-**Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. Without a URL, `sync_state` comes from the kernel clock (`adjtimex(2)`: `locked` when STA_UNSYNC is clear, the TAI offset is set and `esterror` ≤ `AVSYNC_CLOCK_MAX_ERROR_US`; else `unlocked`; the kernel cannot tell PTP from NTP). `AVSYNC_PTP_STATUS_URL`, when set, overrides that: an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. With a URL set, any other scheme or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
+**Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. A configured `AVSYNC_PTP_STATUS_URL` explicitly wins (`sync_source=url`). Otherwise, a reachable, valid `AVSYNC_PTP_SOCKET` supplies ptp4l management status (`sync_source=ptp4l`); absent or failed socket access falls back to read-only kernel state (`sync_source=kernel`). A valid unlocked PTP response is retained. Kernel lock requires STA_UNSYNC clear and a positive TAI offset. Real `esterror` must be within `AVSYNC_CLOCK_MAX_ERROR_US`; when both `esterror` and `maxerror` are at least 16000000 µs they are unreported, accuracy is unknown and the reason is "error not reported (PTP discipline)". Kernel state cannot identify PTP versus NTP. See [Clock reference](docs/clock-reference.md) for PTP mapping and runtime requirements. The URL override is an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. With a URL set, any other scheme or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
 
 ### 3.4 Resolution
 
@@ -310,8 +310,8 @@ See §11: the chirps are audible test tones and are muted by one control.
 
 | Resource | Label | Group hint |
 | --- | --- | --- |
-| Node | `NMOS_LABEL` or `HOST_ID`, then a space and the role (`generator` or `analyzer`). This is not the device label | — |
-| Device | `NMOS_LABEL` + ` avsync generator`, else `AVSync Generator` | — |
+| Node | `NMOS_LABEL` verbatim, or `HOST_ID` when unset; no role suffix | — |
+| Device | Node label + ` generator` | — |
 | Video source, flow, sender | `AVSync Test Video` | `AVSync Test:Video` |
 | Audio source, flow, sender | `AVSync Test Audio` | `AVSync Test:Audio` |
 
@@ -323,7 +323,7 @@ See §11: the chirps are audible test tones and are muted by one control.
 
 | Resource | Label | Group hint |
 | --- | --- | --- |
-| Device | `NMOS_LABEL` + ` avsync analyzer`, else `AVSync Analyzer` | — |
+| Device | Node label + ` analyzer` | — |
 | Video receiver | `AVSync In Video` | `AVSync In:Video` |
 | Audio receiver | `AVSync In Audio` | `AVSync In:Audio` |
 | Video source, flow, sender | `AVSync Result Video` | `AVSync Result:Video` |
@@ -524,8 +524,9 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_RESULT_FORMAT` | `960x540` | flow | even width and height, ≤ 1920×1080 |
 | `AVSYNC_RESULT_RATE` | 25 | flow | rate token |
 | `AVSYNC_HOLD_MS` | 1000 | live | `no_signal` after this long without a new grain |
-| `AVSYNC_CLOCK_MAX_ERROR_US` | 100 | restart | Largest kernel `esterror` (µs) that still counts as `locked` |
-| `AVSYNC_PTP_STATUS_URL` | empty | restart | Optional override of the kernel clock check: `http://` JSON `{"sync_state","accuracy_ns"}`. Latency is filled only when `sync_state` is `locked` and an arrival time was measured |
+| `AVSYNC_CLOCK_MAX_ERROR_US` | 100 | restart | Maximum reported kernel error or absolute ptp4l master offset (µs) for `locked`; unreported kernel defaults do not supply accuracy |
+| `AVSYNC_PTP_SOCKET` | empty | restart | Optional ptp4l management socket, e.g. `/var/run/ptp4l`; requires host networking and readable/writable socket permissions, with a read-only socket mount (§3.3) |
+| `AVSYNC_PTP_STATUS_URL` | empty | restart | Explicit override of socket/kernel clock selection: `http://` JSON `{"sync_state","accuracy_ns"}`. Latency is filled only when `sync_state` is `locked` and an arrival time was measured |
 
 ### 10.4 Platform settings (same names and meaning as the siblings)
 
@@ -744,7 +745,7 @@ The widget contract of Appendix B.2.
 ### 16.4 Probes
 
 - `/livez`: 200 while the media threads' heartbeats are younger than 5 s. A generator that finds a leftover output domain whose id is not its own returns 503. Set `MXL_OUTPUT_DOMAIN_ID` or `NMOS_SEED` to keep that id, or remove the leftover directory. The process does not delete a domain with a different id.
-- `/readyz`: 200 when the writers (generator) or the readers and result writer (analyzer) run, the output flows exist and, with a registry and `NMOS_ENABLE=true`, the node is in the Query API. An analyzer input in `waiting` does not fail readiness. `no_signal`, after the head stands still for `AVSYNC_HOLD_MS`, is not ready.
+- `/readyz`: 200 when the process and HTTP service are up and, with a registry and `NMOS_ENABLE=true`, the node is listed in the Query API. The generator additionally requires its video and audio output flows to be created. Analyzer readiness never depends on routing, input flows or signal: `not_routed`, `waiting` and `no_signal` are normal ready states. Their media health remains visible in `/statusz`, `/api/v1/status`, input-state metrics and the UI. Failed process health still returns 503.
 
 ### 16.5 Metrics
 
@@ -910,7 +911,7 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 3. **Chirp level.** −12 dBFS peak is clearly audible in a control room. *Recommendation:* −12, with mute in the widget; lower it if operators complain.
 4. **Result raster.** 960×540 at 25 Hz is 0.7 MB per grain. *Recommendation:* yes; 1920×1080 only on request.
 5. **Event log retention.** 7 days or 100 MB on `/config`. *Recommendation:* as written; the platform's state save does not archive it (only `config.json`, `routes.json`).
-6. **PTP state.** Default: the kernel clock check of §3.3 (it cannot tell PTP from NTP). A platform that wants PTP specifically serves the JSON in §3.3 at `AVSYNC_PTP_STATUS_URL`, which overrides the kernel check.
+6. **PTP state.** Clock selection is URL override, optional ptp4l socket, then kernel fallback (§3.3). The default kernel check cannot distinguish PTP from NTP; every status names `sync_source`, accuracy and reason. A missing NTP TAI offset is explicitly unlocked.
 7. **Calibration rig** for the phone: who builds it and from what parts. Decided at M-P1.
 8. **Tolerances per use** beyond the default windows (draft question 9): per-production overrides through the analyzer's values. *Recommendation:* add `passMinMs` … to the catalog values once a production needs it.
 
@@ -927,3 +928,7 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 - ITU-T G.711 (PCMU, PCMA)
 - ITU-R BT.709-6
 - Sibling specifications: `LeeO86/mxl-scopes`, `mxl-test-player`, `mxl-multiviewer`, `mxl-st2110-gateway`, `mxl-srt-gateway`, `mxl-fabrics-agent`, `mxl-audio-mixer` (Appendices A and B: the platform contract)
+
+### 1.0.1 form editing contract
+
+Signal and Settings fields are local drafts. Status/JPEG refreshes do not replace or reconstruct the settings form. Focused or dirty fields retain their contents; Apply/Discard and an Unsaved changes indicator make adoption explicit. Failed writes retain the draft. A successful own write adopts its server response unless the user typed a newer edit while it was pending. Discard reloads current server values.

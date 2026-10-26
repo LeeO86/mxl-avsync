@@ -126,6 +126,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 test "$stale_code" = 503
+test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SPORT/readyz")" = 503
 grep -q '"status":"domain"' /tmp/avsync-stale-livez.json
 detail=$(curl -sf "http://127.0.0.1:$SPORT/api/v1/status")
 printf '%s\n' "$detail" | grep -q 'MXL_OUTPUT_DOMAIN_ID'
@@ -141,16 +142,24 @@ STALE_PID=""
 test -f "$STALE/domain_def.json"
 echo "leftover domain refuses a new id and fails livez"
 
+# Deployment readiness must not require a running generator.
+start_ana 0
+wait_http "$AAPI/livez"
+wait_ready "$AAPI/readyz"
+curl -sf "$AAPI/statusz" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+assert s["media_ready"] is False and s["input_state"] in ("not_routed", "waiting"), s
+'
+echo "analyzer ready without input flows"
 start_gen 35 1080p50
 wait_http "$GAPI/livez"
 wait_ready "$GAPI/readyz"
 echo "generator ready"
 curl -sf "$GAPI/api/v1/status"
 echo
-start_ana 0
-wait_http "$AAPI/livez"
 wait_ready "$AAPI/readyz"
-echo "analyzer ready"
+echo "analyzer stays ready with input flows"
 curl -sf "$AAPI/" | python3 -c '
 import sys
 page = sys.stdin.read()
