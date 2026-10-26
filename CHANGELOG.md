@@ -2,6 +2,10 @@
 
 ## 1.0.1 (unreleased)
 
+- NMOS node labels equal `NMOS_LABEL` exactly, with the role on the device label; sender and receiver labels are unchanged.
+- Clock source selection: explicit URL override, optional read-only ptp4l management queries, then kernel fallback, with `sync_source`, reasons and PTP grandmaster/offset diagnostics in status, UI and metrics. Unreported kernel PTP error defaults no longer prevent lock; NTP still requires a configured TAI offset and reported error within the limit.
+- Web Signal and Settings forms preserve local edits during periodic status/preview refreshes. Apply/Discard and Unsaved changes are explicit; failed saves and edits made during an in-flight save are retained.
+
 - Readiness no longer waits for analyzer routes, input flows or signal, preventing a deployment deadlock when controllers route only ready pods. `/readyz` checks process/HTTP health and configured NMOS Query API registration; the generator also waits for output-flow creation. Media state remains visible through `/statusz`, metrics and the UI. Regression coverage includes startup before routing, unroute/reroute, signal loss and registry disappearance.
 
 ## 1.0.0 (2026-10-25)
