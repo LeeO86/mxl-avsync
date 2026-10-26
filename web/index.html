@@ -94,7 +94,7 @@
           <dt>Flags</dt><dd>{{ flagText(last) || '–' }}</dd>
         </dl></div>
         <div class="card"><h3>Latency</h3>
-          <p v-if="!ptpLocked" class="note">needs PTP lock (sync_state {{ syncState }})</p>
+          <p v-if="!ptpLocked" class="note">needs clock lock (sync_state {{ syncState }})</p>
           <dl v-else class="kv">
             <dt>Video latency</dt><dd>{{ ms1(measurement.video_latency_ms) }}</dd>
             <dt>Audio latency</dt><dd>{{ ms1(measurement.audio_latency_ms) }}</dd>
@@ -190,6 +190,8 @@
             <dt>Accuracy (ns)</dt><dd>{{ status.ptp?.accuracy_ns ?? 'unknown' }}</dd>
             <dt>Clock detail</dt><dd>{{ status.ptp?.reason || '–' }}</dd>
             <dt>Grandmaster</dt><dd>{{ status.ptp?.gm_identity || '–' }}</dd>
+            <dt>Grandmaster present</dt><dd>{{ status.ptp?.gm_present ?? false }}</dd>
+            <dt>PTP port state</dt><dd>{{ status.ptp?.port_state || 'unknown' }}</dd>
             <dt>Master offset (ns)</dt><dd>{{ status.ptp?.master_offset_ns ?? '–' }}</dd>
           </dl>
           <p class="note"><a href="/metrics">/metrics</a> · <a href="/api/v1/status">/api/v1/status</a> · <a href="/api/v1/info">/api/v1/info</a></p>

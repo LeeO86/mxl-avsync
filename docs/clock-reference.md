@@ -5,7 +5,7 @@ AV offset can be measured without a shared clock. Absolute arrival latency needs
 ## Source selection
 
 1. `AVSYNC_PTP_STATUS_URL`, when set, is an explicit override: `sync_source=url`. It accepts `http://` JSON with `sync_state` and `accuracy_ns`. Failure reports unknown; it does not silently choose another reference.
-2. Otherwise, `AVSYNC_PTP_SOCKET` optionally selects a ptp4l management socket, for example `/var/run/ptp4l`: `sync_source=ptp4l`. Only GET management requests are sent, for `TIME_STATUS_NP` and `PORT_DATA_SET`. A valid but unlocked response stays on this source. Socket/access/protocol failure logs once and falls back to the kernel.
+2. Otherwise, `AVSYNC_PTP_SOCKET` optionally selects a ptp4l management socket, for example `/var/run/ptp4l`: `sync_source=ptp4l`. Only GET management requests are sent, for `TIME_STATUS_NP` and `PORT_DATA_SET`, using management domain 0. A daemon using another management domain is not supported by this subset and falls back on query failure. A valid but unlocked response stays on this source. Socket/access/protocol failure logs once and falls back to the kernel.
 3. Without a usable socket, read-only `adjtimex(2)` supplies `sync_source=kernel`. No clock-setting capability is required.
 
 `/statusz`, `/api/v1/status` and the UI show the selected source, state and reason. PTP status includes grandmaster presence/identity, signed master offset in ns and port state. Metrics expose source selection and `mxl_avsync_ptp_master_offset_seconds` / `mxl_avsync_ptp_gm_present`, initialized to zero before a PTP reading. A zero startup metric is not evidence of lock.
