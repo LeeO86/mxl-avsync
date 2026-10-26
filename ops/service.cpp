@@ -276,11 +276,7 @@ void install_web(HttpServer& http, Runtime& rt)
     });
     http.add("GET", "/readyz", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
-#ifdef AVSYNC_WITH_NMOS
         const bool want_registry = rt.config.nmos_enable && !rt.config.nmos_registry_address.empty();
-#else
-        const bool want_registry = false;
-#endif
         // Controllers may wait for deployment readiness before connecting receivers.
         // Route and signal health belong in status/metrics, outside this gate.
         const bool process_up = !g_stop && rt.media_live

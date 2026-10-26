@@ -126,6 +126,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 test "$stale_code" = 503
+test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SPORT/readyz")" = 503
 grep -q '"status":"domain"' /tmp/avsync-stale-livez.json
 detail=$(curl -sf "http://127.0.0.1:$SPORT/api/v1/status")
 printf '%s\n' "$detail" | grep -q 'MXL_OUTPUT_DOMAIN_ID'
