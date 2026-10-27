@@ -85,6 +85,8 @@ offset sweeps that overlap telegrams are rejected. Rate/profile changes start a
 new schedule; receivers reacquire the new QR/period. Transitional packets can be
 lost, so measure after reacquisition. File plans omit tail events that cannot
 fit a complete packet in the requested duration.
+Receivers clear previous audio/identity windows when the QR source, timing mode,
+profile or rate changes. A stale timecode cache cannot suppress legacy decoding.
 
 ## Phone feedback and latency
 

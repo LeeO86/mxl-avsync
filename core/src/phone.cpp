@@ -45,8 +45,10 @@ PhoneSession::PhoneSession(int event_rate, GradeWindows windows)
 
 void PhoneSession::observe_signal(const QrPayload& qr) {
     if ((qr.rate != 1 && qr.rate != 2 && qr.rate != 4) || !parse_video_format(qr.format)) return;
-    if (signal_ && (signal_->test_id != qr.test_id || signal_->timecode != qr.timecode || signal_->rate != qr.rate)) {
+    if (signal_ && (signal_->test_id != qr.test_id || signal_->source_id != qr.source_id ||
+        signal_->mode != qr.mode || signal_->timecode != qr.timecode || signal_->rate != qr.rate)) {
         videos_.clear(); locked_seq_.reset(); pending_frames_ = 0; have_transition_ = false;
+        timecode_stream_.reset(); timecodes_.clear(); audio_.clear(); audio_set_ = false;
     }
     signal_ = qr; event_rate_ = qr.rate;
 }

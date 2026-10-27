@@ -5,6 +5,22 @@
 
 using namespace avsync;
 
+TEST_CASE("signal reconfiguration discards decoded history before legacy reacquisition") {
+    QrPayload qr; qr.test_id="source"; qr.timecode=true;
+    PhoneSession phone(2,{}); phone.observe_signal(qr);
+    auto wave=timecode_waveform(encode_timecode(123,1700000037000000000LL,0,true),1200);
+    std::vector<float> received(48000,0);
+    std::copy(wave.begin(),wave.end(),received.begin()+4800);
+    phone.push_audio(received.data(),received.size(),0,48000);
+    REQUIRE(phone.finish().audio_timecodes.size()==1);
+    qr.timecode=false; phone.observe_signal(qr);
+    auto empty=phone.finish(); CHECK(empty.audio_timecodes.empty()); CHECK(empty.audio_samples==0);
+    std::vector<PlannedEvent> events(1); events[0].chirp_id=1; events[0].audio_centre_sample=4800;
+    std::vector<float> legacy(24000); synthesise_block({},events,0,legacy.data(),legacy.size());
+    phone.push_audio(legacy.data(),legacy.size(),1000,48000);
+    auto recovered=phone.finish(); CHECK(recovered.audio_timecodes.empty()); CHECK(recovered.audio_hits.size()==1);
+}
+
 TEST_CASE("QR preserves exact TAI identity and flash tracking emits only rising events") {
     QrPayload qr;
     qr.test_id = "exact-time";

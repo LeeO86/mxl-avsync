@@ -666,3 +666,13 @@ could not read the roughly 1.5-pixel modules. QR error correction/parsing and
 all measurement gates remain unchanged. The unchanged Stage-2 encoded
 scaling/padding test is the integration regression, supplemented by a rendered
 v3 full-canvas QR unit test that verifies exact payload/source/rate recovery.
+
+## Signal-change reacquisition and CI dependency (2026-10-27)
+
+An explicit QR source/mode/profile/rate change now clears the old native/live
+audio decoder and identity windows. This prevents previously decoded timecodes
+from suppressing legacy pairing until their 20-second cache expires. A core
+regression decodes a compact packet, switches to legacy and verifies immediate
+fresh-buffer legacy chirp acquisition. QR updates naming later events do not
+clear state. The new external-FFmpeg CI regression also installs the ffmpeg
+executable explicitly; the pre-existing packages supplied libraries only.

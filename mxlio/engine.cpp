@@ -712,7 +712,21 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         const int64_t tai_ns = static_cast<int64_t>(time_of_index(pace, want));
         if (tai_ns / 1e6 - qr_read_ms >= 500) {
             qr_read_ms = tai_ns / 1e6;
-            if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) signal_qr = parse_qr_payload(*text);
+            if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) {
+                if (auto next = parse_qr_payload(*text)) {
+                    const bool changed = !signal_qr || next->test_id != signal_qr->test_id ||
+                        next->source_id != signal_qr->source_id || next->mode != signal_qr->mode ||
+                        next->timecode != signal_qr->timecode || next->rate != signal_qr->rate;
+                    if (changed) {
+                        timecode_stream.reset(); audio_window.clear(); heard.clear(); heard_timecodes.clear();
+                        tracker.emplace(tracked, next->rate);
+                        pairer.emplace(plan_period(tracked, next->rate).period_ms,
+                            GradeWindows{config.pass_min_ms,config.pass_max_ms,config.warn_min_ms,config.warn_max_ms},
+                            current_reference(video.domain_id), "LIVE", config.test_id.empty() ? config.seed() : config.test_id);
+                    }
+                    signal_qr = std::move(next);
+                }
+            }
         }
         if (signal_qr) tracker->configure(signal_qr->rate, signal_qr->timecode);
         VideoObservation observation = tracker->push(luma.data(), video.width, static_cast<int64_t>(want), static_cast<double>(tai_ns) / 1e6, tai_ns);
