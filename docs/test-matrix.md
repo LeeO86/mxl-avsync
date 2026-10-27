@@ -52,7 +52,30 @@ H.264 and G.711 rows below are FFmpeg test aids. They are not live SRT or SIP in
 | SRT | not this repo. mxl-srt-gateway presents an MXL flow. The H.264 rows above are file-mode test aids |
 | Cross-node fabrics | not this repo. mxl-fabrics-agent moves the flows. The merge view here runs on saved results |
 | SIP / G.711 live | not this repo. A sibling gateway presents the audio as an MXL flow. File-mode PCMU/PCMA is a test aid |
-| Phone on a real device | `PhoneSession` and the Expo UI are in the tree; iOS/Android SDKs and the LED/piezo rig are not |
+| Physical phone emission/capture accuracy | Native iOS capture/generator and simulator tests are implemented; independent LED/piezo/photodiode validation and Android capture remain pending |
 | PTP-locked latency (`video_latency_ms`, `audio_latency_ms`, index shifts, `av_offset_arrival_ms`) | lab only. This VM does not lock PTP, so those fields stay absent |
 | A registry on a real network | lab only. Registration here is a local stand-in, or the AMWA job's registry container |
 | Crosspoint-driven routing | lab only. This VM does not drive an IS-05 crosspoint |
+
+
+## Native phone source / optical live analyzer (2026-10-27)
+
+The native UIKit generator test decodes the actual generated QR at 1/2 Hz and
+checks every 60-Hz strip/flash phase against the shared core reader. Its actual
+audio waveform independently recovers source/time plus the protected estimated
+flag. The 8-kHz A/µ-law unit paths also recover every phone packet. Existing
+native capture/calibration regressions, 30 JS tests and full simulator/device
+builds pass. Simulator UI checks cover Stop/Close/restart and inactivity.
+
+The Linux MXL regression (`tests/integration/phone_generator.py`) carries a
+720p60 source in a 1080p50 camera raster, with 120-ms video and 155-ms audio
+index delays. One observed run recovered 18/37 valid pairs at 1/2 Hz, median
++34.992 ms; no video events appeared during a three-second image loss, and
+pairing resumed after recovery. Reader regressions cover both 1080p and 4K
+search downscaling. The normal direct MXL regression and all CTest suites pass.
+
+These are synthetic/native software results. Phone-source latency remains
+explicitly **estimated**, even with a locked receiver, and optical uncertainty
+is unknown. A software display schedule and reported audio output latency do
+not measure photons/sound emission, independently calibrate a camera, or prove
+physical call-path accuracy. See [workflow and reproducible tests](phone-generator.md).

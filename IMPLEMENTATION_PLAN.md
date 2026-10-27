@@ -740,3 +740,13 @@ keep existing routes/services untouched. It preserves the validated camera-
 frame timing tolerance and gates; physical phone/camera accuracy is not inferred.
 The existing Linux/MXL live CI job invokes this regression after the normal
 live test; portable builds do not acquire an MXL fixture dependency.
+
+
+Executed Linux camera fixture: 1/2-Hz runs recovered 18/37 valid pairs, all
++34.992 ms for the planned +35 ms, no video observations inside the image
+lapse, then successful reacquisition. Every phone result retained estimated
+source/latency labels and unknown uncertainty. Three CTest suites and the
+normal direct MXL integration passed. These are synthetic SDK/software
+results, not physical camera/phone timing calibration. The signed iPhone
+build also passes macOS codesign verification with access to trust services;
+installation awaits an available physical device.

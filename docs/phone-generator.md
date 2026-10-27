@@ -85,6 +85,8 @@ receiver clocks. Picture tests cover direct input, a moving scaled tile,
 picture loss and reacquisition. The native test checks actual UIKit QR images,
 every marker/strip phase at both rates and the actual audio payload/waveform.
 Software tests do not prove physical emission/capture timing or a real call path.
+Executed local/native and Linux fixture results are recorded in the
+[test matrix](test-matrix.md#native-phone-source--optical-live-analyzer-2026-10-27).
 
 The Linux live regression runs 1/2-Hz phone plans in a 1080p50 camera flow,
 checks the planned +35-ms AV difference, and blanks the picture for three
