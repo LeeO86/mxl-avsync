@@ -99,6 +99,41 @@ TEST_CASE("locator keeps the full rendered tile corners instead of QR and text s
     }
 }
 
+TEST_CASE("coded QR survives a scaled tile outside the canvas QR region")
+{
+    QrPayload payload;
+    payload.test_id = "TEST-stage2";
+    payload.mode = "FILE";
+    payload.k = 1;
+    payload.tk = 1000000000;
+    payload.format = "720p50";
+    payload.rate = 1;
+    payload.timecode = true;
+    payload.source_id = 1880207804;
+    const auto json = qr_payload_json(payload);
+    PictureInfo info;
+    info.qr_json = json;
+    Yuv422p10 frame;
+    frame.resize(1280, 720);
+    render_picture(frame, info, 1, 0, 50, true);
+    std::vector<uint16_t> canvas(960 * 540, kYBlack);
+    for (int y = 0; y < 360; ++y) {
+        for (int x = 0; x < 640; ++x) {
+            const size_t p = size_t(y * 2) * frame.width + x * 2;
+            canvas[size_t(y + 40) * 960 + x + 80] =
+                (unsigned(frame.y[p]) + frame.y[p + 1] + frame.y[p + frame.width] + frame.y[p + frame.width + 1]) / 4;
+        }
+    }
+    const auto decoded = decode_qr_text(canvas.data(), 960, 540, 960);
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == json);
+    const auto parsed = parse_qr_payload(*decoded);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->timecode);
+    CHECK(parsed->source_id == payload.source_id);
+    CHECK(parsed->rate == 1);
+}
+
 TEST_CASE("result picture states")
 {
     auto ink_rows = [](const Yuv422p10& frame, int y0, int y1, uint16_t background) {
