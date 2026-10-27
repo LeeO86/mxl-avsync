@@ -251,6 +251,13 @@ MarkerTracker::MarkerTracker(VideoFormat format, int event_rate)
 {
 }
 
+void MarkerTracker::configure(int rate, bool flash) {
+    const auto period = plan_period(format_, rate);
+    if (period.grains != period_.grains || flash != flash_) {
+        *this = MarkerTracker(format_, rate); flash_ = flash;
+    }
+}
+
 VideoObservation MarkerTracker::push(const uint16_t* luma, int stride, int64_t grain_index, double time_ms, int64_t tai_ns)
 {
     VideoObservation obs;
@@ -325,7 +332,10 @@ VideoObservation MarkerTracker::push(const uint16_t* luma, int stride, int64_t g
     obs.duplicates_total = duplicates_;
     const bool changed = have_prev_ && reading.state != MarkerReading::State::Invalid && prev_state_ != MarkerReading::State::Invalid
         && reading.state != prev_state_;
-    if (changed && reading.strip_ok) {
+    const bool flash_event = flash_ && reading.state == MarkerReading::State::White && reading.strip_ok &&
+        emitted_seq_ != obs.seq && reading.frame_pos_mod16 < int(std::ceil(100.0 / (period_.period_ms / period_.grains)));
+    if ((flash_ ? flash_event : changed) && reading.strip_ok) {
+        emitted_seq_ = obs.seq;
         obs.event = true;
         obs.seq = last_seq_;
         if (std::llabs(grain_index - last_event_grain_) <= 2 && last_event_grain_ >= 0) {

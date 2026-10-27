@@ -13,6 +13,7 @@ int main(int argc,char**argv){
   avsync::GenerateRequest r;
   r.format=value("--format","1080p50");r.duration_s=std::stod(value("--duration","10"));r.offset_ms=std::stod(value("--offset","0"));
   r.container=value("--container","mp4");r.video_codec=value("--video-codec","h264");r.audio_codec=value("--audio-codec","aac");r.out_path=value("--out","");
+  r.event_rate=std::stoi(value("--event-rate","2"));r.audio_timecode=value("--audio-timecode","1200");
   r.test_id=value("--test-id","TEST-FILES");r.title="AV-SYNC TEST SIGNAL";r.source=r.test_id;r.subtitle="Expected audio offset: "+value("--offset","0")+" ms";
   r.allow_container_shift=true;result=avsync::run_generate(r,error);
  }else if(std::string(argv[1])=="analyze"){

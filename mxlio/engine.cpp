@@ -28,6 +28,8 @@ PlanConfig plan_from(const Config& config, const VideoFormat& format)
     plan.sample_rate = 48000;
     plan.offset_ms = config.offset_ms;
     plan.live = true;
+    plan.timecode_baud = config.audio_timecode == "legacy" ? 0 : std::stoi(config.audio_timecode);
+    plan.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
     plan.chirp_ms = config.chirp_ms;
     plan.chirp_low_hz = config.chirp_low_hz;
     plan.chirp_high_hz = config.chirp_high_hz;
@@ -125,9 +127,18 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     std::vector<float> samples;
     uint64_t qr_seq = ~0ULL;
     std::string qr_cached;
+    AudioTimecodeWriter timecode_writer;
+    uint64_t packets_skipped = 0;
+    int writer_rate = config.event_rate;
+    std::string writer_profile = config.audio_timecode;
 
     while (!stop.load()) {
         config = callbacks.copy_config();
+        if (writer_rate != config.event_rate || writer_profile != config.audio_timecode) {
+            timecode_writer = AudioTimecodeWriter{};
+            writer_rate = config.event_rate; writer_profile = config.audio_timecode;
+            qr_seq = ~0ULL;
+        }
         const bool halted = callbacks.stopped();
         const uint64_t now = tai_now();
         uint64_t index = index_now(pace);
@@ -169,6 +180,8 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             const uint64_t named_seq = named / static_cast<uint64_t>(grains);
             if (named_seq != qr_seq) {
                 QrPayload payload;
+                payload.timecode = config.audio_timecode != "legacy";
+                payload.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
                 payload.test_id = config.test_id.empty() ? config.seed() : config.test_id;
                 payload.mode = "LIVE";
                 payload.k = named_seq;
@@ -180,7 +193,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 qr_seq = named_seq;
             }
             info.qr_json = qr_cached;
-            render_picture(picture, info, seq, frame_in_period, period.grains, (seq % 2) != 0);
+            render_picture(picture, info, seq, frame_in_period, period.grains, config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
             pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format->width, grain_rows, format->width, packed.data());
             const bool wrote = domain.write_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {
                 std::memcpy(dst, packed.data(), std::min(size, packed.size()));
@@ -218,7 +231,15 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     events.push_back(live_event(plan, seq + static_cast<uint64_t>(extra)));
                 }
                 std::vector<float> mono(static_cast<size_t>(frames));
-                synthesise_block(chirp_from(config), events, audio_written, mono.data(), mono.size());
+                if (plan.timecode_baud) {
+                    const auto previous = timecode_writer.skipped();
+                    timecode_writer.write(events, audio_written, mono.data(), mono.size(), plan.timecode_baud, config.chirp_level_dbfs);
+                    if (timecode_writer.skipped() != previous) {
+                        packets_skipped += timecode_writer.skipped() - previous;
+                        status.timecode_skipped = packets_skipped;
+                        callbacks.set_status(status);
+                    }
+                } else synthesise_block(chirp_from(config), events, audio_written, mono.data(), mono.size());
                 for (int frame = 0; frame < frames; ++frame) {
                     for (int channel = 0; channel < config.audio_channels; ++channel) {
                         samples[static_cast<size_t>(frame * config.audio_channels + channel)] = mono[static_cast<size_t>(frame)];
@@ -413,7 +434,11 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     std::vector<float> audio_window;
     uint64_t window_origin = 0;
     std::set<int64_t> heard;
+    std::set<std::pair<uint32_t,int64_t>> heard_timecodes;
     std::optional<MarkerTracker> tracker;
+    AudioTimecodeStream timecode_stream;
+    std::optional<QrPayload> signal_qr;
+    double qr_read_ms = -1e30;
     std::optional<Pairer> pairer;
     std::string tracker_flow;
     MediaStatus status;
@@ -679,13 +704,20 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             pairer.emplace(period_ms, GradeWindows{config.pass_min_ms, config.pass_max_ms, config.warn_min_ms, config.warn_max_ms}, reference, "LIVE",
                 config.test_id.empty() ? config.seed() : config.test_id);
             tracker_flow = video.flow_id;
-            heard.clear();
+            heard.clear(); heard_timecodes.clear();
             audio_window.clear();
             window_origin = 0;
+            timecode_stream.reset(); signal_qr.reset(); qr_read_ms = -1e30;
         }
         const int64_t tai_ns = static_cast<int64_t>(time_of_index(pace, want));
+        if (tai_ns / 1e6 - qr_read_ms >= 500) {
+            qr_read_ms = tai_ns / 1e6;
+            if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) signal_qr = parse_qr_payload(*text);
+        }
+        if (signal_qr) tracker->configure(signal_qr->rate, signal_qr->timecode);
         VideoObservation observation = tracker->push(luma.data(), video.width, static_cast<int64_t>(want), static_cast<double>(tai_ns) / 1e6, tai_ns);
         if (observation.event) {
+            if (signal_qr) identify_video(observation, *signal_qr);
             observation.have_arrival = true;
             observation.arrival_ms = static_cast<double>(video_arrived_ns) / 1e6;
             observation.have_grain_time = true;
@@ -722,6 +754,13 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 for (int frame = 0; frame < frames; ++frame) {
                     mono[static_cast<size_t>(frame)] = interleaved[static_cast<size_t>(frame * audio_channels + std::min(config.audio_channel, audio_channels - 1))];
                 }
+                const double block_start_ms = double(time_of_index(Rate{48000, 1}, audio_cursor)) / 1e6;
+                timecode_stream.push(mono.data(), mono.size(), 48000, block_start_ms, audio_arrived_ms - frames / 48.0);
+                const auto& packets = timecode_stream.scan();
+                for (const auto& packet : packets) {
+                    const auto key = std::make_pair(packet.source_id, packet.video_send_ns);
+                    if (heard_timecodes.insert(key).second) pairer->observe_audio(audio_observation(packet));
+                }
                 audio_window.insert(audio_window.end(), mono.begin(), mono.end());
                 const size_t keep = 48000;
                 if (audio_window.size() > keep) {
@@ -736,8 +775,10 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 const Rate audio_rate{48000, 1};
                 detect.timeline_origin_ms = static_cast<double>(time_of_index(audio_rate, window_origin)) / 1e6;
                 AudioDetector detector(detect);
-                const auto hits = detector.detect(audio_window.data(), audio_window.size(), window_origin);
+                const auto hits = ((signal_qr && signal_qr->timecode) || !packets.empty())
+                    ? std::vector<AudioHit>{} : detector.detect(audio_window.data(), audio_window.size(), window_origin);
                 for (const auto& hit : hits) {
+                    if ((signal_qr && signal_qr->timecode) || !packets.empty()) break;
                     const int64_t key = static_cast<int64_t>(std::llround(hit.sample_pos));
                     if (!heard.insert(key).second) {
                         continue;
@@ -760,6 +801,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     pairer->observe_audio(heard_hit);
                 }
                 audio_cursor += static_cast<uint64_t>(frames);
+                while (heard_timecodes.size() > 128) heard_timecodes.erase(heard_timecodes.begin());
                 if (heard.size() > 128) {
                     heard.erase(heard.begin());
                 }

@@ -163,9 +163,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
           let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000
           let captureGeneration = generation
           qrWorker.async { [weak self] in
-            let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
-            try? VNImageRequestHandler(cvPixelBuffer: pixel, orientation: .up).perform([request])
-            let texts = request.results?.compactMap { $0.payloadStringValue } ?? []
+            let texts = AVSyncQRCodeReader.read(pixel)["payloads"] as? [String] ?? []
             self?.samples.async { [weak self] in
               guard let self else { return }; self.qrBusy = false
               guard self.generation == captureGeneration else { return }

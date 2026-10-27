@@ -44,6 +44,7 @@ add_custom_command(
 add_library(avsync-core STATIC
     core/src/plan.cpp
     core/src/chirp.cpp
+    core/src/timecode.cpp
     core/src/detect.cpp
     core/src/marker.cpp
     core/src/grade.cpp
@@ -62,10 +63,14 @@ set_source_files_properties(core/src/text.cpp PROPERTIES OBJECT_DEPENDS "${DEJAV
 target_link_libraries(avsync-core PUBLIC blend2d::blend2d)
 target_compile_options(avsync-core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
-add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp)
+add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp tests/unit/test_timecode.cpp)
 target_include_directories(avsync-core-tests PRIVATE third_party/doctest)
 target_link_libraries(avsync-core-tests PRIVATE avsync-core)
 target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+add_executable(avsync-timecode-tool tests/tools/timecode_tool.cpp)
+target_include_directories(avsync-timecode-tool PRIVATE third_party)
+target_link_libraries(avsync-timecode-tool PRIVATE avsync-core)
 
 enable_testing()
 add_test(NAME core COMMAND avsync-core-tests)

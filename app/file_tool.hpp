@@ -11,6 +11,7 @@ struct GenerateRequest {
     double offset_ms = 0;
     std::vector<double> sweep;
     int event_rate = 2;
+    std::string audio_timecode = "1200"; // legacy, 600, 1200
     int audio_rate = 48000;
     int channels = 2;
     std::string container = "mov";

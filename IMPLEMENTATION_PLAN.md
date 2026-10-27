@@ -578,3 +578,33 @@ The release candidate reports app/core/CMake 1.0.1; the existing tag workflow ve
 The unchanged Stage-2 tile check failed on a generated 720p50 ProRes signal scaled to 640×360 and padded into 960×540. The unchanged 1.0.0 release image failed on the same retained file, establishing a pre-existing locator bug. High-scoring QR/text candidates displaced real corners, and unrestricted size-biased refinement expanded hits incorrectly. The focused fix keeps spatial extrema across bounded size ranges, retains tolerant coarse scoring, refines locally with complete rings, and ranks poses using geometry/reference cells/parity. `read_located_marker` rectifies to stable 640×360 to avoid integer strip-width drift. Public API signatures are unchanged.
 
 A full-renderer QR/text unit regression checks the intended (80,40), 640×360 pose, all four corners, three sequences and both marker states: 54 assertions pass; the original locator fails 51 of those assertions. Existing fiducial and phone cases remain green, and the unchanged full Stage-2 integration passes. No unpublished mobile implementation or private footage was imported into this release.
+
+
+## Complete onset/timecode integration (2026-10-27)
+
+Supersedes the prior prototype-only status. Production generator, CLI/file
+analyzer, live analyzer and iOS native bridge now share core/src/timecode.cpp.
+The compact v3 packet carries source ID, 48-bit Q32.16 common event time, a
+signed 1/16-ms source offset (omitted for protected zero), and CRC-32; K7 FEC and
+interleaving remain. Full 1200-baud duration is 330/303.333 ms, including prefix.
+The transmitted and received references are chirp onset. Old four-ID signals
+and experimental centre packets retain compatibility; no silent 15-ms shift.
+The main Signal draft form exposes 1/2 Hz and 1200/600/legacy. Invalid profiles
+and overlapping FILE sweeps are rejected; live collisions are counted/skipped.
+The marker now flashes white on each coded event, with matching QR/tracker
+metadata and exact integer source times. Coded identity pairing replaces the
+legacy repeating-ID time window. Packet completion does not replace chirp
+arrival. Audio-only file analysis and phone estimated latency need no image/QR.
+The phone's 1-Hz stability window was extended while retaining current-picture
+freshness gates. Physical calls, optical/acoustic capture accuracy and Android
+capture remain outside synthetic validation. No new release is implied by this
+branch. Wire contract and test commands are in docs/audio-timecode.md.
+
+
+Local validation completed: Core/picture CTest, 30 JS tests, full generated-file
+integration (1/2 Hz, 59.94, 600/legacy, G.711 +3217 ms), 128-packet production
+channel matrix and the full native iOS simulator suite. The simulator/native
+suite exposed and verified a shared compatible Vision QR-reader fallback for
+camera and file analysis. Results and hardware limits are recorded in
+tests/audio-timecode/RESULTS-2026-10-27-COMPACT.md. Linux/live/NMOS testing is
+delegated to the user's peer host on the pushed branch.

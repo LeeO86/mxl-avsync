@@ -3,6 +3,7 @@
 // avsync-core public API. No MXL, NMOS, FFmpeg or GUI.
 // Time: positive av_offset_ms means audio is late (SPECIFICATION §3.2).
 
+#include "avsync/timecode.hpp"
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -67,6 +68,8 @@ struct PlanConfig {
     double duration_ms = 60000;
     bool live = false;
     int chirp_ms = 30;
+    int timecode_baud = 0; // 0: legacy centre / alternating marker; 600 or 1200: v3 onset / flash
+    uint32_t source_id = 0;
     double chirp_low_hz = 700;
     double chirp_high_hz = 2500;
     double chirp_level_dbfs = -12;
@@ -87,6 +90,8 @@ struct PlannedEvent {
     double expected_av_offset_ms = 0;
     double rounding_residual_us = 0;
     int frame_in_period = 0;
+    bool timecode = false;
+    std::vector<uint8_t> audio_packet;
 };
 
 struct EventPlan {
@@ -293,6 +298,9 @@ struct VideoObservation {
     bool strip_ok = false;
     bool have_arrival = false;
     double arrival_ms = 0;
+    bool timecode = false;
+    uint32_t source_id = 0;
+    int64_t event_time_ns = 0;
     bool have_set_time = false;
     int64_t set_tai_ns = 0; // generator T_k from the QR, when that code names this event
     bool have_grain_time = false;
@@ -307,11 +315,14 @@ public:
     int drops() const { return drops_; }
     int duplicates() const { return duplicates_; }
     const Period& period() const { return period_; }
+    void configure(int event_rate, bool flash);
 
 private:
     VideoFormat format_;
     Period period_;
     bool have_prev_ = false;
+    bool flash_ = false;
+    uint64_t emitted_seq_ = ~uint64_t{0};
     MarkerReading::State prev_state_ = MarkerReading::State::Invalid;
     int64_t last_unwrapped_pos_ = -1;
     int last_low_ = 0;
@@ -342,8 +353,12 @@ struct QrPayload {
     double offset_ms = 0;
     int rate = 2;
     std::string format = "1080p50";
+    bool timecode = false;
+    uint32_t source_id = 0;
 };
 
+bool identify_video(VideoObservation& video, const QrPayload& payload);
+bool flash_white(int frame_in_period, double grain_ms);
 std::string qr_payload_json(const QrPayload& payload);
 std::optional<QrPayload> parse_qr_payload(std::string_view json);
 
@@ -357,6 +372,10 @@ struct ReferenceInfo {
 };
 
 struct AudioObservation {
+    bool timecode = false;
+    uint32_t source_id = 0;
+    int64_t event_time_ns = 0;
+    int64_t audio_send_ns = 0;
     int chirp_id = 0;
     double time_ms = 0;
     int64_t tai_ns = 0;
@@ -372,7 +391,12 @@ struct AudioObservation {
     bool ambiguous = false;
 };
 
+AudioObservation audio_observation(const AudioTimecode& packet);
+
 struct Measurement {
+    bool audio_timecode = false;
+    uint32_t source_id = 0;
+    int64_t audio_send_ns = 0;
     std::string test_id;
     std::string event_id;
     uint64_t seq = 0;
@@ -443,6 +467,7 @@ OffsetWords describe_offset(double ms);
 struct PhoneReport {
     std::vector<Measurement> events;
     std::vector<AudioHit> audio_hits;
+    std::vector<AudioTimecode> audio_timecodes;
     size_t video_events = 0;
     size_t audio_samples = 0;
     double audio_peak_dbfs = -120;
@@ -462,6 +487,7 @@ struct PhoneReport {
 class PhoneSession {
 public:
     PhoneSession(int event_rate, GradeWindows windows);
+    void observe_signal(const QrPayload& payload);
     void set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms);
     void push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms);
     void push_audio(const float* samples, size_t count, double start_ms, int sample_rate);
@@ -478,6 +504,9 @@ public:
     }
 
 private:
+    std::optional<QrPayload> signal_;
+    AudioTimecodeStream timecode_stream_;
+    std::vector<AudioTimecode> timecodes_;
     PicturePose cached_pose_;
     PicturePose current_picture_;
     bool picture_code_confirmed_ = false;

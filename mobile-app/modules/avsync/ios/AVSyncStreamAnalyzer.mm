@@ -46,11 +46,11 @@ NSData *wav(const std::vector<float>& samples,int rate) {
 }
 - (void)observeQR:(NSString *)text timeMs:(double)timeMs {
  auto qr=avsync::parse_qr_payload(text.UTF8String);
- if(qr&&std::isfinite(timeMs)){state->qr=qr;state->qrObservedMs=timeMs;}
+ if(qr&&std::isfinite(timeMs)){state->session->observe_signal(*qr);state->qr=qr;state->qrObservedMs=timeMs;}
 }
 - (NSDictionary *)pictureObservation {
  auto&s=*state;const auto&pose=s.session->current_picture();
- if(s.calibration||!pose.found||s.videoWidth<=0||s.videoHeight<=0)return @{@"found":@NO};
+ if(s.calibration||s.lastAudio-s.lastVideo>300||!pose.found||s.videoWidth<=0||s.videoHeight<=0)return @{@"found":@NO};
  NSMutableArray *points=[NSMutableArray array];
  for(int i=0;i<4;++i)[points addObject:@{@"x":@(pose.corner_x[i]/s.videoWidth),@"y":@(pose.corner_y[i]/s.videoHeight)}];
  auto confirmed=s.session->confirmed_picture_seq();
@@ -124,7 +124,7 @@ NSData *wav(const std::vector<float>& samples,int rate) {
 - (NSDictionary *)poll {
  auto&s=*state;
  if(s.origin<0)return nil;
- double now=std::min(s.lastVideo,s.lastAudio),duration=now-s.origin;
+ double now=s.calibration?std::min(s.lastVideo,s.lastAudio):std::max(s.lastVideo,s.lastAudio),duration=now-s.origin;
  if(s.calibration){
   if(s.complete)return nil;
   if(s.spike<0){if(duration>12000){s.complete=true;return @{@"kind":@"error",@"message":@"No sharp sound detected. Try one visible clap after a quiet pause."};}return nil;}
@@ -156,9 +156,10 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  if(duration<1500||now-s.lastReport<1000)return nil;
  s.lastReport=now;
  auto report=s.session->finish("PHONE");std::vector<double>offsets;
+ const double recentWindow=s.qr?std::max(2000.0,3500.0/std::max(1,s.qr->rate)):2000.0;
  NSMutableArray *events=[NSMutableArray array];
  for(const auto&e:report.events){NSMutableDictionary*item=[@{@"seq":@(e.seq),@"videoTimeMs":@(e.video_time_ms),@"audioTimeMs":@(e.audio_time_ms),@"reason":[NSString stringWithUTF8String:e.reason.c_str()],@"valid":@(e.grade!="invalid")}mutableCopy];if(e.av_offset_ms)item[@"offset_ms"]=@(*e.av_offset_ms);[events addObject:item];}
- for(const auto&e:report.events)if(e.av_offset_ms&&e.grade!="invalid"&&std::isfinite(*e.av_offset_ms)&&e.video_time_ms>=now-2000)offsets.push_back(*e.av_offset_ms);
+ for(const auto&e:report.events)if(e.av_offset_ms&&e.grade!="invalid"&&std::isfinite(*e.av_offset_ms)&&e.video_time_ms>=now-recentWindow)offsets.push_back(*e.av_offset_ms);
  double fps=s.frames*1000.0/std::max(1.0,s.lastVideo-s.origin);
  NSMutableDictionary* result=[@{@"kind":@"status",@"fps":@(fps),@"locatedFrames":@(s.session->located_frames()),@"validFrames":@(s.session->valid_frames()),@"eventCount":@(offsets.size()),@"events":events}mutableCopy];
  const int recentLocated=s.session->located_frames()-s.previousLocated,recentValid=s.session->valid_frames()-s.previousValid;
@@ -173,9 +174,22 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   latency[@"state"]=[NSString stringWithUTF8String:source.state];
   if(source.video_utc_ms&&video&&s.haveWallClock){
    latency[@"state"]=@"estimated";latency[@"video_ms"]=@(video->time_ms+s.wallOffsetMs-*source.video_utc_ms);
-   for(auto it=report.events.rbegin();it!=report.events.rend();++it)if(it->seq==video->seq&&it->av_offset_ms&&it->grade!="invalid"&&source.audio_utc_ms){latency[@"audio_ms"]=@(it->audio_time_ms+s.wallOffsetMs-*source.audio_utc_ms);break;}
+   for(auto it=report.events.rbegin();it!=report.events.rend();++it)if(!s.qr->timecode&&it->seq==video->seq&&it->av_offset_ms&&it->grade!="invalid"&&source.audio_utc_ms){latency[@"audio_ms"]=@(it->audio_time_ms+s.wallOffsetMs-*source.audio_utc_ms);break;}
    latency[@"source"]=@"live-qr-tai/device-utc";latency[@"eventSeq"]=@(video->seq);latency[@"referenceAgeMs"]=@(now-s.qrObservedMs);
   }else if(source.video_utc_ms)latency[@"state"]=@"waiting_for_device_clock";
+ }
+ if(!report.audio_timecodes.empty()){
+  const auto&packet=report.audio_timecodes.back();
+  const double lease=1000+avsync::timecode_duration_ms(packet.bytes.size(),packet.baud)+200;
+  if(now-packet.time_ms<=lease){
+   result[@"audioTimecode"]=@{@"valid":@YES,@"crcOk":@YES,@"receivedTimeMs":@(packet.time_ms),@"validUntilMs":@(packet.time_ms+lease),@"sourceId":@(packet.source_id),@"baud":@(packet.baud),@"live":@(packet.live),@"sendTaiNs":[NSString stringWithFormat:@"%lld",(long long)packet.audio_send_ns]};
+   if(packet.live&&s.haveWallClock){
+    latency[@"state"]=@"estimated";
+    latency[@"audio_ms"]=@(packet.time_ms+s.wallOffsetMs+s.taiUtcSeconds*1000-double(packet.audio_send_ns)/1e6);
+    latency[@"audioSource"]=@"audio-timecode-tai/device-utc";
+    latency[@"source"]=latency[@"video_ms"]?@"live-qr-and-audio-timecode-tai/device-utc":@"audio-timecode-tai/device-utc";
+   }else if(!packet.live&&!latency[@"video_ms"])latency[@"state"]=@"file_signal";
+  }
  }
  result[@"latency"]=latency;
  result[@"diagnosticVersion"]=@3;result[@"recentLocatedFrames"]=@(recentLocated);result[@"recentValidFrames"]=@(recentValid);
@@ -188,7 +202,8 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  if(report.last_video_event_ms>0)result[@"lastVideoEventAgeMs"]=@(now-report.last_video_event_ms);
  if(!offsets.empty())std::sort(offsets.begin(),offsets.end());
  double spread=offsets.empty()?0:offsets.back()-offsets.front();
- const bool stable=offsets.size()>=3 && spread<=std::max(50.0,3000.0/std::max(1.0,fps));
+ const double freshPeriod=s.qr?1000.0/std::max(1,s.qr->rate):500.0;
+ const bool stable=recentLocated>0 && recentValid>0 && now-report.last_video_event_ms<=freshPeriod+300 && offsets.size()>=3 && spread<=std::max(50.0,3000.0/std::max(1.0,fps));
  result[@"spread_ms"]=@(spread);
  if(stable){
   std::sort(offsets.begin(),offsets.end());result[@"kind"]=@"reading";result[@"offset_ms"]=@(offsets[offsets.size()/2]);result[@"spread_ms"]=@(offsets.back()-offsets.front());result[@"quality"]=@"degraded";

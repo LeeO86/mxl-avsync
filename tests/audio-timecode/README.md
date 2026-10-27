@@ -1,3 +1,11 @@
+# Audio timecode validation
+
+**The production compact codec is now integrated.** Run `run.py --production`
+to test the exact core implementation used by the generator/analyzers/iPhone.
+See [the current format and full test commands](../../docs/audio-timecode.md).
+The dated reports and original 25-byte probe below are historical evidence;
+their old prototype-only integration status applies to those snapshots.
+
 # Experimental audio-only timecode modem
 
 This is an offline encoder/decoder and channel benchmark, **not the production

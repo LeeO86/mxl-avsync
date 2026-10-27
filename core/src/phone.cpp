@@ -43,6 +43,14 @@ PhoneSession::PhoneSession(int event_rate, GradeWindows windows)
 {
 }
 
+void PhoneSession::observe_signal(const QrPayload& qr) {
+    if ((qr.rate != 1 && qr.rate != 2 && qr.rate != 4) || !parse_video_format(qr.format)) return;
+    if (signal_ && (signal_->test_id != qr.test_id || signal_->timecode != qr.timecode || signal_->rate != qr.rate)) {
+        videos_.clear(); locked_seq_.reset(); pending_frames_ = 0; have_transition_ = false;
+    }
+    signal_ = qr; event_rate_ = qr.rate;
+}
+
 void PhoneSession::set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms)
 {
     calibration_ = record;
@@ -76,8 +84,11 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     // A decoded event number and the marker phase must agree. Monitor refresh,
     // rolling shutter and moire can toggle the block without a new event.
     const bool white = reading.state == MarkerReading::State::White;
-    if (white != bool(reading.seq_low24 & 1u)) { ++phase_rejected_frames_; pending_frames_ = 0; return; }
+    if (!(signal_ && signal_->timecode) && white != bool(reading.seq_low24 & 1u)) { ++phase_rejected_frames_; pending_frames_ = 0; return; }
     const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, height / 2, height);
+    if (signal_ && signal_->timecode && (!locked_seq_ || reading.seq_low24 != *locked_seq_) && !white) {
+        pending_frames_ = 0; return;
+    }
     if (!pending_frames_ || pending_seq_ != reading.seq_low24) {
         pending_seq_ = reading.seq_low24; pending_time_ms_ = time_ms; pending_frames_ = 1;
     } else ++pending_frames_;
@@ -99,7 +110,8 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
         if (time_ms - last_seen_ms_ > 1500) anchor();
         return;
     }
-    const double period = 1000.0 / std::max(1, event_rate_);
+    double period = 1000.0 / std::max(1, event_rate_);
+    if (signal_) if (auto f = parse_video_format(signal_->format)) period = plan_period(*f, event_rate_).period_ms;
     if (have_transition_ && std::abs(pending_time_ms_ - last_transition_ms_ - period) > period * 0.25) {
         ++timing_resets_; anchor(); return;
     }
@@ -109,6 +121,7 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     obs.event = true; obs.seq = unwrapped_seq_; obs.time_ms = pending_time_ms_;
     obs.marker_white = white; obs.strip_ok = true; obs.quality = reading.quality;
     obs.contrast = reading.contrast;
+    if (signal_) identify_video(obs, *signal_);
     videos_.push_back(obs);
 }
 
@@ -116,6 +129,15 @@ void PhoneSession::push_audio(const float* samples, size_t count, double start_m
 {
     if (count == 0 || samples == nullptr || sample_rate <= 0) {
         return;
+    }
+    for (size_t at = 0; at < count; at += size_t(sample_rate / 10)) {
+        const size_t n = std::min(count - at, size_t(sample_rate / 10));
+        const double time = start_ms + at * 1000.0 / sample_rate;
+        timecode_stream_.push(samples + at, n, sample_rate, time, time);
+        for (const auto& packet : timecode_stream_.scan()) {
+            const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };
+            if (std::none_of(timecodes_.begin(), timecodes_.end(), same)) timecodes_.push_back(packet);
+        }
     }
     if (!audio_set_) {
         audio_origin_ms_ = start_ms;
@@ -134,6 +156,7 @@ void PhoneSession::push_audio(const float* samples, size_t count, double start_m
 
 void PhoneSession::trim_before(double time_ms)
 {
+    timecodes_.erase(std::remove_if(timecodes_.begin(), timecodes_.end(), [&](const AudioTimecode& p) { return p.time_ms < time_ms; }), timecodes_.end());
     videos_.erase(std::remove_if(videos_.begin(), videos_.end(), [&](const VideoObservation& v) { return v.time_ms < time_ms; }), videos_.end());
     if (!audio_set_ || time_ms <= audio_origin_ms_) return;
     const size_t drop = std::min(audio_.size(), static_cast<size_t>((time_ms - audio_origin_ms_) * audio_rate_ / 1000.0));
@@ -177,15 +200,25 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
     }
     const auto hits = detector.detect(audio.data(), audio.size(), 0);
     report.audio_hits = hits;
+    for (const auto& packet : timecode_stream_.scan(true)) {
+        const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };
+        if (std::none_of(timecodes_.begin(), timecodes_.end(), same)) timecodes_.push_back(packet);
+    }
+    std::sort(timecodes_.begin(), timecodes_.end(), [](const auto& a, const auto& b) { return a.time_ms < b.time_ms; });
+    report.audio_timecodes = timecodes_;
     if (videos_.empty()) return report;
     ReferenceInfo reference;
     reference.type = "none";
     reference.sync_state = "unknown";
     Pairer pairer(detect.period_ms, windows_, reference, "LIVE", test_id);
-    for (const auto& video : videos_) {
+    const bool coded = (signal_ && signal_->timecode) || !report.audio_timecodes.empty();
+    for (auto video : videos_) {
+        if (signal_) identify_video(video, *signal_);
+        if (coded && !video.timecode) continue;
         pairer.observe_video(video, 0);
     }
     for (const auto& hit : hits) {
+        if (coded) break;
         AudioObservation obs;
         obs.chirp_id = hit.chirp_id;
         obs.time_ms = hit.time_ms;
@@ -197,6 +230,7 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
         obs.ambiguous = hit.ambiguous;
         pairer.observe_audio(obs);
     }
+    for (const auto& packet : report.audio_timecodes) pairer.observe_audio(audio_observation(packet));
     pairer.finish();
     report.events = pairer.results();
     if (calibration_state_ == CalibrationState::Valid) {

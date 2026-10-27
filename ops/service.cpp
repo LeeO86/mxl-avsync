@@ -57,6 +57,7 @@ struct Runtime {
     std::vector<Measurement> events;
     int events_epoch = 0;
     double generator_events = 0;
+    uint64_t timecode_skipped = 0;
     double output_video = 0;
     double output_audio = 0;
     double late_video = 0;
@@ -146,6 +147,7 @@ std::string metrics_text(Runtime& rt)
        << "\",role=\"" << rt.config.role << "\"} 1\n";
     os << "# TYPE mxl_avsync_generator_active gauge\nmxl_avsync_generator_active " << (gen && !rt.stopped && rt.media_ready ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_generator_audio_muted gauge\nmxl_avsync_generator_audio_muted " << (gen && !rt.config.audio_enable ? 1 : 0) << "\n";
+    os << "# TYPE mxl_avsync_timecode_packets_skipped_total counter\nmxl_avsync_timecode_packets_skipped_total " << rt.timecode_skipped << "\n";
     os << "# TYPE mxl_avsync_generator_events_total counter\nmxl_avsync_generator_events_total " << rt.generator_events << "\n";
     os << "# TYPE mxl_avsync_output_frames_total counter\n";
     os << "mxl_avsync_output_frames_total{essence=\"video\"} " << rt.output_video << "\n";
@@ -319,7 +321,7 @@ void install_web(HttpServer& http, Runtime& rt)
     http.add("GET", "/api/v1/status", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
         return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
-            {"input_state", rt.input_state}, {"detail", rt.media_detail},
+            {"timecode_packets_skipped", rt.timecode_skipped}, {"input_state", rt.input_state}, {"detail", rt.media_detail},
             {"nmos_enable", rt.config.nmos_enable}, {"nmos_port", rt.config.nmos_port}, {"nmos_registered", rt.nmos_registered},
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
@@ -350,7 +352,7 @@ void install_web(HttpServer& http, Runtime& rt)
         return json_response({{"offset_ms", rt.config.offset_ms}, {"level_dbfs", rt.config.chirp_level_dbfs}, {"muted", !rt.config.audio_enable},
             {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"subtitle", rt.config.subtitle},
             {"notes", rt.config.notes},
-            {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
+            {"timing_reference", rt.config.audio_timecode == "legacy" ? "centre" : "start"}, {"marker", rt.config.audio_timecode == "legacy" ? "toggle" : "flash"}, {"audio_timecode", rt.config.audio_timecode}, {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
             {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
     });
     http.add("PATCH", "/api/v1/generator", [&](const HttpRequest& request) {
@@ -374,6 +376,7 @@ void install_web(HttpServer& http, Runtime& rt)
             flat["AVSYNC_SUBTITLE"] = body["subtitle"];
         }
         if (body.contains("muted")) flat["AVSYNC_AUDIO_ENABLE"] = body["muted"].get<bool>() ? "false" : "true";
+        if (body.contains("audio_timecode")) flat["AVSYNC_AUDIO_TIMECODE"] = body["audio_timecode"].get<std::string>();
         if (body.contains("event_rate")) flat["AVSYNC_EVENT_RATE"] = std::to_string(body["event_rate"].get<int>());
         try {
             apply_settings(rt.config, flat, nullptr);
@@ -647,7 +650,7 @@ HttpResponse http_status_alias(Runtime& rt)
 {
     std::lock_guard lock(rt.mu);
     return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
-        {"input_state", rt.input_state}, {"detail", rt.media_detail}, {"ptp", clock_status_json(rt)}});
+        {"timecode_packets_skipped", rt.timecode_skipped}, {"input_state", rt.input_state}, {"detail", rt.media_detail}, {"ptp", clock_status_json(rt)}});
 }
 
 std::map<std::string, std::string> widget_headers(const Config& config)
@@ -911,6 +914,7 @@ int run_service(Config config)
             if (!status.state.empty()) {
                 rt.input_state = status.state;
             }
+            rt.timecode_skipped = status.timecode_skipped;
             rt.media_detail = status.detail;
             rt.video_flow = status.video_flow;
             rt.audio_flow = status.audio_flow;

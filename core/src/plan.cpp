@@ -125,7 +125,8 @@ PlannedEvent make_event(const PlanConfig& config, const Period& period, uint64_t
     PlannedEvent event;
     event.seq = seq;
     event.event_id = event_id_for(seq);
-    event.chirp_id = static_cast<int>(seq % 4);
+    event.chirp_id = config.timecode_baud ? 0 : static_cast<int>(seq % 4);
+    event.timecode = config.timecode_baud != 0;
     event.marker_phase = static_cast<int>(seq % 2);
     event.video_grain = grain;
     event.video_tai_ns = index_to_ns(grain_rate, grain);
@@ -154,6 +155,12 @@ PlannedEvent make_event(const PlanConfig& config, const Period& period, uint64_t
         // expected offset stays the requested value; the residual is reported separately.
         event.expected_av_offset_ms = offset_ms;
     }
+    if (event.timecode) {
+        const int64_t video_ns = live ? event.video_tai_ns : int64_t(std::llround(event.video_timeline_ms * 1e6));
+        const int64_t offset_ns = live ? event.audio_tai_ns - video_ns : int64_t(std::llround(event.audio_timeline_ms * 1e6)) - video_ns;
+        event.audio_packet = encode_timecode(config.source_id, video_ns, offset_ns, live);
+        event.audio_centre_sample += config.chirp_ms * config.sample_rate / 2000.0;
+    }
     return event;
 }
 
@@ -179,6 +186,12 @@ EventPlan make_file_plan(const PlanConfig& config)
 {
     EventPlan plan;
     plan.config = config;
+    if (config.timecode_baud && ((config.timecode_baud != 600 && config.timecode_baud != 1200) ||
+        (config.event_rate != 1 && config.event_rate != 2) || config.chirp_ms != 30 ||
+        config.chirp_low_hz != 700 || config.chirp_high_hz != 2500))
+        throw std::invalid_argument("timecode needs 1/2 Hz, 600/1200 baud and the 30-ms 700-2500-Hz prefix");
+    if (config.timecode_baud == 600 && config.event_rate != 1)
+        throw std::invalid_argument("600-baud timecode requires 1 event/s");
     plan.period = plan_period(config.video, config.event_rate);
     const Rate grain_rate = config.video.grain_rate();
     const uint64_t first_ns = static_cast<uint64_t>(std::llround(config.first_event_ms * 1e6));
@@ -196,12 +209,23 @@ EventPlan make_file_plan(const PlanConfig& config)
     uint64_t ordinal = 0;
     uint64_t seq = 1;
     while (index_to_ns(grain_rate, grain) <= last_ns) {
-        plan.events.push_back(make_event(config, plan.period, seq, grain, offset_for(config, ordinal), false));
+        auto event = make_event(config, plan.period, seq, grain, offset_for(config, ordinal), false);
+        const bool fits = !config.timecode_baud || event.audio_sample * 1000.0 / config.sample_rate +
+            timecode_duration_ms(event.audio_packet.size(), config.timecode_baud) <= config.duration_ms;
+        if (fits) plan.events.push_back(std::move(event));
         ++seq;
         ++ordinal;
         grain += step;
         if (plan.events.size() > 1000000) {
             break;
+        }
+    }
+    if (config.timecode_baud) {
+        double end = -1e30;
+        for (const auto& event : plan.events) {
+            const double start = event.audio_sample * 1000.0 / config.sample_rate;
+            if (start < end) throw std::invalid_argument("timecode packets overlap; reduce rate or offset-sweep steps");
+            end = start + timecode_duration_ms(event.audio_packet.size(), config.timecode_baud);
         }
     }
     plan.canonical = canonical_of(plan);

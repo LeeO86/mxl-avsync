@@ -15,7 +15,7 @@ function app(fetch) {
   return instance;
 }
 function server() {
-  const state = {generator:{offset_ms:0, level_dbfs:-12, title:'Saved', source:'', subtitle:'', muted:false}, config:{AVSYNC_TITLE:'Saved', LOG_LEVEL:'info'}};
+  const state = {generator:{offset_ms:0, level_dbfs:-12, title:'Saved', source:'', subtitle:'', event_rate:2, audio_timecode:'1200', muted:false}, config:{AVSYNC_TITLE:'Saved', LOG_LEVEL:'info'}};
   const calls=[];
   const fetch = async (url, init={}) => {
     calls.push({url, ...init});
@@ -72,4 +72,14 @@ test('edits typed during Apply survive its response and remain unsaved', async (
   assert.equal(backend.state.generator.title,'Submitted'); assert.equal(backend.state.config.AVSYNC_TITLE,'Submitted');
   assert.equal(a.title,'Typed later'); assert.equal(a.draft.AVSYNC_TITLE,'Typed later');
   assert.equal(a.signalDirty,true); assert.equal(a.settingsDirty,true);
+});
+
+test('event-rate and modem selections survive polling and persist on Apply', async () => {
+  const backend=server(), a=app(backend.fetch); a.info={role:'generator'};
+  await a.refresh(); a.eventRate=1; a.audioTimecode='600';
+  for(let i=0;i<4;i++)await a.refresh();
+  assert.equal(a.eventRate,1); assert.equal(a.audioTimecode,'600'); assert.equal(a.signalDirty,true);
+  await a.saveGenerator();
+  assert.equal(backend.state.generator.event_rate,1); assert.equal(backend.state.generator.audio_timecode,'600');
+  assert.equal(a.signalDirty,false);
 });

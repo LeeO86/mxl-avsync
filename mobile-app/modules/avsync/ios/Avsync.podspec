@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
   s.summary = 'Recorded AV sync analysis using avsync-core'
   s.description = s.summary
   s.license = 'MIT'
-  s.author = 'ICM'
+  s.author = 'LeeO86'
   s.homepage = 'https://github.com/LeeO86/mxl-avsync'
   s.source = { :git => s.homepage }
   s.platform = :ios, '15.1'
@@ -14,7 +14,7 @@ Pod::Spec.new do |s|
   s.frameworks = 'AVFoundation', 'UIKit', 'CoreMedia', 'CoreVideo', 'CoreGraphics', 'Vision'
   s.source_files = '*.{h,mm,cpp,swift}'
   s.exclude_files = 'AvsyncCapture.swift'
-  s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h'
+  s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h', 'AVSyncQRCodeReader.h'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'GCC_OPTIMIZATION_LEVEL' => '2',

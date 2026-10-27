@@ -167,7 +167,7 @@ An event is one video marker change and one chirp that belong together.
 | `event_id` | `EVT-` + zero-padded sequence number (`EVT-000024`). In LIVE mode the sequence number is `k` of §4.2 (it fits in 64 bits for any TAI time) |
 | `seq` | the number `k` |
 | `video_time` | set time of the video marker change (ms in FILE, TAI ns in LIVE) |
-| `audio_time` | set time of the chirp's reference point (the chirp's centre) |
+| `audio_time` | set time of the chirp's reference point (onset for audio timecode v3; centre in legacy mode) |
 | `expected_av_offset_ms` | `audio_time − video_time` as planned |
 | `chirp_id` | which of the four chirps (§6.1): `seq mod 4` |
 | `marker_phase` | the marker state after the change (`seq mod 2`) |
@@ -216,7 +216,7 @@ Events are paired by identity, not by nearest neighbour:
 1. **QR code** (top left, about 18 % of the height): changes once per second (`AVSYNC_QR_PERIOD_MS`, default 1000), error correction level M. Payload §5.6. It identifies the test and the event; it is not needed for timing.
 2. **Frame counter** (text): the grain index the generator wrote, and in LIVE mode the TAI time of the grain. The text says "frame as written by the generator"; the analyzer reports the frame it saw separately.
 3. **Free text**: `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES`, and the format, rate, audio format and set offset, drawn once per change.
-4. **Timing marker**: a large block (40 % × 40 % of the height, centred) that toggles between black (Y 64) and white (Y 940) at every event. Its edge is the video event.
+4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal flashes white (Y 940) for 100 ms from each event, then black (Y 64). Its rising edge coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
 7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). In 1.0 the analyzer assumes the full raster and uses them only to check the geometry.
@@ -281,7 +281,7 @@ The long field names of the draft (`schema`, `test_id`, …) are used in the man
 - Four chirp shapes, all band-limited, Hann-windowed (10 % fades), duration `AVSYNC_CHIRP_MS` (default 30 ms), band `AVSYNC_CHIRP_LOW_HZ`–`AVSYNC_CHIRP_HIGH_HZ` (default 700–2500 Hz, inside the G.711 telephone band, so the file-mode G.711 test aid can still carry them):
   - `0` linear up-chirp, `1` linear down-chirp, `2` up-chirp in the lower 60 % of the band, `3` down-chirp in the upper 60 % of the band.
   The four are chosen for low cross-correlation; M0 measures it and MAY change the shapes before 1.0.
-- The chirp's reference point is its centre. Event `k` uses chirp `k mod 4`.
+- The default is compact audio timecode v3: a known up-chirp references its start and a protected voice-band data burst independently carries source, common video-event time and audio offset. See [wire format, timing, compatibility and tests](docs/audio-timecode.md). Legacy mode retains centre reference and chirp `k mod 4`.
 - Silence between chirps (no noise bed, no tone).
 - Level `AVSYNC_CHIRP_LEVEL_DBFS` (default −12 dBFS peak), never clipping.
 - Every output sample is computed from its absolute sample index (a pure function), so a restart, a block size or a late block never shifts the signal, and the chirp centre can sit between two samples.
@@ -415,7 +415,7 @@ End-to-end latency between two analyzers is `t_arr(destination) − t_arr(source
 
 ```
 mxl-avsync generate --format 1080p50 --duration 60 --offset 0 \
-  [--offset-sweep -40,-20,0,20,40] [--event-rate 2] [--audio-rate 48000] [--channels 2] \
+  [--offset-sweep -40,-20,0,20,40] [--event-rate 2] [--audio-timecode 1200|600|legacy] [--audio-rate 48000] [--channels 2] \
   [--container mov|mp4|mkv] [--video-codec prores|v210|h264] [--audio-codec pcm24|pcm16|aac] \
   [--title …] [--notes …] --out test.mov
 ```
@@ -486,7 +486,8 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | Key | Default | Apply | Meaning |
 | --- | --- | --- | --- |
 | `AVSYNC_ROLE` | — (required for `serve`) | restart | `generator` or `analyzer` |
-| `AVSYNC_EVENT_RATE` | 2 | flow (gen) / live (ana) | 1, 2 or 4 events per second (§4.2); the analyzer takes it from the QR when it can |
+| `AVSYNC_EVENT_RATE` | 2 | flow (gen) / live (ana) | 1 or 2/s for timecode; legacy also supports 4/s. 600 baud requires 1/s. Analyzer adopts QR rate |
+| `AVSYNC_AUDIO_TIMECODE` | 1200 | flow | `1200`, `600`, or `legacy`; timecode has fixed 30-ms / 700–2500-Hz prefix, onset reference and one white pulse/event |
 | `AVSYNC_CHIRP_MS` | 30 | flow / live | 10–100 |
 | `AVSYNC_CHIRP_LOW_HZ`, `AVSYNC_CHIRP_HIGH_HZ` | 700, 2500 | flow / live | band, 100–20000, low < high |
 | `AVSYNC_STATE_DIR` | `/config` | restart | `config.json`, `routes.json`, `events/` |
@@ -932,3 +933,15 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 ### 1.0.1 form editing contract
 
 Signal and Settings fields are local drafts. Status/JPEG refreshes do not replace or reconstruct the settings form. Focused or dirty fields retain their contents; Apply/Discard and an Unsaved changes indicator make adoption explicit. Failed writes retain the draft. A successful own write adopts its server response unless the user typed a newer edit while it was pending. Discard reloads current server values.
+
+
+## Integrated audio timecode v3 (2026-10-27)
+
+The onset-reference, compact protected audio format and white-pulse marker
+supersede the legacy-only event-ID/reference descriptions above when
+AVSYNC_AUDIO_TIMECODE is 1200 or 600. Generator/analyzers/native iPhone share
+one codec. Coded pairs use source plus full common timestamp, with an online
+10-second retention window; legacy ±2-period pairing remains only for legacy.
+Phone audio-only latency is explicitly estimated from device UTC, with unknown
+clock/capture accuracy; this user-authorized extension does not claim PTP lock.
+Detailed contract and hardware boundaries: [audio-timecode.md](docs/audio-timecode.md).

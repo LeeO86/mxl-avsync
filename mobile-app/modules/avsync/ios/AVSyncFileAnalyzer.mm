@@ -1,5 +1,6 @@
 #import "AVSyncFileAnalyzer.h"
 #import <AVFoundation/AVFoundation.h>
+#import "AVSyncQRCodeReader.h"
 #import <UIKit/UIKit.h>
 #include "avsync/avsync.hpp"
 #include <algorithm>
@@ -77,7 +78,7 @@ static NSDictionary *failure(NSString *message) { return @{ @"error": message };
   images.requestedTimeToleranceAfter=kCMTimeZero;
   NSString *directory=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
   if(calibration) [[NSFileManager defaultManager] createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
-  int decoded=0;
+  int decoded=0, decodedQR=0; double lastQR=-1e30; NSString *qrError=@"none";
   while((sample=[videoOut copyNextSampleBuffer])) {
    @autoreleasepool {
     CMTime time=CMSampleBufferGetPresentationTimeStamp(sample);
@@ -86,6 +87,13 @@ static NSDictionary *failure(NSString *message) { return @{ @"error": message };
     if(pixel) {
       ++decoded;
       if(!calibration) {
+        if(ms-lastQR>=500){
+          lastQR=ms;
+          NSDictionary *reading=[AVSyncQRCodeReader readPixelBuffer:pixel];qrError=reading[@"error"];
+          for(NSString *text in reading[@"payloads"]){
+            auto qr=avsync::parse_qr_payload(text.UTF8String);if(qr){session.observe_signal(*qr);++decodedQR;}
+          }
+        }
         CVPixelBufferLockBaseAddress(pixel,kCVPixelBufferLock_ReadOnly);
         int w=(int)CVPixelBufferGetWidthOfPlane(pixel,0),h=(int)CVPixelBufferGetHeightOfPlane(pixel,0);
         int stride=(int)CVPixelBufferGetBytesPerRowOfPlane(pixel,0);
@@ -137,7 +145,7 @@ static NSDictionary *failure(NSString *message) { return @{ @"error": message };
     if(event.av_offset_ms && std::isfinite(*event.av_offset_ms)) {item[@"offset_ms"]=@(*event.av_offset_ms);if(event.grade!="invalid") offsets.push_back(*event.av_offset_ms);}
     [events addObject:item];
   }
-  if(offsets.empty()) return failure([NSString stringWithFormat:@"No matching AV events. Picture located in %d/%d frames; readable marker code in %d. Move closer, keep all four corner marks visible and play the chirps.",session.located_frames(),decoded,session.valid_frames()]);
+  if(offsets.empty()) return failure([NSString stringWithFormat:@"No matching AV events. Picture located in %d/%d frames; readable marker code in %d; %lu timecodes, %lu video events, %d QRs (QR error: %@).",session.located_frames(),decoded,session.valid_frames(),(unsigned long)report.audio_timecodes.size(),(unsigned long)report.video_events,decodedQR,qrError]);
   std::sort(offsets.begin(),offsets.end());
   double median=offsets[offsets.size()/2];
   result[@"offset_ms"]=@(median);

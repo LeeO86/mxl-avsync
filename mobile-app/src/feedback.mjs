@@ -6,8 +6,9 @@ export function signalFeedback(report = {}, ageMs = Infinity, active = true) {
  const recent = t => Number.isFinite(now) && Number.isFinite(t) && now - t >= -100 && now - t <= 1200;
  const chirps = (report.chirps || []).filter(hit => recent(hit.timeMs));
  const timecode = report.audioTimecode;
- const decoded = timecode?.valid === true && timecode.crcOk === true && recent(timecode.receivedTimeMs);
- const audio = decoded ? { tone: 'green', label: `Audio timecode · #${timecode.eventSeq}` }
+ const decoded = timecode?.valid === true && timecode.crcOk === true &&
+  (Number.isFinite(timecode.validUntilMs) ? Number.isFinite(now) && now >= timecode.receivedTimeMs - 100 && now <= timecode.validUntilMs : recent(timecode.receivedTimeMs));
+ const audio = decoded ? { tone: 'green', label: Number.isFinite(timecode.eventSeq) ? `Audio timecode · #${timecode.eventSeq}` : 'Audio timecode decoded' }
   : chirps.length ? { tone: 'orange', label: chirps.every(hit => hit.quality === 'invalid') ? 'Chirp ambiguous' : 'Chirp detected · no timecode' } : empty.audio;
  const picture = !report.picture?.found ? empty.picture
   : report.picture.codeDecoded ? { tone: 'green', label: `Picture code · #${report.picture.codeSeq ?? report.decodedSeq ?? 'decoded'}` }

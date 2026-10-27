@@ -26,7 +26,7 @@ def percentile(values,p):
     values=sorted(values);at=(len(values)-1)*p;lo=int(at);hi=min(lo+1,len(values)-1)
     return values[lo]+(at-lo)*(values[hi]-values[lo])
 
-def experiment(binary,out,count,seed,anchor):
+def experiment(binary,out,count,seed,anchor,production=False):
     out.mkdir(parents=True,exist_ok=True)
     ffmpeg=['ffmpeg','-hide_banner','-loglevel','error','-y']
     rows=[];violations=[]
@@ -78,7 +78,7 @@ def experiment(binary,out,count,seed,anchor):
                 ms=int(name.removeprefix('drop').removeprefix('plc').removesuffix('ms'))
                 for event in source_events:
                     payload_start=event['chirp_start_ms']+40+64000/baud
-                    payload_duration=(25*8+6)*2000/baud
+                    payload_duration=(event.get('payload_bytes',25)*8+6)*2000/baud
                     begin=round((payload_start+rng.uniform(20,payload_duration-ms-20))*8);length=ms*8
                     data[begin:begin+length]=data[begin-length:begin] if name.startswith('plc') else [0.]*length
             if name=='delay3217ms':delay=3217;data=[0.]*(delay*8)+data
@@ -91,15 +91,15 @@ def experiment(binary,out,count,seed,anchor):
             with wave.open(str(path),'rb') as received: duration_ms=received.getnframes()/8
             for event in source_events:
                 begin=event['chirp_start_ms']*scale+delay-cut
-                end=begin+truth['packet_duration_ms']*scale
-                if begin>=0 and end<=duration_ms:events[(event['source'],event['seq'],event['send_tai_ns'])]=event
+                end=begin+event.get('packet_duration_ms',truth['packet_duration_ms'])*scale
+                if begin>=0 and end<=duration_ms:events[(event['source'],event['video_send_ns'] if production else event['seq'],event['send_tai_ns'])]=event
             found=set();errors=[];incorrect=[];corrections=[]
             for got in observed['packets']:
-                key=(got['source'],got['seq'],got['send_tai_ns']);expected=events.get(key)
+                key=(got['source'],got['video_send_ns'] if production else got['seq'],got['send_tai_ns']);expected=events.get(key)
                 if not expected or got['video_offset_ns']!=expected['video_offset_ns'] or got['baud']!=baud or got['anchor_reference']!=anchor:
                     incorrect.append(got);continue
                 found.add(key);arrival=expected['anchor_ms']*scale+delay-cut
-                errors.append(got['anchor_ms']-arrival);corrections.append(got['hard_changes'])
+                errors.append(got['anchor_ms']-arrival);corrections.extend([] if got['hard_changes'] is None else [got['hard_changes']])
             row={'profile':profile,'baud':baud,'events_per_second':1000/period,'condition':name,'expected':len(events),'decoded':len(found),'wrong':len(incorrect),'decode_percent':100*len(found)/len(events) if events else None,'anchor_shift_median_ms':statistics.median(errors) if errors else None,'anchor_shift_abs_p95_ms':percentile([abs(v) for v in errors],.95),'anchor_shift_abs_max_ms':max([abs(v) for v in errors],default=None),'hard_changes_max':max(corrections,default=0),'crc_rejects':observed['crc_rejects'],'prefix_candidates':observed['prefix_candidates'],'decode_wall_seconds':elapsed,'wav_sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
             rows.append(row);print(profile,name,f"{len(found)}/{len(events)}",'wrong',len(incorrect),'p95-ms',row['anchor_shift_abs_p95_ms'],flush=True)
             if incorrect:violations.append(f'{profile}/{name}: incorrect accepted payload')
@@ -116,10 +116,11 @@ def experiment(binary,out,count,seed,anchor):
             row={'profile':profile,'baud':baud,'condition':control,'expected':0,'decoded':len(observed['packets']),'wrong':len(observed['packets']),'decode_percent':None,'prefix_candidates':observed['prefix_candidates'],'crc_rejects':observed['crc_rejects']};rows.append(row)
             print(profile,control,'false packets',row['wrong'],flush=True)
             if row['wrong']:violations.append(f'{profile}/{control}: false accepted packet')
-    return {'schema':'mxl-avsync-audio-timecode-benchmark/1','seed':seed,'packets_per_stream':count,'platform':platform.platform(),'ffmpeg':subprocess.check_output(['ffmpeg','-version'],text=True).splitlines()[0],'protocol':{'payload_bytes':25,'fec':'K7 rate 1/2, terminated, soft Viterbi','interleaver':'permutation 73 mod 412','preamble_bits':32,'sync_bits':32,'fsk_bits_per_packet':476,'frequencies_hz':[1300,2100],'tx_sample_rate':48000,'rx_sample_rate':8000,'chirp_ms':30,'guard_ms':10,'reference':'chirp '+anchor,'receiver':'blind audio-only, auto 600/1200; no manifest or image supplied'},'rows':rows,'hard_gate_violations':violations,'limits':['Synthetic/offline channels only; no real phone/call/speaker/microphone validation.','Anchor shift includes channel filter/echo effects; decoding success alone is not timing accuracy.','Stress losses are reported, not hidden by changing thresholds.','Not integrated into the production generator or iPhone app.']}
+    return {'schema':'mxl-avsync-audio-timecode-benchmark/1','seed':seed,'packets_per_stream':count,'platform':platform.platform(),'ffmpeg':subprocess.check_output(['ffmpeg','-version'],text=True).splitlines()[0],'protocol':{'payload_bytes':'15/17' if production else 25,'fec':'K7 rate 1/2, terminated, soft Viterbi','interleaver':'permutation 73 mod 252/284' if production else 'permutation 73 mod 412','preamble_bits':32,'sync_bits':32,'fsk_bits_per_packet':[316,348] if production else 476,'frequencies_hz':[1300,2100],'tx_sample_rate':48000,'rx_sample_rate':8000,'chirp_ms':30,'guard_ms':10,'reference':'chirp '+anchor,'receiver':'blind audio-only, auto 600/1200; no manifest or image supplied'},'rows':rows,'hard_gate_violations':violations,'limits':['Synthetic/offline channels only; no real phone/call/speaker/microphone validation.','Anchor shift includes channel filter/echo effects; decoding success alone is not timing accuracy.','Stress losses are reported, not hidden by changing thresholds.','Physical acoustic/call accuracy is not established; production and iPhone share this codec.' if production else 'Not integrated into the production generator or iPhone app.']}
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--production',action='store_true',help='Test the actual compact core codec shared by the generator/analyzers/iPhone.')
     parser.add_argument('--anchor',choices=['start','centre'],default='start',help='Start is the new default; centre reproduces historical packets.')
     parser.add_argument('--binary',type=Path,help='Use a prebuilt experiment binary instead of compiling.')
     parser.add_argument('--out',type=Path,default=Path('/tmp/avsync-timecode-results'))
@@ -127,21 +128,27 @@ def main():
     parser.add_argument('--seed',type=int,default=20261026)
     parser.add_argument('--cxx',default=os.environ.get('CXX','clang++'))
     args=parser.parse_args()
+    if args.production and args.anchor!='start':parser.error('Production compact packets always use chirp start')
     args.out.mkdir(parents=True,exist_ok=True)
     compiled_here=args.binary is None
     if args.binary is None:
         args.binary=args.out/'audio-timecode-probe'
-        run([args.cxx,'-std=c++20','-O3','-Wall','-Wextra','-I'+str(ROOT/'core/include'),'-I'+str(ROOT/'third_party/pocketfft'),Path(__file__).with_name('probe.cpp'),ROOT/'core/src/chirp.cpp',ROOT/'core/src/detect.cpp','-o',args.binary])
+        sources=[ROOT/'tests/tools/timecode_tool.cpp',*[ROOT/f'core/src/{name}.cpp' for name in ['timecode','chirp','detect','g711']]] if args.production else [Path(__file__).with_name('probe.cpp'),ROOT/'core/src/chirp.cpp',ROOT/'core/src/detect.cpp']
+        run([args.cxx,'-std=c++20','-O3','-Wall','-Wextra','-I'+str(ROOT/'core/include'),'-I'+str(ROOT/'third_party'),'-I'+str(ROOT/'third_party/pocketfft'),*sources,'-o',args.binary])
     body=struct.pack('>BIIQi',0x23 if args.anchor=='start' else 0x21,0x01020304,0x10203040,1792963237123456789,35000000)
+    if args.production:
+        ticks=(1792963237123456789*65536+500000000)//1000000000
+        body=bytes([0x31])+struct.pack('>I',0x01020304)+ticks.to_bytes(6,'big')+struct.pack('>h',35000000//62500)
     expected=(body+struct.pack('>I',zlib.crc32(body))).hex()
     actual=subprocess.check_output([str(args.binary),'dump-vector','--anchor',args.anchor],text=True).strip()
     assert actual==expected, 'Independent struct/zlib wire-vector mismatch'
     run([args.binary,'self-test'])
     started=time.monotonic()
-    report=experiment(args.binary,args.out,args.packets,args.seed,args.anchor)
+    report=experiment(args.binary,args.out,args.packets,args.seed,args.anchor,args.production)
     report['elapsed_seconds']=time.monotonic()-started
     report['compiler']=subprocess.check_output([args.cxx,'--version'],text=True).splitlines()[0] if compiled_here else 'prebuilt binary (see binary hash)'
     files=[Path(__file__).with_name('probe.cpp'),Path(__file__),ROOT/'core/src/chirp.cpp',ROOT/'core/src/detect.cpp',ROOT/'core/include/avsync/avsync.hpp']
+    if args.production:files += [ROOT/f'core/src/{n}.cpp' for n in ['timecode','g711']] + [ROOT/'core/include/avsync/timecode.hpp',ROOT/'tests/tools/timecode_tool.cpp']
     report['source_sha256']={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
     report['binary_sha256']=hashlib.sha256(args.binary.read_bytes()).hexdigest()
     report['independent_wire_vector']=expected

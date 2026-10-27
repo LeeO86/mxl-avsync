@@ -203,6 +203,11 @@ int run_generate(const GenerateRequest& request, std::string& error)
             return 78;
         }
         PlanConfig plan_config;
+        if (request.audio_timecode != "legacy" && request.audio_timecode != "600" && request.audio_timecode != "1200") {
+            error = "audio-timecode must be legacy, 600 or 1200"; return 78;
+        }
+        plan_config.timecode_baud = request.audio_timecode == "legacy" ? 0 : std::stoi(request.audio_timecode);
+        plan_config.source_id = timecode_source_id(request.test_id.c_str());
         plan_config.video = *format;
         plan_config.event_rate = request.event_rate;
         plan_config.sample_rate = 48000;
@@ -233,7 +238,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
             return 1;
         }
         AVFormatContext* fmt = nullptr;
-        check(avformat_alloc_output_context2(&fmt, nullptr, request.container.c_str(), request.out_path.c_str()), "alloc output");
+        check(avformat_alloc_output_context2(&fmt, nullptr, (request.container == "mkv" ? "matroska" : request.container.c_str()), request.out_path.c_str()), "alloc output");
         AVStream* vstream = avformat_new_stream(fmt, nullptr);
         AVStream* astream = avformat_new_stream(fmt, nullptr);
         AVCodecContext* venc = avcodec_alloc_context3(vcodec);
@@ -316,14 +321,16 @@ int run_generate(const GenerateRequest& request, std::string& error)
             int64_t tk = static_cast<int64_t>(std::llround(ms));
             for (const auto& event : plan.events) {
                 if (static_cast<uint64_t>(index) >= event.video_grain) {
-                    marker_white = event.marker_phase != 0;
+                    marker_white = plan_config.timecode_baud ? flash_white(int(index - event.video_grain), period.period_ms / period.grains) : event.marker_phase != 0;
                     shown_seq = event.seq;
+                    qr_seq = event.seq;
+                    tk = static_cast<int64_t>(std::llround(event.video_timeline_ms * (plan_config.timecode_baud ? 1e6 : 1)));
                     frame_in_period = static_cast<int>(static_cast<uint64_t>(index) - event.video_grain);
                     offset = event.expected_av_offset_ms;
                 } else {
                     qr_seq = event.seq;
                     offset = event.expected_av_offset_ms;
-                    tk = static_cast<int64_t>(std::llround(event.video_timeline_ms));
+                    tk = static_cast<int64_t>(std::llround(event.video_timeline_ms * (plan_config.timecode_baud ? 1e6 : 1)));
                     break;
                 }
             }
@@ -344,8 +351,10 @@ int run_generate(const GenerateRequest& request, std::string& error)
             char timetext[64];
             std::snprintf(timetext, sizeof(timetext), "t %8.1f ms", ms);
             info.time_line = timetext;
-            if (second != qr_second) {
+            if (second != qr_second || plan_config.timecode_baud) {
                 QrPayload payload;
+                payload.timecode = plan_config.timecode_baud != 0;
+                payload.source_id = plan_config.source_id;
                 payload.test_id = request.test_id;
                 payload.mode = "FILE";
                 payload.k = qr_seq;
@@ -428,7 +437,11 @@ int run_generate(const GenerateRequest& request, std::string& error)
         if (mono.size() < static_cast<size_t>(request.duration_s * 48000)) {
             mono.resize(static_cast<size_t>(request.duration_s * 48000) + 8);
         }
-        synthesise_block(spec, plan.events, 0, mono.data(), mono.size());
+        if (plan_config.timecode_baud) {
+            AudioTimecodeWriter writer;
+            writer.write(plan.events, 0, mono.data(), mono.size(), plan_config.timecode_baud, spec.level_dbfs);
+            if (writer.skipped()) throw std::invalid_argument("timecode scheduling collision");
+        } else synthesise_block(spec, plan.events, 0, mono.data(), mono.size());
         std::vector<float> played = mono;
         if (out_rate != 48000) {
             played = resample_linear(mono.data(), static_cast<size_t>(request.duration_s * 48000), 48000, out_rate);
@@ -537,7 +550,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
                           {"scan", format->interlaced ? "interlaced_tff" : "progressive"}, {"codec", fourcc_name(request.video_codec)}}},
             {"audio", {{"codec", fourcc_name(request.audio_codec)}, {"sample_rate_hz", out_rate}, {"channels", request.channels},
                           {"chirp", {{"ms", request.chirp_ms}, {"low_hz", request.chirp_low_hz}, {"high_hz", request.chirp_high_hz},
-                                        {"level_dbfs", request.chirp_level_dbfs}}}}},
+                                        {"level_dbfs", request.chirp_level_dbfs}, {"reference", plan_config.timecode_baud ? "start" : "centre"}, {"timecode", request.audio_timecode}, {"source_id", plan_config.source_id}}}}},
             {"container", {{"format", request.container}, {"video_time_base", checks.value("video_time_base", "")},
                               {"audio_time_base", checks.value("audio_time_base", "")},
                               {"video_start_pts", checks.value("video_start_time", 0)}, {"audio_start_pts", checks.value("audio_first_pts", 0)},
@@ -577,8 +590,8 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
         check(avformat_find_stream_info(fmt, nullptr), "info");
         const int video_index = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
         const int audio_index = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-        if (video_index < 0 || audio_index < 0) {
-            error = "file has no video and audio";
+        if (audio_index < 0) {
+            error = "file has no audio";
             return 78;
         }
         auto open_dec = [&](int index) {
@@ -588,22 +601,22 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
             check(avcodec_open2(ctx, codec, nullptr), "open dec");
             return ctx;
         };
-        AVCodecContext* vdec = open_dec(video_index);
+        AVCodecContext* vdec = video_index >= 0 ? open_dec(video_index) : nullptr;
         AVCodecContext* adec = open_dec(audio_index);
-        const int width = vdec->width;
-        const int height = vdec->height;
-        SwsContext* sws = sws_getContext(width, height, vdec->pix_fmt, width, height, AV_PIX_FMT_YUV422P10LE, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        const int width = vdec ? vdec->width : 0;
+        const int height = vdec ? vdec->height : 0;
+        SwsContext* sws = vdec ? sws_getContext(width, height, vdec->pix_fmt, width, height, AV_PIX_FMT_YUV422P10LE, SWS_BILINEAR, nullptr, nullptr, nullptr) : nullptr;
         std::vector<uint16_t> luma(static_cast<size_t>(width * height));
         AVFrame* yuv = av_frame_alloc();
         yuv->format = AV_PIX_FMT_YUV422P10LE;
         yuv->width = width;
         yuv->height = height;
-        check(av_frame_get_buffer(yuv, 0), "yuv");
+        if (vdec) check(av_frame_get_buffer(yuv, 0), "yuv");
         VideoFormat synthetic;
         synthetic.token = std::to_string(width) + "x" + std::to_string(height);
         synthetic.width = width;
         synthetic.height = height;
-        synthetic.frame = Rate{fmt->streams[video_index]->avg_frame_rate.num > 0 ? fmt->streams[video_index]->avg_frame_rate.num : 50,
+        synthetic.frame = video_index < 0 ? Rate{50, 1} : Rate{fmt->streams[video_index]->avg_frame_rate.num > 0 ? fmt->streams[video_index]->avg_frame_rate.num : 50,
             fmt->streams[video_index]->avg_frame_rate.den > 0 ? fmt->streams[video_index]->avg_frame_rate.den : 1};
         synthetic.interlaced = false;
         int event_rate = 2;
@@ -659,7 +672,8 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
                             qr = parse_qr_payload(*text);
                         }
                     }
-                    const int64_t grain = frame->pts == AV_NOPTS_VALUE ? 0 : frame->pts;
+                    if (qr) { event_rate = qr->rate; tracker.configure(event_rate, qr->timecode); }
+                    const int64_t grain = static_cast<int64_t>(std::llround(ms * synthetic.frame.num / (1000.0 * synthetic.frame.den)));
                     VideoObservation obs;
                     if (request.locate) {
                         const LocatedMarker located = read_located_marker(luma.data(), width, height, width);
@@ -670,6 +684,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
                                 located_format.height = located.height;
                                 locate_tracker = MarkerTracker(located_format, event_rate);
                             }
+                            if (qr) locate_tracker->configure(qr->rate, qr->timecode);
                             obs = locate_tracker->push(located.canonical.data(), located.width, grain, ms);
                             if (obs.event) {
                                 obs.flags.push_back("fiducial_lock");
@@ -679,6 +694,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
                         obs = tracker.push(luma.data(), width, grain, ms);
                     }
                     if (obs.event) {
+                        if (qr) identify_video(obs, *qr);
                         videos.push_back(obs);
                     }
                 } else if (!audio_origin_set) {
@@ -713,6 +729,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
         }
         AudioDetector detector(detect);
         const auto hits = detector.detect(audio.data(), audio.size(), 0);
+        const auto timecodes = decode_timecodes(audio.data(), audio.size(), 48000, audio_origin_ms);
         ReferenceInfo reference;
         reference.type = "file";
         reference.sync_state = "unknown";
@@ -732,6 +749,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
             pairer.observe_video(video, expected);
         }
         for (const auto& hit : hits) {
+            if ((qr && qr->timecode) || !timecodes.empty()) break;
             AudioObservation obs;
             obs.chirp_id = hit.chirp_id;
             obs.time_ms = hit.time_ms;
@@ -743,18 +761,23 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
             obs.ambiguous = hit.ambiguous;
             pairer.observe_audio(obs);
         }
+        for (const auto& packet : timecodes) pairer.observe_audio(audio_observation(packet));
         pairer.finish();
-        if (pairer.results().empty()) {
+        if (pairer.results().empty() && timecodes.empty()) {
             error = "no event was found";
             return 2;
         }
-        nlohmann::json stream = {{"format", std::to_string(width) + "x" + std::to_string(height)},
+        nlohmann::json stream = {{"format", video_index < 0 ? "audio-only" : std::to_string(width) + "x" + std::to_string(height)},
             {"audio", "pcm " + std::to_string(native_rate) + " Hz ch " + std::to_string(request.channel)},
             {"container", request.path}};
         const bool deviation = std::any_of(pairer.results().begin(), pairer.results().end(), [](const Measurement& m) {
             return std::abs(m.expected_av_offset_ms) > 1e-6;
         });
         auto document = result_document(test_id, "FILE", deviation ? "deviation" : "offset", reference, stream, pairer.results());
+        document["audio_timecodes"] = nlohmann::json::array();
+        for (const auto& packet : timecodes) document["audio_timecodes"].push_back({{"source_id", packet.source_id},
+            {"video_send_ns", packet.video_send_ns}, {"audio_send_ns", packet.audio_send_ns}, {"live", packet.live},
+            {"received_ms", packet.time_ms}, {"baud", packet.baud}, {"crc_ok", true}});
         std::cout << "mxl-avsync analyze " << request.path << "\n" << human_report(document);
         if (!request.json_out.empty()) {
             std::ofstream out(request.json_out);

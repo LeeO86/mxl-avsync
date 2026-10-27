@@ -55,3 +55,11 @@ MIT (`LICENSE`).
 See [testfiles/README.md](testfiles/README.md) for eight verified AV-sync clips in MP4, MOV and MKV (720p to 4K), known offsets, manifests, analysis reports and regeneration commands.
 
 Signal and Settings forms keep local drafts across status/JPEG polling, with an Unsaved changes indicator and Apply/Discard. Only successful Apply or explicit Discard adopts the server settings; failed saves and newer edits made during a save are retained.
+
+
+## Audio timecode and white flash
+
+The default signal carries independently decodable audio timecode at 1200 baud.
+At zero offset, each white flash starts with the chirp. Choose 1 or 2 chirps/s
+in Signal; 600 baud and legacy compatibility are also available. See
+[the format, phone feedback, audio-only latency and tests](docs/audio-timecode.md).

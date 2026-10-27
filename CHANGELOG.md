@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.2 (unreleased)
+
+- Integrate compact audio-only timecode across the generator, file/live analyzers
+  and native iOS app, with CRC/FEC, full event identity and legacy compatibility.
+- Align each white pulse to chirp onset and add draft-preserving 1/2-Hz and
+  1200/600-baud controls. Count skipped live collisions; reject overlapping files.
+- Decode audio without picture/QR and show separately estimated phone latency,
+  independent signal pills, picture outline and current-stage diagnostics.
+- Restore working native capture/calibration, retain zero correction without
+  calibration, and preserve antialiased generator text. Add end-to-end channel,
+  file, native iOS and form regressions; hardware timing remains unverified.
+
 ## 1.0.1 (2026-10-26)
 
 - Fixed a pre-existing `--locate` failure on scaled, padded full-renderer signals: QR/text squares could displace real corners. Spatial candidate retention, local ring refinement, strip/geometry checks and stable 640×360 rectification now recover the full picture. Regression coverage checks actual corner coordinates and multiple marker sequences/states.

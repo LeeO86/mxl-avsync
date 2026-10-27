@@ -55,12 +55,14 @@ jobs:
         run: ./tests/integration/clock.sh
       - name: file
         run: ./tests/integration/file.sh
+      - name: audio timecode files
+        run: python3 tests/integration/timecode.py build/mxl-avsync
       - name: stage 2 file paths
         run: ./tests/integration/stage2.sh
       - name: web form draft rules
         run: node --test tests/web/*.test.cjs
       - name: phone display rules
-        run: node --test mobile-app/src/display.test.mjs
+        run: node --test mobile-app/src/*.test.mjs
 
   build-and-test:
     runs-on: ubuntu-24.04

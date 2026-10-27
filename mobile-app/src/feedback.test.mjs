@@ -38,3 +38,10 @@ test('latency distinguishes a file signal, expired QR and absent capture clock',
  assert.match(latencyHint('qr_expired'), /expired/);
  assert.match(latencyHint('waiting_for_device_clock'), /clock mapping unavailable/);
 });
+
+test('compact timecode needs no sequence field and remains green through its declared packet lease', () => {
+ const report={timeMs:1500,audioTimecode:{valid:true,crcOk:true,receivedTimeMs:100,validUntilMs:1700}};
+ assert.equal(signalFeedback(report,0,true).audio.tone,'green');
+ assert.equal(signalFeedback(report,0,true).audio.label,'Audio timecode decoded');
+ report.timeMs=1701; assert.equal(signalFeedback(report,0,true).audio.tone,'gray');
+});

@@ -62,3 +62,11 @@ Video and audio estimates include device capture delay and may be negative if cl
 “Check clock” makes three HTTPS requests only when tapped, using the WorldTimeAPI-compatible service `https://worldtime.timezone.io/api/timezone/Etc/UTC` ([provider documentation](https://www.timezone.io/docs/worldtimeapi)). It brackets API−phone clock difference over request/response times without assuming symmetric network delay, reports RTT, rejects cached/invalid/inconsistent answers and local clock jumps, and expires after five minutes or a clock change. It does not set the phone clock or silently correct latency. API clock error and capture error are not bounded by this bracket; it is a **coarse sanity check** only. The original worldtimeapi.org endpoint was unreachable during development; the configured compatible endpoint returned valid UTC data. [NIST explains network-path accuracy limits](https://www.nist.gov/pml/time-and-frequency-division/time-distribution/internet-time-service-its).
 
 Regression coverage includes pill progression and expiry, ambiguous/mismatched chirp identities, negative estimates, UTC/TAI conversion, source audio offsets, sequence wrap, source expiry, unsupported/file references, real native +120 ms video/+155 ms audio estimates, and four-corner aspect-fill mapping. A physical phone/Safari test remains necessary to validate overlay alignment, QR availability and performance on the capture path.
+
+
+The integrated compact audio timecode now drives the green audio pill only
+after CRC validation. Both 1/2-Hz sources are acquired from QR metadata; the
+stability window retains at least three recent events at 1 Hz. Independently
+decoded LIVE audio supplies estimated audio latency even without image/QR,
+with device/source clock and capture accuracy still unknown. A native rebuild
+is required (Expo Go cannot load this codec). See ../docs/audio-timecode.md.
