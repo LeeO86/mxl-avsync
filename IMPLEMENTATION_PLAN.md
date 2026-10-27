@@ -699,3 +699,17 @@ keeps original pixels for QR, adopts source strip rate while retaining received
 MXL times, and publishes no video event from an invalid/lost pose. Optical AV
 uncertainty is unknown. See docs/phone-generator.md for lifecycle, test commands
 and hardware limits. Validation results are recorded after execution.
+
+
+## Linux optical fixture feedback (2026-10-27)
+
+A real native MXL fixture carries PhoneGeneratorPlan's 720p60 source as a
+960x540 tile in a 1920x1080/50 camera raster. Its QR, strip and marker were
+readable, but the 960-pixel search quantized outer edges and left a few
+pixels of margin; strict canonical geometry rejected it. PictureReader now
+tries bounded local quad insets/outsets on original pixels only after the
+initial pose fails. At most eight original-pixel steps per direction are
+tried, scaled to the search resolution. Existing geometry/parity/state gates
+are unchanged, and an initially valid strip identity must be preserved.
+A rendered phone-QR regression at 1920x1080 and 3840x2160 covers initial/cached/search reads and loss.
+The normal direct path and existing valid poses retain their fast path.

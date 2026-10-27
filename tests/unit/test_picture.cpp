@@ -427,3 +427,28 @@ TEST_CASE("live picture reader keeps direct path and reacquires a moving camera 
         CHECK(found.reading.state==MarkerReading::State::White);
     }
 }
+
+#include "avsync/phone_generator.hpp"
+TEST_CASE("bounded optical search refines phone tile borders in 1080p and 4K cameras") {
+    PhoneGeneratorPlan plan("linux-phone-1",1,1793000000000000000LL,1000);
+    Yuv422p10 frame; frame.resize(1280,720);
+    PictureInfo info; info.title="TEST SIGNAL"; info.source="Synthetic phone camera";
+    info.qr_json=qr_payload_json(plan.qr(1)); info.period_ms=1000;
+    render_picture(frame,info,1,0,60,true);
+    for(int scale:{1,2}) {
+        const int width=1920*scale, height=1080*scale;
+        std::vector<uint16_t> camera(size_t(width)*height,240);
+        for(int y=0;y<540*scale;++y)for(int x=0;x<960*scale;++x)
+            camera[size_t(y+180*scale)*width+x+240*scale]=frame.y[size_t(y*4/(3*scale))*1280+x*4/(3*scale)];
+        PictureReader reader;
+        for(double now:{0.0,20.0,600.0}) {
+            const auto found=reader.read(camera.data(),width,height,width,now);
+            REQUIRE(found.located); REQUIRE_FALSE(found.canonical.empty());
+            CHECK(found.reading.geometry_ok); CHECK(found.reading.strip_ok);
+            CHECK(found.reading.seq_low24==1);
+            CHECK(found.reading.state==MarkerReading::State::White);
+        }
+        std::fill(camera.begin(),camera.end(),240);
+        CHECK_FALSE(reader.read(camera.data(),width,height,width,800).located);
+    }
+}
