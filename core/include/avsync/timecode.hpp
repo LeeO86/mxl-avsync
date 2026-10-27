@@ -16,6 +16,7 @@ struct AudioTimecode {
     int64_t video_send_ns = 0;
     int64_t audio_send_ns = 0;
     bool live = false;
+    bool estimated_source = false; // UTC-derived source/output timing, not a PTP emission proof
     bool onset = true;
     bool compact = true;
     int baud = 1200;
@@ -30,7 +31,7 @@ struct AudioTimecode {
 uint32_t timecode_source_id(const char *text);
 int64_t quantize_timecode_ns(int64_t ns);
 std::vector<uint8_t> encode_timecode(uint32_t source_id, int64_t video_ns, int64_t offset_ns,
-                                     bool live);
+                                     bool live, bool estimated_source = false);
 bool parse_timecode(const std::vector<uint8_t> &bytes, AudioTimecode &out);
 double timecode_duration_ms(size_t payload_bytes, int baud);
 std::vector<float> timecode_waveform(const std::vector<uint8_t> &bytes, int baud,

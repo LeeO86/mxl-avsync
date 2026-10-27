@@ -22,7 +22,7 @@ Names that are guesses and need a check before implementation are marked `TODO_`
 
 Design principles:
 
-1. **AV offset and latency are different quantities.** AV offset needs no common clock. Absolute latency needs one (TAI from PTP on the platform) and is never reported without it (§3).
+1. **AV offset and latency are different quantities.** AV offset needs no common clock. Verified absolute latency needs one (TAI from PTP on the platform); phone-clock estimates are separately marked, with unknown accuracy (§3).
 2. **Measure, don't guess.** Every result carries a quality and an uncertainty, or says `unknown`. A missing or ambiguous marker gives an invalid measurement, never an invented number. No accuracy is claimed that a test has not shown.
 3. **One portable core.** Event model, chirp synthesis and detection, marker drawing and detection, pairing and statistics live in `avsync-core`: C++20 with no dependencies on MXL, NMOS, FFmpeg or a GUI. The CLI, the media function and later the phone app (§12) use the same core.
 4. **Test signals are obvious.** The picture says TEST SIGNAL, the NMOS labels and tags say so, the function never routes anything by itself (§11).
@@ -144,7 +144,7 @@ From these:
 
 Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measured in M3) and is coarsened by writers that commit in batches (for example 960 samples per video frame, or packet bursts in a gateway). The reader MUST NOT count ranges that are not yet committed as late, and the uncertainty of every latency includes the batch size seen on that flow (§8.4).
 
-**LIVE without MXL** (the phone app, §12, and a recording made elsewhere). Only the AV offset is measured. A phone's system time (NTP, mobile network) is coarse wall-clock metadata, not a reference; it never turns an AV-offset measurement into a latency.
+**LIVE without a verified source reference.** AV offset remains a measurement. By explicit maintainer decision (2026-10-27), the iPhone source/capture workflows additionally expose **estimated latency**, with unknown clock/output/capture uncertainty. A phone's UTC is not a verified PTP reference; a locked server clock does not validate it. Phone-source packets and QR mark this distinction, and results retain `latency_estimated: true`. See [phone generator](docs/phone-generator.md). FILE playback never proves absolute latency.
 
 **Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. A configured `AVSYNC_PTP_STATUS_URL` explicitly wins (`sync_source=url`). Otherwise, a reachable, valid `AVSYNC_PTP_SOCKET` supplies ptp4l management status (`sync_source=ptp4l`); absent or failed socket access falls back to read-only kernel state (`sync_source=kernel`). A valid unlocked PTP response is retained. Kernel lock requires STA_UNSYNC clear and a positive TAI offset. Real `esterror` must be within `AVSYNC_CLOCK_MAX_ERROR_US`; when both `esterror` and `maxerror` are at least 16000000 µs they are unreported, accuracy is unknown and the reason is "error not reported (PTP discipline)". Kernel state cannot identify PTP versus NTP. See [Clock reference](docs/clock-reference.md) for PTP mapping and runtime requirements. The URL override is an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. With a URL set, any other scheme or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
 
@@ -219,7 +219,7 @@ Events are paired by identity, not by nearest neighbour:
 4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal flashes white (Y 940) for 100 ms from each event, then black (Y 64). Its rising edge coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
-7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). In 1.0 the analyzer assumes the full raster and uses them only to check the geometry.
+7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). The live analyzer retains a fast full-raster path and can also locate/rectify an optical or scaled test picture using these fiducials.
 8. **TEST SIGNAL** text at the top and bottom, always on, not configurable.
 
 ### 5.2 Event timing in the picture
@@ -584,7 +584,7 @@ At a real monitor and loudspeaker, the phone's camera sees the test picture and 
 - a time series and the statistics after several events;
 - saved measurements (local), compare, export as the result JSON of §8 (`mode: "LIVE"`, `reference.type: "none"`).
 
-Only the AV offset is measured. The phone's clock is never used as a latency reference (§3.3).
+AV offset is measured. Optional estimated latency uses the phone clock with explicitly unknown physical timing accuracy (§3.3). The Generate tab also supplies a native test source for an external camera/analyzer; its source-output calibration is separate from capture calibration.
 
 ### 12.2 Technology
 

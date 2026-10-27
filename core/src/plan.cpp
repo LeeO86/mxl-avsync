@@ -56,6 +56,8 @@ std::optional<VideoFormat> parse_video_format(std::string_view token)
         fmt = VideoFormat{"1080i25", 1920, 1080, {25, 1}, true};
     } else if (token == "2160p50") {
         fmt = VideoFormat{"2160p50", 3840, 2160, {50, 1}, false};
+    } else if (token == "720p60") {
+        fmt = VideoFormat{"720p60", 1280, 720, {60, 1}, false};
     } else if (token == "720p50") {
         fmt = VideoFormat{"720p50", 1280, 720, {50, 1}, false};
     } else if (token == "540p25" || token == "960x540p25") {

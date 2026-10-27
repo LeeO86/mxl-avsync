@@ -184,14 +184,15 @@ int64_t quantize_timecode_ns(int64_t ns) {
 }
 
 std::vector<uint8_t> encode_timecode(uint32_t source, int64_t video_ns, int64_t offset_ns,
-                                     bool live) {
+                                     bool live, bool estimated_source) {
+    if (estimated_source && !live) throw std::invalid_argument("estimated source requires LIVE time");
     (void)quantize_timecode_ns(video_ns);
     const int64_t offset = std::llround(offset_ns / 62500.0);
     if (offset < -32768 || offset > 32767)
         throw std::invalid_argument("timecode offset exceeds +/-2048 ms");
     const bool zero = offset_ns == 0;
     Bytes b(zero ? 15 : 17);
-    b[0] = uint8_t(0x30 | (live ? 1 : 0) | (zero ? 4 : 0));
+    b[0] = uint8_t(0x30 | (live ? 1 : 0) | (zero ? 4 : 0) | (estimated_source ? 8 : 0));
     put(b, 1, source, 4);
     const auto ticks = (static_cast<__int128>(video_ns) * 65536 + 500000000) / 1000000000;
     put(b, 5, uint64_t(ticks), 6);
@@ -223,9 +224,11 @@ bool parse_timecode(const std::vector<uint8_t> &b, AudioTimecode &out) {
         p.video_send_ns = p.audio_send_ns - int32_t(get(b, 17, 4));
     } else {
         const bool zero = b.size() == 15;
-        if (b[0] != uint8_t(0x30 | (b[0] & 1) | (zero ? 4 : 0)))
+        if (b[0] != uint8_t(0x30 | (b[0] & 9) | (zero ? 4 : 0)))
             return false;
         p.live = b[0] & 1;
+        p.estimated_source = b[0] & 8;
+        if (p.estimated_source && !p.live) return false;
         p.video_send_ns =
             int64_t((static_cast<__int128>(get(b, 5, 6)) * 1000000000 + 32768) / 65536);
         p.audio_send_ns = p.video_send_ns + (zero ? 0 : int64_t(int16_t(get(b, 11, 2))) * 62500);

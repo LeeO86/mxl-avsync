@@ -676,3 +676,26 @@ regression decodes a compact packet, switches to legacy and verifies immediate
 fresh-buffer legacy chirp acquisition. QR updates naming later events do not
 clear state. The new external-FFmpeg CI regression also installs the ffmpeg
 executable explicitly; the pre-existing packages supplied libraries only.
+
+
+## Native phone source and optical live input (2026-10-27)
+
+User authorizes an iPhone source filmed into the server analyzer. This extends
+§12 beyond capture and supersedes §3's prohibition only for explicitly marked
+phone-clock **estimates**, not verified latency. The portable PhoneGeneratorPlan
+shares the compact modem and QR event timeline. Native playback queues audio
+on AV host time with reported output presentation latency and uses CADisplayLink
+target timestamps for a 60-Hz raster. UI selects 1/2 Hz and preserves Measure/
+Results. No transport or remote IS-05 control is introduced.
+
+A protected 0x08 estimated-source flag and QR clk=phone-utc are propagated into
+results/UI/widgets/result pictures, even with a locked receiver. Existing normal
+packets remain byte-compatible; old decoders reject the new phone flag safely.
+Source/capture clock and physical output timing remain unvalidated. Capture
+calibration is never reused as source-output calibration.
+
+The live analyzer gains a bounded, cached fiducial/rectification fallback. It
+keeps original pixels for QR, adopts source strip rate while retaining received
+MXL times, and publishes no video event from an invalid/lost pose. Optical AV
+uncertainty is unknown. See docs/phone-generator.md for lifecycle, test commands
+and hardware limits. Validation results are recorded after execution.

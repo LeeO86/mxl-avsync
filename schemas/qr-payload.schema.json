@@ -13,6 +13,9 @@
     "tk": {"type": "integer"},
     "o": {"oneOf": [{"type": "integer"}, {"const": "sweep"}]},
     "r": {"enum": [1, 2, 4]},
-    "f": {"type": "string", "minLength": 1}
+    "f": {"type": "string", "minLength": 1},
+    "tc": {"const": "v3"},
+    "sid": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "clk": {"const": "phone-utc"}
   }
 }

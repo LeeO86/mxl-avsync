@@ -405,3 +405,25 @@ TEST_CASE("large qr stays decodable and the sync square moves")
         CHECK(boxes[i] >= boxes[i - 1] + 4);
     }
 }
+
+#include "avsync/picture_reader.hpp"
+TEST_CASE("live picture reader keeps direct path and reacquires a moving camera tile after loss") {
+    PictureReader reader;
+    Yuv422p10 picture;picture.resize(1280,720);
+    PictureInfo info; info.title="TEST SIGNAL";
+    render_picture(picture,info,5,0,30,true);
+    auto direct=reader.read(picture.y.data(),1280,720,1280,0);
+    REQUIRE(direct.located);CHECK(direct.canonical.empty());CHECK(direct.reading.seq_low24==5);
+    constexpr int w=960,h=540;
+    std::vector<uint16_t> tile(w*h,150);
+    for (int step=0;step<4;++step) {
+        std::fill(tile.begin(),tile.end(),150);
+        if(step!=2) for(int y=0;y<360;++y)for(int x=0;x<640;++x)
+            tile[(y+40+step*5)*w+x+80+step*8]=picture.y[y*2*1280+x*2];
+        auto found=reader.read(tile.data(),w,h,w,1000+step*600);
+        if(step==2) { CHECK_FALSE(found.located);continue; }
+        REQUIRE(found.located);REQUIRE_FALSE(found.canonical.empty());
+        CHECK(found.reading.strip_ok);CHECK(found.reading.seq_low24==5);
+        CHECK(found.reading.state==MarkerReading::State::White);
+    }
+}

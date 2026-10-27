@@ -93,8 +93,9 @@
           <dt>Audio level</dt><dd>{{ last.audio_level_dbfs != null ? last.audio_level_dbfs + ' dBFS' : '–' }}</dd>
           <dt>Flags</dt><dd>{{ flagText(last) || '–' }}</dd>
         </dl></div>
-        <div class="card"><h3>Latency</h3>
-          <p v-if="!ptpLocked" class="note">needs clock lock (sync_state {{ syncState }})</p>
+        <div class="card"><h3>{{ measurement.latency_estimated ? 'Estimated latency' : 'Latency' }}</h3>
+          <p v-if="measurement.latency_estimated" class="note">Phone clock and scheduled output; display/speaker accuracy unknown. AV sync includes the whole source/camera path.</p>
+          <p v-if="!ptpLocked && !measurement.latency_estimated" class="note">needs clock lock (sync_state {{ syncState }})</p>
           <dl v-else class="kv">
             <dt>Video latency</dt><dd>{{ ms1(measurement.video_latency_ms) }}</dd>
             <dt>Audio latency</dt><dd>{{ ms1(measurement.audio_latency_ms) }}</dd>

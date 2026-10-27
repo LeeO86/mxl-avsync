@@ -299,6 +299,7 @@ struct VideoObservation {
     bool have_arrival = false;
     double arrival_ms = 0;
     bool timecode = false;
+    bool estimated_source = false;
     uint32_t source_id = 0;
     int64_t event_time_ns = 0;
     bool have_set_time = false;
@@ -353,6 +354,7 @@ struct QrPayload {
     double offset_ms = 0;
     int rate = 2;
     std::string format = "1080p50";
+    bool estimated_source = false; // QR clk=phone-utc
     bool timecode = false;
     uint32_t source_id = 0;
 };
@@ -373,6 +375,7 @@ struct ReferenceInfo {
 
 struct AudioObservation {
     bool timecode = false;
+    bool estimated_source = false;
     uint32_t source_id = 0;
     int64_t event_time_ns = 0;
     int64_t audio_send_ns = 0;
@@ -394,6 +397,7 @@ struct AudioObservation {
 AudioObservation audio_observation(const AudioTimecode& packet);
 
 struct Measurement {
+    bool latency_estimated = false;
     bool audio_timecode = false;
     uint32_t source_id = 0;
     int64_t audio_send_ns = 0;

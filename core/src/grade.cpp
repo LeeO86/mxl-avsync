@@ -263,6 +263,7 @@ void Pairer::observe_video(const VideoObservation& video, double expected_offset
 
 AudioObservation audio_observation(const AudioTimecode& p) {
     AudioObservation a;
+    a.estimated_source = p.estimated_source;
     a.timecode = true; a.source_id = p.source_id; a.event_time_ns = p.video_send_ns;
     a.audio_send_ns = p.audio_send_ns; a.time_ms = p.time_ms;
     a.arrival_ms = p.arrival_ms; a.have_arrival = true;
@@ -353,10 +354,21 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
         m.uncertainty_ms = uncertainty.offset_ms;
         m.uncertainty_status = uncertainty.offset_status;
         m.latency_uncertainty_status = uncertainty.latency_status;
+        if (has_flag(m, "optical_capture")) {
+            m.uncertainty_ms.reset(); m.uncertainty_status = "unknown";
+        }
     }
     // Latency and index shift need the generator's T_k and a locked PTP reading.
     // Audio's set time is T_k plus the configured offset, so a clean path reports a shift near 0.
-    const bool locked = reference_.sync_state == "locked" && pending.video.have_set_time;
+    m.latency_estimated = pending.video.estimated_source || audio->estimated_source;
+    if (m.latency_estimated) {
+        m.latency_uncertainty_status = "unknown";
+        m.flags.push_back("estimated_source_clock_and_output");
+    }
+    // Phone source timestamps describe scheduled output on a UTC-derived clock.
+    // Keep the requested estimate, and retain the receiver clock status verbatim.
+    const bool locked = (reference_.sync_state == "locked" || m.latency_estimated)
+        && pending.video.have_set_time && mode_ == "LIVE";
     if (locked) {
         m.have_set_time = true;
         m.set_video_ns = pending.video.set_tai_ns;

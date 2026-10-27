@@ -30,8 +30,11 @@ build/mxl-avsync analyze /tmp/signal.mkv --json /tmp/result.json
 All multibyte integers use big-endian byte order. This is a custom modem using
 1300/2100-Hz continuous-phase binary FSK, not a V.23 compliance claim.
 
-- Version/flags: 1 byte, `0x30 | LIVE(1) | zero-offset(4)`. Version 3 always
+- Version/flags: 1 byte, `0x30 | LIVE(1) | zero-offset(4) | estimated-source(8)`. Version 3 always
   references chirp onset. FILE timestamps are media time; LIVE timestamps are TAI.
+  The optional estimated-source flag is valid only with LIVE and identifies
+  scheduled output on an unverified source clock, such as the iPhone generator.
+  Older v3 decoders reject this flag. It adds no bytes or duration.
 - Source ID: 4 bytes, CRC-32/IEEE of the UTF-8 test ID. Use distinct test IDs for
   unrelated sources. It intentionally remains identical across paths from one source.
 - **Common video-event timestamp**: 6 bytes, unsigned Q32.16 TAI/media seconds.
@@ -138,3 +141,6 @@ The native regression also verifies +3217-ms AV and +3337-ms estimated audio
 latency through the publication layer. Digital and camera picture searches are
 both preserved: the camera path is used when the digital search cannot produce
 a readable strip. Full-renderer exposure/softening tests cover the shared entry.
+
+The native [iPhone generator](phone-generator.md) uses the same zero-offset packet
+and marks its source clock/output as estimated in both audio and QR.

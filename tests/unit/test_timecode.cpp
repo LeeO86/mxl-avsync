@@ -175,3 +175,60 @@ TEST_CASE("packet scheduling is block invariant and reports a collision") {
     writer.write(collision, 0, one.data(), one.size(), 1200);
     CHECK(writer.skipped() == 1);
 }
+
+#include "avsync/phone_generator.hpp"
+TEST_CASE("phone generator uses one scheduled clock for QR, flash and independently decoded audio") {
+    constexpr int64_t epoch = 1792963237123456789LL;
+    for (int rate : {1,2}) {
+        PhoneGeneratorPlan plan("phone-test",rate,epoch,100.125);
+        CHECK(plan.frame_at(100.125)==0);
+        CHECK(plan.frame_at(100.125+1.0/60)==1);
+        CHECK(plan.frame_at(100.125+1.0/rate)==60/rate);
+        std::vector<float> stream(48000*3);
+        for (int i=0;i<3;++i) {
+            const auto qr=plan.qr(i+1);
+            CHECK(qr.estimated_source); CHECK(qr.format=="720p60");
+            auto parsed=parse_qr_payload(qr_payload_json(qr));
+            REQUIRE(parsed); CHECK(parsed->estimated_source);
+            CHECK(qr.tk==epoch+int64_t(i)*1000000000/rate);
+            CHECK(plan.host_seconds(i+1)==doctest::Approx(100.125+double(i)/rate));
+            auto audio=plan.audio(i+1);
+            std::copy(audio.begin(),audio.end(),stream.begin()+4800+i*48000/rate);
+            VideoObservation video; video.seq=i+1;
+            REQUIRE(identify_video(video,qr));
+            CHECK(video.estimated_source);
+            CHECK(video.event_time_ns==quantize_timecode_ns(qr.tk));
+        }
+        const auto decoded=decode_timecodes(stream.data(),stream.size(),48000);
+        REQUIRE(decoded.size()==3);
+        for(int i=0;i<3;++i) {
+            CHECK(decoded[i].estimated_source); CHECK(decoded[i].live);
+            CHECK(decoded[i].time_ms==doctest::Approx(100+1000.0*i/rate).epsilon(.0001));
+            CHECK(decoded[i].video_send_ns==quantize_timecode_ns(plan.qr(i+1).tk));
+            CHECK(decoded[i].audio_send_ns==decoded[i].video_send_ns);
+        }
+    }
+    CHECK_THROWS(PhoneGeneratorPlan("unsafe\"",2,epoch,1));
+    CHECK_THROWS(PhoneGeneratorPlan("phone",4,epoch,1));
+    CHECK_THROWS(encode_timecode(1,epoch,0,false,true));
+}
+
+TEST_CASE("phone source latency stays explicitly estimated even with receiver clock lock") {
+    for (auto state : {"locked","unlocked","unknown"}) {
+        ReferenceInfo ref; ref.type="tai-ptp"; ref.sync_state=state;
+        Pairer pairer(500,{},ref,"LIVE","phone");
+        auto qr=PhoneGeneratorPlan("phone",2,1700000037000000000LL,100).qr(1);
+        VideoObservation video; video.event=true;video.seq=1;video.time_ms=1000;video.quality="good";
+        video.have_arrival=true;video.arrival_ms=1700000037120.0;video.flags={"optical_capture"};
+        REQUIRE(identify_video(video,qr)); pairer.observe_video(video,0);
+        AudioTimecode packet; REQUIRE(parse_timecode(encode_timecode(qr.source_id,qr.tk,0,true,true),packet));
+        packet.time_ms=1035;packet.arrival_ms=1700000037155.0;packet.correlation=.99;
+        pairer.observe_audio(audio_observation(packet));
+        auto events=pairer.poll(2000); REQUIRE(events.size()==1);
+        const auto& e=events[0]; REQUIRE(e.av_offset_ms);CHECK(*e.av_offset_ms==35);
+        CHECK(e.latency_estimated);CHECK(e.reference.sync_state==state);
+        REQUIRE(e.video_latency_ms);CHECK(*e.video_latency_ms==120);
+        REQUIRE(e.audio_latency_ms);CHECK(*e.audio_latency_ms==155);
+        CHECK(e.latency_uncertainty_status=="unknown");CHECK(e.uncertainty_status=="unknown");
+    }
+}

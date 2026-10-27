@@ -53,6 +53,8 @@ add_library(avsync-core STATIC
     core/src/text.cpp
     core/src/locate.cpp
     core/src/phone.cpp
+    core/src/phone_generator.cpp
+    core/src/picture_reader.cpp
 )
 target_include_directories(avsync-core
     PUBLIC core/include

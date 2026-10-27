@@ -4,6 +4,17 @@ public class AvsyncModule: Module {
   public func definition() -> ModuleDefinition {
     Name("Avsync")
     Function("supportsLiveCapture") { true }
+    Function("supportsGenerator") { true }
+    AsyncFunction("generate") { (rate: Int, taiUtc: Double, promise: Promise) in
+      guard (rate == 1 || rate == 2), taiUtc.isFinite, taiUtc >= 0, taiUtc <= 100,
+            let parent = self.appContext?.utilities?.currentViewController(),
+            parent.presentedViewController == nil else {
+        promise.reject("GENERATOR_UNAVAILABLE", "Close the current screen and use 1 or 2 events/s."); return
+      }
+      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc)
+      controller.onClose = { result in promise.resolve(result) }
+      parent.present(controller, animated: true)
+    }.runOnQueue(.main)
     View(AvsyncCameraView.self) {
       Events("onReport")
       Prop("active") { (view: AvsyncCameraView, active: Bool) in view.setActive(active) }

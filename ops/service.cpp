@@ -470,6 +470,8 @@ void install_web(HttpServer& http, Runtime& rt)
             if (!last->reason.empty()) {
                 body["reason"] = last->reason;
             }
+            body["latency_estimated"] = last->latency_estimated;
+            if (last->latency_estimated) body["source_reference"] = "phone-utc-scheduled-output";
             if (last->video_latency_ms) {
                 body["video_latency_ms"] = *last->video_latency_ms;
             }
@@ -691,7 +693,7 @@ std::string widget_html(Runtime& rt, const std::string& id, bool latency, bool t
             "document.body.style.background=colours[grade]||colours.invalid;"
             "let line=grade==='invalid'?'<div>'+(m.sentence||m.reason||'no measurement')+'</div>':'<div class=\"offset\">'+(m.sentence||'')+'</div>';"
             "if(latency&&grade!=='invalid'&&(m.video_latency_ms!=null||m.audio_latency_ms!=null)){"
-            "line+='<div>video '+(m.video_latency_ms==null?'–':m.video_latency_ms)+' ms · audio '+(m.audio_latency_ms==null?'–':m.audio_latency_ms)+' ms</div>';}"
+            "line+='<div>'+(m.latency_estimated?'estimated ':'')+'video '+(m.video_latency_ms==null?'–':m.video_latency_ms)+' ms · audio '+(m.audio_latency_ms==null?'–':m.audio_latency_ms)+' ms</div>';}"
             "document.getElementById('view').innerHTML=line;"
             "const canvas=document.getElementById('trend');"
             "if(!trend||grade==='invalid'){canvas.style.display='none';return;}"

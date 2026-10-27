@@ -2,6 +2,10 @@
 
 ## 1.0.2 (unreleased)
 
+- Add a native iPhone fullscreen generator (1200 baud, 1/2 Hz) and automatic
+  optical/tile search in the live analyzer. Preserve source-frame timing across
+  camera frame rates and explicitly mark phone source latency as estimated.
+
 - Integrate compact audio-only timecode across the generator, file/live analyzers
   and native iOS app, with CRC/FEC, full event identity and legacy compatibility.
 - Align each white pulse to chirp onset and add draft-preserving 1/2-Hz and

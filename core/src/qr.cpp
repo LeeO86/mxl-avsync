@@ -81,6 +81,7 @@ std::string qr_payload_json(const QrPayload& payload)
     }
     os << ",\"r\":" << payload.rate << ",\"f\":\"" << payload.format << "\"";
     if (payload.timecode) os << ",\"tc\":\"v3\",\"sid\":" << payload.source_id;
+    if (payload.estimated_source) os << ",\"clk\":\"phone-utc\"";
     os << '}';
     return os.str();
 }
@@ -113,7 +114,8 @@ std::optional<QrPayload> parse_qr_payload(std::string_view json)
             if (!text) {
                 return std::nullopt;
             }
-            if (*key == "tc") { payload.timecode = *text == "v3"; }
+            if (*key == "clk") { if (*text != "phone-utc") return std::nullopt; payload.estimated_source = true; }
+            else if (*key == "tc") { payload.timecode = *text == "v3"; }
             else if (*key == "s") {
                 payload.schema = *text;
             } else if (*key == "t") {
@@ -175,6 +177,7 @@ bool identify_video(VideoObservation& video, const QrPayload& qr) {
     const int64_t period_ns = index_to_ns(format->grain_rate(), period.grains);
     const int64_t send = qr.tk + int64_t(delta) * period_ns;
     if (send < 0) return false;
+    video.estimated_source = qr.estimated_source;
     video.timecode = true; video.source_id = qr.source_id;
     video.event_time_ns = quantize_timecode_ns(send);
     if (qr.mode == "LIVE") { video.have_set_time = true; video.set_tai_ns = send; }

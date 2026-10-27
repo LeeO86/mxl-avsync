@@ -1,3 +1,4 @@
+#include "avsync/picture_reader.hpp"
 #include "engine.hpp"
 
 #include "domain.hpp"
@@ -436,6 +437,9 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     std::set<int64_t> heard;
     std::set<std::pair<uint32_t,int64_t>> heard_timecodes;
     std::optional<MarkerTracker> tracker;
+    PictureReader picture_reader;
+    int tracker_width = 0, tracker_height = 0;
+    bool tracker_optical = false;
     AudioTimecodeStream timecode_stream;
     std::optional<QrPayload> signal_qr;
     double qr_read_ms = -1e30;
@@ -698,6 +702,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         tracked.interlaced = video.interlaced;
         tracked.frame = video.interlaced ? Rate{std::max<int64_t>(1, pace.num), pace.den * 2} : pace;
         if (tracker_flow != video.flow_id || !tracker || !pairer) {
+            picture_reader.reset();
+            tracker_width = tracker_height = 0;
             tracker.emplace(tracked, config.event_rate);
             const ReferenceInfo reference = current_reference(video.domain_id);
             const double period_ms = plan_period(tracked, config.event_rate).period_ms;
@@ -710,15 +716,30 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             timecode_stream.reset(); signal_qr.reset(); qr_read_ms = -1e30;
         }
         const int64_t tai_ns = static_cast<int64_t>(time_of_index(pace, want));
+        const auto picture = picture_reader.read(luma.data(), video.width, grain_rows, video.width, tai_ns / 1e6);
+        const bool optical = !picture.canonical.empty();
+        if (picture.located) {
+            if (optical) { tracked.width = picture.width; tracked.height = picture.height; tracked.interlaced = false; tracked.frame = pace; }
+        }
+        auto qr_text = [&]() {
+            auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width);
+            if (!text && optical) text = decode_qr_text(picture.canonical.data(), picture.width, picture.height, picture.width);
+            return text;
+        };
         if (tai_ns / 1e6 - qr_read_ms >= 500) {
             qr_read_ms = tai_ns / 1e6;
-            if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) {
+            if (auto text = qr_text()) {
                 if (auto next = parse_qr_payload(*text)) {
                     const bool changed = !signal_qr || next->test_id != signal_qr->test_id ||
                         next->source_id != signal_qr->source_id || next->mode != signal_qr->mode ||
-                        next->timecode != signal_qr->timecode || next->rate != signal_qr->rate;
+                        next->timecode != signal_qr->timecode || next->rate != signal_qr->rate ||
+                        next->format != signal_qr->format || next->estimated_source != signal_qr->estimated_source;
                     if (changed) {
                         timecode_stream.reset(); audio_window.clear(); heard.clear(); heard_timecodes.clear();
+                        if (optical || next->estimated_source) if (auto source = parse_video_format(next->format)) {
+                            tracked.frame = source->grain_rate(); tracked.interlaced = false;
+                            if (!optical) tracked.height = grain_rows;
+                        }
                         tracker.emplace(tracked, next->rate);
                         pairer.emplace(plan_period(tracked, next->rate).period_ms,
                             GradeWindows{config.pass_min_ms,config.pass_max_ms,config.warn_min_ms,config.warn_max_ms},
@@ -728,15 +749,32 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 }
             }
         }
+        // The picture's strip counts source frames, not the camera/encoder's
+        // frame rate. Keep received MXL timestamps for the measurement itself.
+        if (signal_qr && (optical || signal_qr->estimated_source)) {
+            if (auto source = parse_video_format(signal_qr->format)) {
+                tracked.frame = source->grain_rate(); tracked.interlaced = false;
+                if (!optical) tracked.height = grain_rows;
+            }
+        }
+        if (picture.located && (tracker_width != tracked.width || tracker_height != tracked.height || tracker_optical != optical)) {
+            tracker.emplace(tracked, signal_qr ? signal_qr->rate : config.event_rate);
+            tracker_width = tracked.width; tracker_height = tracked.height; tracker_optical = optical;
+        }
         if (signal_qr) tracker->configure(signal_qr->rate, signal_qr->timecode);
-        VideoObservation observation = tracker->push(luma.data(), video.width, static_cast<int64_t>(want), static_cast<double>(tai_ns) / 1e6, tai_ns);
+        VideoObservation observation;
+        if (picture.located) {
+            observation = tracker->push(optical ? picture.canonical.data() : luma.data(),
+                optical ? picture.width : video.width, static_cast<int64_t>(want), static_cast<double>(tai_ns) / 1e6, tai_ns);
+            if ((optical || (signal_qr && signal_qr->estimated_source)) && observation.event) observation.flags.push_back("optical_capture");
+        }
         if (observation.event) {
             if (signal_qr) identify_video(observation, *signal_qr);
             observation.have_arrival = true;
             observation.arrival_ms = static_cast<double>(video_arrived_ns) / 1e6;
             observation.have_grain_time = true;
             observation.grain_tai_ns = static_cast<int64_t>(time_of_index(pace, grain_index));
-            if (auto text = decode_qr_text(luma.data(), video.width, grain_rows, video.width)) {
+            if (auto text = qr_text()) {
                 if (auto qr = parse_qr_payload(*text)) {
                     if (qr->k == observation.seq) {
                         observation.have_set_time = true;
@@ -860,7 +898,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                         caption.event_ms = event.video_time_ms;
                     }
                     if (event.video_latency_ms || event.audio_latency_ms) {
-                        caption.latency = "video " + (event.video_latency_ms ? std::to_string(*event.video_latency_ms) : std::string("–"))
+                        caption.latency = (event.latency_estimated ? "estimated video " : "video ") + (event.video_latency_ms ? std::to_string(*event.video_latency_ms) : std::string("–"))
                             + " audio " + (event.audio_latency_ms ? std::to_string(*event.audio_latency_ms) : std::string("–"));
                     } else {
                         caption.latency = "reference: unknown";

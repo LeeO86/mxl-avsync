@@ -70,3 +70,12 @@ stability window retains at least three recent events at 1 Hz. Independently
 decoded LIVE audio supplies estimated audio latency even without image/QR,
 with device/source clock and capture accuracy still unknown. A native rebuild
 is required (Expo Go cannot load this codec). See ../docs/audio-timecode.md.
+
+## Generate on the iPhone
+
+The **Generate** tab opens a native fullscreen source at 1200 baud, selectable
+1/2 chirps/s. Film it with an external camera feeding the updated server
+analyzer. AV sync includes the phone output; latency is explicitly estimated.
+This requires a rebuilt native development client. See [workflow, timing and
+validation limits](../docs/phone-generator.md). Run
+`python3 tests/native/generator.py` from this directory with a booted simulator.
