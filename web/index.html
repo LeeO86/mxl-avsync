@@ -127,6 +127,13 @@
         <p v-if="signalError" class="banner" role="alert">{{ signalError }}</p>
         <p v-if="signalDirty" role="status">Unsaved changes</p>
         <label>Set offset (ms, + audio late) <input type="number" v-model.number="offset" min="-500" max="500"/></label>
+        <label>Chirps per second
+          <select v-model.number="eventRate"><option :value="1">1 / second</option><option :value="2">2 / second</option><option v-if="audioTimecode === 'legacy'" :value="4">4 / second (legacy)</option></select>
+        </label>
+        <p class="note" v-if="audioTimecode !== 'legacy'">Each white flash starts at the chirp reference; positive offset delays the audio.</p>
+        <label>Audio timecode
+          <select v-model="audioTimecode"><option value="1200">1200 baud</option><option value="600">600 baud (1 / second)</option><option value="legacy">Legacy chirps</option></select>
+        </label>
         <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
         <label>Title <input v-model="title" maxlength="80"/></label>
         <label>Source name <input v-model="source" maxlength="80"/></label>
@@ -247,7 +254,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
   computed: {
     role() { return this.info.role || ''; },
     signalDirty() { return !!this.generatorBaseline && (this.imageFile !== null || !this.sameDraft(this.generatorDraft(), this.generatorBaseline)); },
@@ -268,7 +275,7 @@ createApp({
     settingGroups() {
       const groups = [
         ['Grading', ['AVSYNC_PASS_MIN_MS','AVSYNC_PASS_MAX_MS','AVSYNC_WARN_MIN_MS','AVSYNC_WARN_MAX_MS','AVSYNC_GRADE_EVENTS','AVSYNC_STALE_S']],
-        ['Signal', ['AVSYNC_AV_OFFSET_MS','AVSYNC_CHIRP_LEVEL_DBFS','AVSYNC_AUDIO_ENABLE','AVSYNC_EVENT_RATE','AVSYNC_VIDEO_FORMAT','AVSYNC_AUDIO_CHANNELS','AVSYNC_CHIRP_MS','AVSYNC_CHIRP_LOW_HZ','AVSYNC_CHIRP_HIGH_HZ','AVSYNC_TITLE','AVSYNC_SOURCE','AVSYNC_SUBTITLE','AVSYNC_NOTES','AVSYNC_TEST_ID']],
+        ['Signal', ['AVSYNC_AV_OFFSET_MS','AVSYNC_CHIRP_LEVEL_DBFS','AVSYNC_AUDIO_ENABLE','AVSYNC_AUDIO_TIMECODE','AVSYNC_EVENT_RATE','AVSYNC_VIDEO_FORMAT','AVSYNC_AUDIO_CHANNELS','AVSYNC_CHIRP_MS','AVSYNC_CHIRP_LOW_HZ','AVSYNC_CHIRP_HIGH_HZ','AVSYNC_TITLE','AVSYNC_SOURCE','AVSYNC_SUBTITLE','AVSYNC_NOTES','AVSYNC_TEST_ID']],
         ['Measurement', ['AVSYNC_AUDIO_CHANNEL','AVSYNC_AUDIO_THRESHOLD','AVSYNC_QR_RATE','AVSYNC_STATS_WINDOW','AVSYNC_RESULT_ENABLE','LOG_LEVEL']]
       ];
       const used = new Set(groups.flatMap((group) => group[1]));
@@ -401,13 +408,14 @@ createApp({
       await this.loadNmos();
     },
     generatorDraft() {
-      return {offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle};
+      return {event_rate:this.eventRate, audio_timecode:this.audioTimecode, offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle};
     },
     sameDraft(a, b) { return Object.keys(a).every(key => a[key] === b[key]) && Object.keys(a).length === Object.keys(b).length; },
     adoptGenerator(g, submitted = null) {
       const accept = !submitted || this.sameDraft(this.generatorDraft(), submitted);
-      this.generatorBaseline = {offset_ms:g.offset_ms, level_dbfs:g.level_dbfs, title:g.title || '', source:g.source || '', subtitle:g.subtitle || ''};
+      this.generatorBaseline = {event_rate:g.event_rate, audio_timecode:g.audio_timecode || 'legacy', offset_ms:g.offset_ms, level_dbfs:g.level_dbfs, title:g.title || '', source:g.source || '', subtitle:g.subtitle || ''};
       if (accept) {
+        this.eventRate = this.generatorBaseline.event_rate; this.audioTimecode = this.generatorBaseline.audio_timecode;
         this.offset = this.generatorBaseline.offset_ms; this.level = this.generatorBaseline.level_dbfs;
         this.title = this.generatorBaseline.title; this.source = this.generatorBaseline.source; this.subtitle = this.generatorBaseline.subtitle;
       }
