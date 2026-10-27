@@ -618,3 +618,12 @@ accuracy. No private footage or raw frame is included. The native publication
 window now uses the later received side, retaining 12 seconds for the identity
 pairer's bounded delay window. A +3217-ms AV / +3337-ms estimated audio-latency
 case passes through the actual native report, not merely the core pairer.
+
+
+## Linux integration feedback: explicit Matroska variant (2026-10-27)
+
+The full CLI correctly rejects Matroska's 1-ms timestamp scale by default
+(specification §9.3), while the portable testfile wrapper opts into container
+shifts. The timecode integration test and example now explicitly request
+`--allow-container-shift` for their intentional MKV/H.264 variant. No container
+checks, codec gates, analysis tolerances or strict defaults were changed.
