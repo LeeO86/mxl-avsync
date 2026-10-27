@@ -208,6 +208,21 @@ TEST_CASE("phone generator uses one scheduled clock for QR, flash and independen
             CHECK(decoded[i].audio_send_ns==decoded[i].video_send_ns);
         }
     }
+    // Phone-clock identity must survive the telephone-band codec too.
+    for (bool alaw : {false,true}) {
+        PhoneGeneratorPlan phone("phone-g711",2,epoch,100);
+        std::vector<float> channel(8000*2,0);
+        for(int i=0;i<3;++i) {
+            const auto wave=phone.audio(i+1,8000);
+            std::copy(wave.begin(),wave.end(),channel.begin()+800+i*4000);
+        }
+        const auto bytes=alaw ? encode_alaw(channel.data(),channel.size()) : encode_ulaw(channel.data(),channel.size());
+        if(alaw) decode_alaw(bytes.data(),bytes.size(),channel.data());
+        else decode_ulaw(bytes.data(),bytes.size(),channel.data());
+        const auto heard=decode_timecodes(channel.data(),channel.size(),8000);
+        REQUIRE(heard.size()==3);
+        for(int i=0;i<3;++i) { CHECK(heard[i].estimated_source); CHECK(heard[i].video_send_ns==quantize_timecode_ns(phone.qr(i+1).tk)); }
+    }
     CHECK_THROWS(PhoneGeneratorPlan("unsafe\"",2,epoch,1));
     CHECK_THROWS(PhoneGeneratorPlan("phone",4,epoch,1));
     CHECK_THROWS(encode_timecode(1,epoch,0,false,true));
