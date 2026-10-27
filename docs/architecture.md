@@ -8,4 +8,4 @@
 
 AV offset is `audio_time − video_time` on index time. A positive value means audio is late. Latency is reported only with a TAI/PTP reference; this build has no such reference, so latency fields stay absent and `uncertainty_status` for latency is `unknown`.
 
-`/readyz` is 200 only when the media flows exist. Without libmxl linked, it is 503. The control API, widgets and NMOS node still run.
+`/readyz` checks process/HTTP health and, when NMOS registration is configured, Query API visibility. The generator also waits for its video and audio flows to be created (so a generator without libmxl stays 503). An analyzer is ready before routing and remains ready through missing input or signal; `/statusz`, input-state metrics and the UI report media health separately. The control API, widgets and NMOS node continue to run without libmxl.

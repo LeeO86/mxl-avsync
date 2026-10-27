@@ -2,6 +2,7 @@
 
 #include "http.hpp"
 #include "ptp.hpp"
+#include <iostream>
 #include "paths.hpp"
 #include "picture.hpp"
 #include "report.hpp"
@@ -73,13 +74,22 @@ struct Runtime {
     double frame_rate_fps = 0;
     std::string source_image_path;
     int source_image_frames = 0;
-    std::string ptp_sync_state = "unknown";
-    std::string ptp_accuracy_ns = "unknown";
+    PtpReading clock_status;
     bool clock_synchronized = false;
     double clock_esterror_s = 0;
     long clock_tai_offset_s = 0;
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
 };
+
+nlohmann::json clock_status_json(const Runtime& rt)
+{
+    const auto& clock = rt.clock_status;
+    return {{"sync_state", clock.sync_state}, {"accuracy_ns", clock.accuracy_ns},
+        {"sync_source", clock.sync_source}, {"reason", clock.reason},
+        {"gm_present", clock.gm_present}, {"gm_identity", clock.gm_identity},
+        {"master_offset_ns", clock.master_offset_ns}, {"port_state", clock.port_state},
+        {"clock_synchronized", rt.clock_synchronized}, {"tai_offset_s", rt.clock_tai_offset_s}};
+}
 
 HttpResponse http_status_alias(Runtime& rt);
 std::map<std::string, std::string> widget_headers(const Config& config);
@@ -235,12 +245,24 @@ std::string metrics_text(Runtime& rt)
     os << "mxl_avsync_audio_correlation " << correlation << "\nmxl_avsync_audio_level_dbfs " << level_dbfs << "\n";
     os << "# TYPE mxl_avsync_reference_sync gauge\n";
     for (const char* state : {"locked", "unlocked", "unknown"}) {
-        const int on = ana && rt.ptp_sync_state == state ? 1 : 0;
+        const int on = ana && rt.clock_status.sync_state == state ? 1 : 0;
         os << "mxl_avsync_reference_sync{type=\"tai-ptp\",state=\"" << state << "\"} " << on << "\n";
     }
     os << "# TYPE mxl_avsync_clock_synchronized gauge\nmxl_avsync_clock_synchronized " << (rt.clock_synchronized ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_clock_esterror_seconds gauge\nmxl_avsync_clock_esterror_seconds " << rt.clock_esterror_s << "\n";
     os << "# TYPE mxl_avsync_clock_tai_offset_seconds gauge\nmxl_avsync_clock_tai_offset_seconds " << rt.clock_tai_offset_s << "\n";
+    os << "# TYPE mxl_avsync_clock_source gauge\n";
+    for (const char* source : {"kernel", "ptp4l", "url"}) {
+        os << "mxl_avsync_clock_source{sync_source=\"" << source << "\"} "
+           << (rt.clock_status.sync_source == source ? 1 : 0) << "\n";
+    }
+    os << "# TYPE mxl_avsync_ptp_gm_present gauge\nmxl_avsync_ptp_gm_present "
+       << (rt.clock_status.gm_present ? 1 : 0) << "\n";
+    os << "# TYPE mxl_avsync_ptp_master_offset_seconds gauge\nmxl_avsync_ptp_master_offset_seconds "
+       << static_cast<double>(rt.clock_status.master_offset_ns) / 1e9 << "\n";
+    // Identity is locally formatted hex, never an arbitrary metric-label string.
+    os << "# TYPE mxl_avsync_ptp_gm_info gauge\nmxl_avsync_ptp_gm_info{identity=\""
+       << rt.clock_status.gm_identity << "\"} " << (rt.clock_status.gm_present ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_nmos_registry_up gauge\n";
     os << "mxl_avsync_nmos_registry_up " << (rt.nmos_registered ? 1 : 0) << "\n";
     os << "# TYPE mxl_avsync_nmos_activations_total counter\n";
@@ -267,24 +289,23 @@ nlohmann::json nmos_node(const Config& config)
 void install_web(HttpServer& http, Runtime& rt)
 {
     http.add("GET", "/livez", [&](const HttpRequest&) {
+        std::lock_guard lock(rt.mu);
         const auto age = std::chrono::steady_clock::now() - rt.heartbeat;
-        bool media_live = true;
-        {
-            std::lock_guard lock(rt.mu);
-            media_live = rt.media_live;
-        }
+        const bool media_live = rt.media_live;
         const bool heartbeat_ok = age < std::chrono::seconds(5);
         const bool ok = heartbeat_ok && media_live;
         return json_response({{"status", ok ? "ok" : (media_live ? "stale" : "domain")}}, ok ? 200 : 503);
     });
     http.add("GET", "/readyz", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
-#ifdef AVSYNC_WITH_NMOS
         const bool want_registry = rt.config.nmos_enable && !rt.config.nmos_registry_address.empty();
-#else
-        const bool want_registry = false;
-#endif
-        const bool ok = rt.media_ready && (!want_registry || rt.nmos_registered);
+        // Controllers may wait for deployment readiness before connecting receivers.
+        // Route and signal health belong in status/metrics, outside this gate.
+        const bool process_up = !g_stop && rt.media_live
+            && std::chrono::steady_clock::now() - rt.heartbeat < std::chrono::seconds(5);
+        const bool outputs_created = rt.config.role != "generator"
+            || (!rt.video_flow.empty() && !rt.audio_flow.empty());
+        const bool ok = process_up && outputs_created && (!want_registry || rt.nmos_registered);
         return json_response({{"ready", ok}, {"role", rt.config.role}, {"nmos_registered", rt.nmos_registered}}, ok ? 200 : 503);
     });
     http.add("GET", "/metrics", [&](const HttpRequest&) {
@@ -304,8 +325,7 @@ void install_web(HttpServer& http, Runtime& rt)
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
             {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps},
-            {"ptp", {{"sync_state", rt.ptp_sync_state}, {"accuracy_ns", rt.ptp_accuracy_ns},
-                {"clock_synchronized", rt.clock_synchronized}, {"tai_offset_s", rt.clock_tai_offset_s}}}});
+            {"ptp", clock_status_json(rt)}});
     });
     auto preview_response = [](const std::string& slot) {
 #ifdef AVSYNC_WITH_MXL
@@ -626,7 +646,8 @@ void install_web(HttpServer& http, Runtime& rt)
 HttpResponse http_status_alias(Runtime& rt)
 {
     std::lock_guard lock(rt.mu);
-    return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready}});
+    return json_response({{"role", rt.config.role}, {"stopped", rt.stopped}, {"media_ready", rt.media_ready},
+        {"input_state", rt.input_state}, {"detail", rt.media_detail}, {"ptp", clock_status_json(rt)}});
 }
 
 std::map<std::string, std::string> widget_headers(const Config& config)
@@ -818,7 +839,10 @@ int run_service(Config config)
     });
     std::thread beat([&] {
         while (!g_stop) {
-            rt.heartbeat = std::chrono::steady_clock::now();
+            {
+                std::lock_guard lock(rt.mu);
+                rt.heartbeat = std::chrono::steady_clock::now();
+            }
 #ifdef AVSYNC_WITH_NMOS
             if (nmos_node) {
                 const bool registered = nmos_node->registered();
@@ -832,28 +856,27 @@ int run_service(Config config)
         }
     });
     std::thread ptp([&] {
+        bool socket_error_logged = false;
         while (!g_stop) {
             std::string url;
+            std::string socket_path;
             long max_error_us = 100;
             {
                 std::lock_guard lock(rt.mu);
                 url = rt.config.ptp_status_url;
+                socket_path = rt.config.ptp_socket;
                 max_error_us = rt.config.clock_max_error_us;
             }
-            // The kernel clock is the default; a configured URL (a node agent that knows about PTP) overrides it.
             const KernelClock kernel = read_kernel_clock();
-            PtpReading reading;
-            if (url.empty()) {
-                const ClockState state = classify_kernel_clock(kernel, max_error_us);
-                reading.sync_state = state.sync_state;
-                reading.accuracy_ns = state.accuracy_ns >= 0 ? std::to_string(state.accuracy_ns) : "unknown";
-            } else {
-                reading = read_ptp_status(url, 300);
+            const auto reading = read_clock_status(url, socket_path, max_error_us, kernel, 300);
+            if (!reading.socket_error.empty() && !socket_error_logged) {
+                std::cerr << nlohmann::json{{"level", "warn"}, {"event", "ptp_socket_fallback"},
+                    {"reason", reading.socket_error}}.dump() << '\n';
+                socket_error_logged = true;
             }
             {
                 std::lock_guard lock(rt.mu);
-                rt.ptp_sync_state = reading.sync_state;
-                rt.ptp_accuracy_ns = reading.accuracy_ns;
+                rt.clock_status = reading;
                 rt.clock_synchronized = kernel.read_ok && !kernel.unsynced;
                 rt.clock_esterror_s = kernel.read_ok ? static_cast<double>(kernel.esterror_us) / 1e6 : 0;
                 rt.clock_tai_offset_s = kernel.read_ok ? kernel.tai_offset_s : 0;
@@ -935,8 +958,8 @@ int run_service(Config config)
         callbacks.clock_reading = [&] {
             std::lock_guard lock(rt.mu);
             ClockReading clock;
-            clock.sync_state = rt.ptp_sync_state;
-            clock.accuracy_ns = rt.ptp_accuracy_ns;
+            clock.sync_state = rt.clock_status.sync_state;
+            clock.accuracy_ns = rt.clock_status.accuracy_ns;
             return clock;
         };
 #ifdef AVSYNC_WITH_NMOS

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 namespace avsync {
@@ -21,7 +22,8 @@ int at_px(const uint16_t* luma, int stride, int w, int h, int x, int y)
     return luma[static_cast<size_t>(y) * static_cast<size_t>(stride) + x];
 }
 
-double score_fiducial(const uint16_t* luma, int stride, int w, int h, int x, int y, int size)
+double score_fiducial(const uint16_t* luma, int stride, int w, int h, int x, int y, int size,
+    int min_borders = 3, int min_rings = 2)
 {
     if (size < 8 || x < 0 || y < 0 || x + size > w || y + size > h) {
         return -1;
@@ -40,8 +42,7 @@ double score_fiducial(const uint16_t* luma, int stride, int w, int h, int x, int
     const int center = sample(x + mid, y + mid);
     const int borders[4] = {white_l, white_r, white_t, white_b};
     const int rings[4] = {black_l, black_r, black_t, black_b};
-    // Camera exposure, monitor glare and scaling lift the black ring well above
-    // the digital test signal's black level. Use local contrast, not absolute Y.
+    // Camera exposure can lift black above the digital black level.
     double border_sum = 0, ring_sum = 0;
     for (int value : borders) border_sum += value;
     for (int value : rings) ring_sum += value;
@@ -49,9 +50,8 @@ double score_fiducial(const uint16_t* luma, int stride, int w, int h, int x, int
     int bright = 0, dark = 0;
     for (int value : borders) if (value > black + 100) ++bright;
     for (int value : rings) if (value < white - 100) ++dark;
-    if (bright < 3 || dark < 2 || white - black < 140 || center < black + 100) return -1;
+    if (bright < min_borders || dark < min_rings || white - black < 140 || center < black + 100) return -1;
     return white - black + center - black;
-
 }
 
 bool solve_homography(const double src[4][2], const double dst[4][2], double H[9])
@@ -165,22 +165,10 @@ bool pose_from_hits(const Hit hits[4], int image_w, int image_h, PicturePose& po
     pose.width = ((pose.corner_x[1] - pose.corner_x[0]) + (pose.corner_x[2] - pose.corner_x[3])) * 0.5;
     pose.height = ((pose.corner_y[3] - pose.corner_y[0]) + (pose.corner_y[2] - pose.corner_y[1])) * 0.5;
     pose.fiducial_size = (smin + smax) * 0.5;
-    if (pose.width < 32 || pose.height < 32 || pose.width > image_w * 1.05 || pose.height > image_h * 1.05) {
+    if (pose.width < 32 || pose.height < 32 || pose.width > image_w * 1.05 || pose.height > image_h * 1.05
+        || smax > pose.height * 0.10 || smin < pose.height * 0.035) {
         return false;
     }
-    // Fiducials occupy 6% of the test-picture height. Small QR/strip squares
-    // can score as nested squares too; reject quartets with impossible scale.
-    const double relative_fid = pose.fiducial_size / pose.height;
-    const double top = pose.corner_x[1] - pose.corner_x[0];
-    const double bottom = pose.corner_x[2] - pose.corner_x[3];
-    const double left = pose.corner_y[3] - pose.corner_y[0];
-    const double right = pose.corner_y[2] - pose.corner_y[1];
-    if (relative_fid < 0.035 || relative_fid > 0.10 || top < bottom * 0.8 || bottom < top * 0.8
-        || left < right * 0.8 || right < left * 0.8) return false;
-    if (std::abs(pose.corner_x[3] - pose.corner_x[0]) > pose.height * 0.35
-        || std::abs(pose.corner_x[2] - pose.corner_x[1]) > pose.height * 0.35
-        || std::abs(pose.corner_y[1] - pose.corner_y[0]) > pose.width * 0.25
-        || std::abs(pose.corner_y[2] - pose.corner_y[3]) > pose.width * 0.25) return false;
     const double aspect = pose.width / pose.height;
     if (aspect < 1.2 || aspect > 2.4) {
         return false;
@@ -224,6 +212,24 @@ PicturePose locate_picture(const uint16_t* luma, int width, int height, int stri
     }
     std::sort(raw.begin(), raw.end(), [](const Hit& a, const Hit& b) { return a.score > b.score; });
     std::vector<Hit> kept;
+    // QR/text can supply all the highest-contrast squares. Preserve spatial
+    // extremes before applying the score budget, so real outer corners survive.
+    for (const auto& direction : {std::pair{-1, -1}, std::pair{1, -1}, std::pair{-1, 1}, std::pair{1, 1}}) {
+        for (const int band : {8, 17, 33, 65}) {
+            const auto rank = [&](const Hit& hit) {
+                const int upper = band == 8 ? 16 : band == 17 ? 32 : band == 33 ? 64 : 96;
+                if (hit.size < band || hit.size > upper) return -1000000.0;
+                return direction.first * (hit.x + (direction.first > 0 ? hit.size : 0))
+                    + direction.second * (hit.y + (direction.second > 0 ? hit.size : 0)) + hit.score * 0.04;
+            };
+            if (!raw.empty()) {
+                const auto best = std::max_element(raw.begin(), raw.end(), [&](const Hit& a, const Hit& b) {
+                    return rank(a) < rank(b) || (rank(a) == rank(b) && a.score < b.score);
+                });
+                if (rank(*best) > -1000000.0) kept.push_back(*best);
+            }
+        }
+    }
     for (const auto& hit : raw) {
         bool near = false;
         for (const auto& prev : kept) {
@@ -237,38 +243,78 @@ PicturePose locate_picture(const uint16_t* luma, int width, int height, int stri
         if (!near) {
             kept.push_back(hit);
         }
-        if (kept.size() >= 128) {
+        if (kept.size() >= 24) {
             break;
         }
     }
+    // Refine around the seed, requiring all four borders and rings. The old
+    // unrestricted size bonus expanded true corners into adjacent QR/text.
+    // A factor of two also recovers an inner square hit at coarse scan phases.
+    std::vector<Hit> refined;
+    for (const auto& hit : kept) {
+        Hit best = hit;
+        double best_rank = -1;
+        for (int size = std::max(8, hit.size / 2); size <= std::min(96, hit.size * 2); ++size) {
+            for (int dy = -8; dy <= 8; ++dy) {
+                for (int dx = -8; dx <= 8; ++dx) {
+                    const double score = score_fiducial(luma, stride, width, height, hit.x + dx, hit.y + dy, size, 4, 4);
+                    const double rank = score + size * 0.01;
+                    if (score > 0 && rank > best_rank) {
+                        best_rank = rank;
+                        best = Hit{hit.x + dx, hit.y + dy, size, score};
+                    }
+                }
+            }
+        }
+        if (best_rank >= 0) refined.push_back(best);
+    }
+    kept = std::move(refined);
     if (kept.size() < 4) {
         return pose;
     }
     PicturePose best;
     double best_score = -1;
-    // Build corner constellations spatially rather than trying every quartet.
-    // This lets real, slightly blurred screen corners survive QR/text clutter.
-    for (const Hit& tl : kept) for (const Hit& tr : kept) {
-        const double horizontal = tr.x - tl.x;
-        if (horizontal < std::max(tl.size, tr.size) * 10 || std::abs(tr.y - tl.y) > horizontal * 0.25) continue;
-        for (const Hit& bl : kept) {
-            const double vertical = bl.y - tl.y;
-            if (vertical < tl.size * 8 || std::abs(bl.x - tl.x) > vertical * 0.35) continue;
-            if (horizontal / vertical < 1.2 || horizontal / vertical > 2.5) continue;
-            const double bx = tr.x + bl.x - tl.x, by = tr.y + bl.y - tl.y;
-            for (const Hit& br : kept) {
-                if (std::abs(br.x - bx) > horizontal * 0.15 || std::abs(br.y - by) > vertical * 0.15) continue;
-                Hit four[4] = {tl, tr, bl, br}; PicturePose candidate;
-                if (!pose_from_hits(four, width, height, candidate)) continue;
-                const double canonical[4][2]={{0,0},{1919,0},{1919,1079},{0,1079}};
-                const double corners[4][2]={{candidate.corner_x[0],candidate.corner_y[0]},{candidate.corner_x[1],candidate.corner_y[1]},{candidate.corner_x[2],candidate.corner_y[2]},{candidate.corner_x[3],candidate.corner_y[3]}};
-                double H[9]; if (!solve_homography(canonical,corners,H)) continue;
-                const auto geometry=frame_geometry(1920,1080);
-                auto strip_sample=[&](int index){double x=geometry.strip_x+(index+0.5)*geometry.strip_w,y=geometry.strip_y+geometry.strip_h*0.5;double den=H[6]*x+H[7]*y+1;return sample_bilinear(luma,stride,width,height,(H[0]*x+H[1]*y+H[2])/den,(H[3]*x+H[4]*y+H[5])/den);};
-                const double contrast=(strip_sample(29)+strip_sample(31))*0.5-strip_sample(30);
-                const double aspect_penalty=std::abs(std::log((candidate.width/candidate.height)/(16.0/9.0)));
-                const double score = tl.score + tr.score + bl.score + br.score + std::sqrt(candidate.width * candidate.height) * 10 + contrast*8 - aspect_penalty*3000;
-                if (score > best_score) { best_score = score; best = candidate; }
+    for (size_t a = 0; a < kept.size(); ++a) {
+        for (size_t b = a + 1; b < kept.size(); ++b) {
+            for (size_t c = b + 1; c < kept.size(); ++c) {
+                for (size_t d = c + 1; d < kept.size(); ++d) {
+                    Hit four[4] = {kept[a], kept[b], kept[c], kept[d]};
+                    PicturePose candidate;
+                    if (!pose_from_hits(four, width, height, candidate)) {
+                        continue;
+                    }
+                    // Check the known white/black/white strip reference cells
+                    // through the candidate homography, not QR-like corner score.
+                    const double src[4][2] = {{0, 0}, {639, 0}, {639, 359}, {0, 359}};
+                    double dst[4][2];
+                    for (int i = 0; i < 4; ++i) {
+                        dst[i][0] = candidate.corner_x[i];
+                        dst[i][1] = candidate.corner_y[i];
+                    }
+                    double H[9];
+                    if (!solve_homography(src, dst, H)) continue;
+                    const auto geometry = frame_geometry(640, 360);
+                    auto cell = [&](int bit) {
+                        const double x = geometry.strip_x + (bit + 0.5) * geometry.strip_w;
+                        const double y = geometry.strip_y + geometry.strip_h * 0.5;
+                        const double den = H[6] * x + H[7] * y + H[8];
+                        return std::abs(den) < 1e-9 ? 0.0 : double(sample_bilinear(luma, stride, width, height,
+                            (H[0] * x + H[1] * y + H[2]) / den,
+                            (H[3] * x + H[4] * y + H[5]) / den));
+                    };
+                    const double white = std::min(cell(29), cell(31));
+                    const double black = cell(30);
+                    if (white - black < 200) continue;
+                    const double threshold = (white + black) * 0.5;
+                    int parity = 0;
+                    for (int bit = 0; bit < 29; ++bit) parity ^= cell(bit) >= threshold ? 1 : 0;
+                    if (parity) continue;
+                    const double score = candidate.width * candidate.height + white - black;
+                    if (score > best_score) {
+                        best_score = score;
+                        best = candidate;
+                    }
+                }
             }
         }
     }
@@ -277,7 +323,7 @@ PicturePose locate_picture(const uint16_t* luma, int width, int height, int stri
 
 LocatedMarker read_located_marker(const uint16_t* luma, int width, int height, int stride)
 {
-    return read_located_marker_at_pose(luma, width, height, stride, locate_picture(luma, width, height, stride));
+    return read_located_marker_at_pose(luma, width, height, stride, locate_picture(luma, width, height, stride), 640);
 }
 
 LocatedMarker read_located_marker_at_pose(const uint16_t* luma, int width, int height, int stride, const PicturePose& pose, int canonical_width)
@@ -289,8 +335,9 @@ LocatedMarker read_located_marker_at_pose(const uint16_t* luma, int width, int h
         return located;
     }
     located.located = true;
-    located.width = canonical_width > 0 ? canonical_width : std::max(32, static_cast<int>(std::lround(located.pose.width)));
-    located.height = canonical_width > 0 ? canonical_width * 9 / 16 : std::max(32, static_cast<int>(std::lround(located.pose.height)));
+    // Stable geometry avoids changing integer strip widths with a subpixel pose.
+    located.width = canonical_width > 0 ? canonical_width : 640;
+    located.height = located.width * 9 / 16;
     located.canonical.assign(static_cast<size_t>(located.width * located.height), kYBackground);
     const double src[4][2] = {{0, 0}, {static_cast<double>(located.width - 1), 0},
         {static_cast<double>(located.width - 1), static_cast<double>(located.height - 1)},

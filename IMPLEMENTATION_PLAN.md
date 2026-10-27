@@ -558,3 +558,23 @@ violations or wrong payloads); 8-packet historical-centre matrix; dedicated
 1/2-Hz A/µ-law +35-ms timing/reference/mixed-stream/invalid-option regression.
 See tests/audio-timecode/RESULTS-2026-10-27.md for stress failures and remaining
 physical/video/live-integration limits.
+
+## Route-independent readiness (1.0.1 unreleased)
+
+Supersedes the original §16.4 media-dependent readiness contract: an analyzer is deployment-ready before routing and remains ready on unroute or signal loss. Process/HTTP health and configured Query API registration are still required. The generator also waits for creation of both output flows. Media readiness and input state remain diagnostics, now also included together in `/statusz`. Heartbeat reads/writes share the runtime mutex.
+
+Regression scripts cover an analyzer started before its generator, readiness before first IS-05 routing and after unroute/reroute, no-signal readiness including a late-started analyzer, and Query API disappearance for both roles. Signal-loss regression now runs in the live CI job. Historical 1.0.0 release notes are preserved with a link to the new contract.
+
+## Deployment feedback completed for 1.0.1
+
+The user revised the release process: points 1–4 share the existing PR, and a successful tested candidate may be merged/released. Node labels now use configured `NMOS_LABEL` verbatim; device labels append the role, with unchanged sender/receiver labels. Web signal edits are no longer assigned from every generator poll. Signal and configuration drafts have explicit Apply/Discard, failed-write retention and protection for edits made during a pending save. Settings rendering is memoized on form state rather than status/preview ticks. This follows the siblings' separation of local editor state from polled live data; no sibling code was copied.
+
+Clock selection and deployment requirements are in `docs/clock-reference.md`: URL override, optional ptp4l socket with an abstract host-network reply endpoint, kernel fallback, unreported default error handling and NTP TAI requirements. An isolated-network pod needs kernel mode or an explicit URL unless its management response path is separately made reachable. Core remains independent of media/network libraries. Physical PTP accuracy, ST 2110 hardware runs and mobile accuracy validation are not inferred from protocol mocks or software checks.
+
+The release candidate reports app/core/CMake 1.0.1; the existing tag workflow verifies version agreement and publishes the matching versioned notes and container. Validation results are recorded after execution, with unsupported hardware-dependent checks called out separately.
+
+## Additional file-path regression found during 1.0.1 validation
+
+The unchanged Stage-2 tile check failed on a generated 720p50 ProRes signal scaled to 640×360 and padded into 960×540. The unchanged 1.0.0 release image failed on the same retained file, establishing a pre-existing locator bug. High-scoring QR/text candidates displaced real corners, and unrestricted size-biased refinement expanded hits incorrectly. The focused fix keeps spatial extrema across bounded size ranges, retains tolerant coarse scoring, refines locally with complete rings, and ranks poses using geometry/reference cells/parity. `read_located_marker` rectifies to stable 640×360 to avoid integer strip-width drift. Public API signatures are unchanged.
+
+A full-renderer QR/text unit regression checks the intended (80,40), 640×360 pose, all four corners, three sequences and both marker states: 54 assertions pass; the original locator fails 51 of those assertions. Existing fiducial and phone cases remain green, and the unchanged full Stage-2 integration passes. No unpublished mobile implementation or private footage was imported into this release.

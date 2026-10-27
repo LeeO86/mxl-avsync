@@ -195,7 +195,7 @@ void NmosNode::start()
             const auto& config = impl_->config;
             const auto& ids = impl_->ids;
             web::json::value settings = web::json::value::object();
-            const auto node_label = config.label() + " " + config.role;
+            const auto node_label = config.label();
             settings[U("http_port")] = config.nmos_port;
             settings[U("label")] = web::json::value::string(us(node_label));
             settings[U("host_name")] = web::json::value::string(us(config.host_id));
@@ -270,7 +270,7 @@ void NmosNode::start()
                         }
                     }
                     auto device = nmos::make_device(us(ids.device), us(ids.node), senders, receivers, node_model.settings);
-                    device.data[U("label")] = value::string(us(config.label() + (generator ? " avsync generator" : " avsync analyzer")));
+                    device.data[U("label")] = value::string(us(config.label() + " " + config.role));
                     device.data[U("description")] = value::string(U("mxl-avsync"));
                     tag_test(device);
                     nmos::insert_resource(node_model.node_resources, std::move(device));

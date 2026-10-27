@@ -62,4 +62,31 @@ curl -sf "http://127.0.0.1:$NPORT/x-nmos/node/v1.3/self" | grep -q '"description
 kill -TERM "$pid"
 wait "$pid" || code=$?
 test "${code:-0}" = 143
+
+# Readiness is a control-plane contract even in the build without libmxl.
+work=$(mktemp -d)
+trap 'kill -TERM $pid 2>/dev/null || true; wait $pid 2>/dev/null || true; rm -rf "$work"' EXIT
+AVSYNC_ROLE=analyzer NMOS_ENABLE=false NMOS_REGISTRY_ADDRESS= \
+  AVSYNC_STATE_DIR="$work/state" MXL_DOMAIN_SCAN_PATH="$work/empty" \
+  MXL_OUTPUT_DOMAIN_DIR="$work/output" WEB_PORT="$PORT" \
+  "$BIN" serve >"$work/analyzer.log" 2>&1 &
+pid=$!
+for _ in $(seq 1 50); do
+  curl -sf "http://127.0.0.1:$PORT/readyz" >/dev/null && break
+  sleep 0.1
+done
+curl -sf "http://127.0.0.1:$PORT/readyz" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+assert s["ready"] is True and s["role"]=="analyzer", s
+'
+curl -sf "http://127.0.0.1:$PORT/statusz" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+assert s["media_ready"] is False and s["input_state"] in ("waiting", "not_routed"), s
+'
+kill -TERM "$pid"
+code=0
+wait "$pid" || code=$?
+test "$code" = 143
 echo "api integration ok"

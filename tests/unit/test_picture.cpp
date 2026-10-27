@@ -28,6 +28,51 @@ int square_x(int frame, int period, double period_ms, const FrameGeometry& geome
 
 } // namespace
 
+TEST_CASE("locator keeps the full rendered tile corners instead of QR and text squares")
+{
+    PictureInfo info;
+    info.qr_json = R"({"schema":"mxl-avsync-qr/1","id":"TEST-stage2","seq":7,"tk":1000000000,"offset_ms":0,"format":"720p50","source":"STUDIO A","title":"AV sync","event_rate":2})";
+    info.title = "AV sync";
+    info.source = "STUDIO A";
+    info.format_line = "720p50";
+    info.offset_line = "offset 0 ms";
+    info.counter = "frame 0000050";
+    info.time_line = "t 1000.0 ms";
+    info.period_ms = 500;
+    for (uint64_t sequence : {1, 7, 8}) {
+        const bool white = sequence % 2 != 0;
+        Yuv422p10 frame;
+        frame.resize(1280, 720);
+        render_picture(frame, info, sequence, 0, 25, white);
+        // Same 640x360 tile and (80,40) pad as stage2.sh, with deterministic
+        // 2x2 averaging here. The integration test also covers ProRes encoding.
+        std::vector<uint16_t> canvas(960 * 540, kYBlack);
+        for (int y = 0; y < 360; ++y) {
+            for (int x = 0; x < 640; ++x) {
+                const size_t p = size_t(y * 2) * frame.width + x * 2;
+                canvas[size_t(y + 40) * 960 + x + 80] =
+                    (unsigned(frame.y[p]) + frame.y[p + 1] + frame.y[p + frame.width] + frame.y[p + frame.width + 1]) / 4;
+            }
+        }
+        const auto located = read_located_marker(canvas.data(), 960, 540, 960);
+        REQUIRE(located.located);
+        CHECK(std::abs(located.pose.origin_x - 80) <= 4);
+        CHECK(std::abs(located.pose.origin_y - 40) <= 4);
+        CHECK(std::abs(located.pose.width - 640) <= 5);
+        CHECK(std::abs(located.pose.height - 360) <= 5);
+        const double expected[4][2] = {{80, 40}, {720, 40}, {720, 400}, {80, 400}};
+        for (int corner = 0; corner < 4; ++corner) {
+            CHECK(std::abs(located.pose.corner_x[corner] - expected[corner][0]) <= 4);
+            CHECK(std::abs(located.pose.corner_y[corner] - expected[corner][1]) <= 4);
+        }
+        CHECK(located.width == 640);
+        CHECK(located.height == 360);
+        CHECK(located.reading.strip_ok);
+        CHECK(located.reading.seq_low24 == sequence);
+        CHECK(located.reading.state == (white ? MarkerReading::State::White : MarkerReading::State::Black));
+    }
+}
+
 TEST_CASE("result picture states")
 {
     auto ink_rows = [](const Yuv422p10& frame, int y0, int y1, uint16_t background) {

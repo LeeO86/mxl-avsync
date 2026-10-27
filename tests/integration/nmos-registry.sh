@@ -8,8 +8,10 @@ export LD_LIBRARY_PATH="${MXL_LIB_DIR:-/opt/mxl/lib}${VCPKG_LIB_DIR:+:$VCPKG_LIB
 
 WORK="$(mktemp -d /dev/shm/avs-reg-XXXXXX)"
 GPID=""
+APID=""
 RPPID=""
 cleanup() {
+  [[ -n "$APID" ]] && { kill -TERM "$APID" 2>/dev/null || true; wait "$APID" 2>/dev/null || true; }
   [[ -n "$GPID" ]] && { kill -TERM "$GPID" 2>/dev/null || true; wait "$GPID" 2>/dev/null || true; }
   [[ -n "$RPPID" ]] && { kill -TERM "$RPPID" 2>/dev/null || true; wait "$RPPID" 2>/dev/null || true; }
   rm -rf "$WORK"
@@ -105,6 +107,27 @@ done
 test "$rose" = 1
 echo "activations $BEFORE -> $NOW"
 
+APORT=18782
+mkdir -p "$WORK/a"
+AVSYNC_ROLE=analyzer NMOS_SEED=reg-ana NMOS_ENABLE=true NMOS_DNS_SD=false \
+  NMOS_REGISTRY_ADDRESS=127.0.0.1 NMOS_REGISTRY_PORT=$REG \
+  NMOS_QUERY_ADDRESS=127.0.0.1 NMOS_QUERY_PORT=$QUERY \
+  NMOS_HOST_ADDRESS=127.0.0.1 NMOS_PORT=18734 WEB_PORT=$APORT \
+  AVSYNC_STATE_DIR="$WORK/a" MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$WORK/ana" \
+  "$BIN" serve >"$WORK/ana.log" 2>&1 &
+APID=$!
+for _ in $(seq 1 100); do
+  curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null && break
+  sleep 0.25
+done
+curl -sf "http://127.0.0.1:$APORT/readyz" >/dev/null
+curl -sf "http://127.0.0.1:$APORT/statusz" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+assert s["media_ready"] is False and s["input_state"]=="not_routed", s
+'
+echo "registered analyzer ready without routes"
+
 touch "$WORK/hide"
 dropped=0
 for _ in $(seq 1 30); do
@@ -118,5 +141,12 @@ test "$dropped" = 1
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$GPORT/readyz" || true)
 test "$code" = "503"
 curl -sf "http://127.0.0.1:$GPORT/metrics" | grep -q 'mxl_avsync_nmos_registry_up 0'
-echo "query miss is not ready"
+for _ in $(seq 1 40); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APORT/readyz" || true)
+  [[ "$code" == "503" ]] && break
+  sleep 0.2
+done
+test "$code" = "503"
+curl -sf "http://127.0.0.1:$APORT/api/v1/status" | grep -q '"nmos_registered":false'
+echo "query miss is not ready for either role"
 echo "nmos-registry.sh ok"
