@@ -629,3 +629,14 @@ content-versus-grain diagnostics without changing sub-sample AV measurements,
 the stored chirp arrival mapping or the packet-completion time. File/phone
 observations still do not claim MXL grain timestamps. The unchanged closed-loop
 `tests/integration/live.sh` exercises the missing-field regression.
+
+
+## Linux integration feedback: QR metadata for located file tiles (2026-10-27)
+
+The unchanged Stage-2 scaled/padded-tile regression exposed a coded-signal
+pairing failure: QR lookup used the full input frame's geometry, leaving
+located video observations unidentified while coded audio had a protected
+identity. File analysis now also attempts QR lookup on the locator's rectified
+canonical picture before configuring its marker tracker. This restores source,
+profile and event-rate adoption without changing locator geometry/scoring or
+inventing video identity from the manifest.

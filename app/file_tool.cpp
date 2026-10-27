@@ -678,6 +678,14 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
                     if (request.locate) {
                         const LocatedMarker located = read_located_marker(luma.data(), width, height, width);
                         if (located.located) {
+                            // A padded/scaled tile has different QR geometry from
+                            // the full input frame. Read its rectified picture too.
+                            if (!qr) {
+                                if (auto text = decode_qr_text(located.canonical.data(), located.width, located.height, located.width)) {
+                                    qr = parse_qr_payload(*text);
+                                }
+                            }
+                            if (qr) event_rate = qr->rate;
                             if (!locate_tracker) {
                                 VideoFormat located_format = synthetic;
                                 located_format.width = located.width;
