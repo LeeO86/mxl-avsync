@@ -35,6 +35,13 @@ Additional local validation:
   independent +120/+155-ms clock estimates, audio-only without picture/QR,
   and actual rendered FILE QR through the shared Vision reader. Existing native
   orientation, signal-loss, unstable-pair and calibration regressions passed.
+  The final suite also publishes +3217-ms AV and +3337-ms estimated audio latency;
+  a late matching side is not dropped by the short UI statistics window.
+- Digital and established camera locator paths both pass. A merged digital-only
+  search was caught by replaying a previously readable local camera take; the
+  fallback restores recognition. A new public full-renderer exposure/softening
+  test passes alongside the existing digital tile regression. The private take
+  remains local and provides no independent offset-accuracy reference.
 
 The rendered QR exposed a Vision compatibility issue: the simulator's newest
 request initially lacked an inference context; CPU revisions 3/4 returned no

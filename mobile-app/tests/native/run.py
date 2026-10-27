@@ -123,6 +123,17 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
         assert decoded and abs(decoded[-1]['latency']['audio_ms']-155)<1,audio_only
         assert all('video_ms' not in row['latency'] for row in decoded),decoded
         assert decoded[-1]['videoEvents']==0 and not decoded[-1]['picture']['found'],decoded[-1]
+    # Multi-second AV delay must survive publication, not only core pairing.
+    folder=tmp/'timecode-long-delay';folder.mkdir()
+    run([tmp/'timecode-fixture',folder,2,3217])
+    movie=folder/'signal.mov'
+    run(['ffmpeg','-v','error','-y','-f','rawvideo','-pixel_format','gray','-video_size','640x360','-framerate','50','-i',folder/'video.gray','-f','f32le','-ar','48000','-ac','1','-i',folder/'audio.f32','-c:v','libx264','-pix_fmt','yuv420p','-crf','14','-c:a','pcm_s16le',movie])
+    environment={**os.environ,'SIMCTL_CHILD_AVSYNC_TEST_ADVANCE_QR':'1','SIMCTL_CHILD_AVSYNC_TEST_QR':(folder/'qr.json').read_text(),'SIMCTL_CHILD_AVSYNC_TEST_WALL_OFFSET_MS':'1700000000120'}
+    delayed=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(movie)],text=True,env=environment))
+    good=[row for row in delayed if row['kind']=='reading']
+    assert good and abs(good[-1]['offset_ms']-3217)<1,delayed
+    assert abs(good[-1]['latency']['audio_ms']-3337)<1,good[-1]
+    print('PASS: native +3217-ms AV identity and +3337-ms audio latency survive the publication window')
     tool=os.environ.get('AVSYNC_TESTFILE_TOOL')
     if tool:
         # Actual rendered QR is recognized by Vision in the file analyzer.

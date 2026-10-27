@@ -608,3 +608,13 @@ suite exposed and verified a shared compatible Vision QR-reader fallback for
 camera and file analysis. Results and hardware limits are recorded in
 tests/audio-timecode/RESULTS-2026-10-27-COMPACT.md. Linux/live/NMOS testing is
 delegated to the user's peer host on the pushed branch.
+
+Follow-up regression checks preserved both picture-search paths: the merge's
+digital-only refinement rejected a previously readable local camera take. The
+established camera search is now retained as a fallback after digital geometry/
+strip validation. Digital CTest, exposure/softening and native rendered-signal
+tests pass; local legacy-camera recognition is restored without claiming offset
+accuracy. No private footage or raw frame is included. The native publication
+window now uses the later received side, retaining 12 seconds for the identity
+pairer's bounded delay window. A +3217-ms AV / +3337-ms estimated audio-latency
+case passes through the actual native report, not merely the core pairer.

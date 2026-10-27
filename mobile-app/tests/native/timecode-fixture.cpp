@@ -6,6 +6,7 @@ int main(int argc, char **argv) {
     using namespace avsync;
     const std::string dir = argv[1];
     const int rate = argc > 2 ? std::stoi(argv[2]) : 2;
+    const int delay_ms = argc > 3 ? std::stoi(argv[3]) : 35;
     PlanConfig config;
     config.video = *parse_video_format("1080p50");
     config.event_rate = rate;
@@ -18,7 +19,7 @@ int main(int argc, char **argv) {
         event.audio_packet =
             encode_timecode(config.source_id,
                             epoch + int64_t(std::llround(event.video_timeline_ms * 1e6)), 0, true);
-        event.audio_sample += 35 * 48; // physical audio-path delay, absent from source metadata
+        event.audio_sample += delay_ms * 48; // physical path delay, absent from source metadata
     }
     std::ofstream video(dir + "/video.gray", std::ios::binary);
     constexpr int w = 640, h = 360;

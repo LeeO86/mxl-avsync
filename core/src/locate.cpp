@@ -188,7 +188,66 @@ double marker_row_time_ms(double frame_start_ms, double readout_ms, int row, int
     return frame_start_ms + readout_ms * frac;
 }
 
-PicturePose locate_picture(const uint16_t* luma, int width, int height, int stride)
+static bool pose_from_camera_hits(const Hit hits[4], int image_w, int image_h, PicturePose& pose)
+{
+    Hit corner[4];
+    for (int i = 0; i < 4; ++i) {
+        corner[i] = hits[i];
+    }
+    std::sort(corner, corner + 4, [](const Hit& a, const Hit& b) { return a.y < b.y; });
+    std::sort(corner, corner + 2, [](const Hit& a, const Hit& b) { return a.x < b.x; });
+    std::sort(corner + 2, corner + 4, [](const Hit& a, const Hit& b) { return a.x < b.x; });
+    const Hit& tl = corner[0];
+    const Hit& tr = corner[1];
+    const Hit& bl = corner[2];
+    const Hit& br = corner[3];
+    if (!(tl.x < tr.x && bl.x < br.x && tl.y < bl.y && tr.y < br.y)) {
+        return false;
+    }
+    const int sizes[4] = {tl.size, tr.size, bl.size, br.size};
+    const int smin = *std::min_element(sizes, sizes + 4);
+    const int smax = *std::max_element(sizes, sizes + 4);
+    if (smin < 8 || smax > smin * 2) {
+        return false;
+    }
+    pose.corner_x[0] = tl.x;
+    pose.corner_y[0] = tl.y;
+    pose.corner_x[1] = tr.x + tr.size;
+    pose.corner_y[1] = tr.y;
+    pose.corner_x[2] = br.x + br.size;
+    pose.corner_y[2] = br.y + br.size;
+    pose.corner_x[3] = bl.x;
+    pose.corner_y[3] = bl.y + bl.size;
+    pose.origin_x = pose.corner_x[0];
+    pose.origin_y = pose.corner_y[0];
+    pose.width = ((pose.corner_x[1] - pose.corner_x[0]) + (pose.corner_x[2] - pose.corner_x[3])) * 0.5;
+    pose.height = ((pose.corner_y[3] - pose.corner_y[0]) + (pose.corner_y[2] - pose.corner_y[1])) * 0.5;
+    pose.fiducial_size = (smin + smax) * 0.5;
+    if (pose.width < 32 || pose.height < 32 || pose.width > image_w * 1.05 || pose.height > image_h * 1.05) {
+        return false;
+    }
+    // Fiducials occupy 6% of the test-picture height. Small QR/strip squares
+    // can score as nested squares too; reject quartets with impossible scale.
+    const double relative_fid = pose.fiducial_size / pose.height;
+    const double top = pose.corner_x[1] - pose.corner_x[0];
+    const double bottom = pose.corner_x[2] - pose.corner_x[3];
+    const double left = pose.corner_y[3] - pose.corner_y[0];
+    const double right = pose.corner_y[2] - pose.corner_y[1];
+    if (relative_fid < 0.035 || relative_fid > 0.10 || top < bottom * 0.8 || bottom < top * 0.8
+        || left < right * 0.8 || right < left * 0.8) return false;
+    if (std::abs(pose.corner_x[3] - pose.corner_x[0]) > pose.height * 0.35
+        || std::abs(pose.corner_x[2] - pose.corner_x[1]) > pose.height * 0.35
+        || std::abs(pose.corner_y[1] - pose.corner_y[0]) > pose.width * 0.25
+        || std::abs(pose.corner_y[2] - pose.corner_y[3]) > pose.width * 0.25) return false;
+    const double aspect = pose.width / pose.height;
+    if (aspect < 1.2 || aspect > 2.4) {
+        return false;
+    }
+    pose.found = true;
+    return true;
+}
+
+static PicturePose locate_digital_picture(const uint16_t* luma, int width, int height, int stride)
 {
     PicturePose pose;
     if (luma == nullptr || width < 32 || height < 32) {
@@ -319,6 +378,94 @@ PicturePose locate_picture(const uint16_t* luma, int width, int height, int stri
         }
     }
     return best;
+}
+
+static PicturePose locate_camera_picture(const uint16_t* luma, int width, int height, int stride)
+{
+    PicturePose pose;
+    if (luma == nullptr || width < 32 || height < 32) {
+        return pose;
+    }
+    std::vector<Hit> raw;
+    const int sizes[] = {8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96};
+    for (int size : sizes) {
+        if (size > height / 3 || size > width / 3) {
+            continue;
+        }
+        const int step = std::max(2, size / 5);
+        for (int y = 0; y + size <= height; y += step) {
+            for (int x = 0; x + size <= width; x += step) {
+                const double score = score_fiducial(luma, stride, width, height, x, y, size);
+                if (score > 0) {
+                    raw.push_back(Hit{x, y, size, score});
+                }
+            }
+        }
+    }
+    std::sort(raw.begin(), raw.end(), [](const Hit& a, const Hit& b) { return a.score > b.score; });
+    std::vector<Hit> kept;
+    for (const auto& hit : raw) {
+        bool near = false;
+        for (const auto& prev : kept) {
+            const int dx = hit.x - prev.x;
+            const int dy = hit.y - prev.y;
+            if (dx * dx + dy * dy < (hit.size * hit.size) / 2) {
+                near = true;
+                break;
+            }
+        }
+        if (!near) {
+            kept.push_back(hit);
+        }
+        if (kept.size() >= 128) {
+            break;
+        }
+    }
+    if (kept.size() < 4) {
+        return pose;
+    }
+    PicturePose best;
+    double best_score = -1;
+    // Build corner constellations spatially rather than trying every quartet.
+    // This lets real, slightly blurred screen corners survive QR/text clutter.
+    for (const Hit& tl : kept) for (const Hit& tr : kept) {
+        const double horizontal = tr.x - tl.x;
+        if (horizontal < std::max(tl.size, tr.size) * 10 || std::abs(tr.y - tl.y) > horizontal * 0.25) continue;
+        for (const Hit& bl : kept) {
+            const double vertical = bl.y - tl.y;
+            if (vertical < tl.size * 8 || std::abs(bl.x - tl.x) > vertical * 0.35) continue;
+            if (horizontal / vertical < 1.2 || horizontal / vertical > 2.5) continue;
+            const double bx = tr.x + bl.x - tl.x, by = tr.y + bl.y - tl.y;
+            for (const Hit& br : kept) {
+                if (std::abs(br.x - bx) > horizontal * 0.15 || std::abs(br.y - by) > vertical * 0.15) continue;
+                Hit four[4] = {tl, tr, bl, br}; PicturePose candidate;
+                if (!pose_from_camera_hits(four, width, height, candidate)) continue;
+                const double canonical[4][2]={{0,0},{1919,0},{1919,1079},{0,1079}};
+                const double corners[4][2]={{candidate.corner_x[0],candidate.corner_y[0]},{candidate.corner_x[1],candidate.corner_y[1]},{candidate.corner_x[2],candidate.corner_y[2]},{candidate.corner_x[3],candidate.corner_y[3]}};
+                double H[9]; if (!solve_homography(canonical,corners,H)) continue;
+                const auto geometry=frame_geometry(1920,1080);
+                auto strip_sample=[&](int index){double x=geometry.strip_x+(index+0.5)*geometry.strip_w,y=geometry.strip_y+geometry.strip_h*0.5;double den=H[6]*x+H[7]*y+1;return sample_bilinear(luma,stride,width,height,(H[0]*x+H[1]*y+H[2])/den,(H[3]*x+H[4]*y+H[5])/den);};
+                const double contrast=(strip_sample(29)+strip_sample(31))*0.5-strip_sample(30);
+                const double aspect_penalty=std::abs(std::log((candidate.width/candidate.height)/(16.0/9.0)));
+                const double score = tl.score + tr.score + bl.score + br.score + std::sqrt(candidate.width * candidate.height) * 10 + contrast*8 - aspect_penalty*3000;
+                if (score > best_score) { best_score = score; best = candidate; }
+            }
+        }
+    }
+    return best;
+}
+
+PicturePose locate_picture(const uint16_t* luma, int width, int height, int stride)
+{
+    const auto digital = locate_digital_picture(luma, width, height, stride);
+    if (digital.found) {
+        const auto read = read_located_marker_at_pose(luma, width, height, stride, digital, 640);
+        if (read.located && read.reading.strip_ok && read.reading.quality != "invalid") return digital;
+    }
+    // Camera exposure/blur can erase one complete ring. Retain the established
+    // spatial camera search instead of rejecting a formerly readable picture.
+    const auto camera = locate_camera_picture(luma, width, height, stride);
+    return camera.found ? camera : digital;
 }
 
 LocatedMarker read_located_marker(const uint16_t* luma, int width, int height, int stride)

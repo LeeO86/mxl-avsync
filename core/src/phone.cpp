@@ -198,7 +198,10 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
         detect.timeline_origin_ms = audio_origin_ms_;
         detector = AudioDetector(detect);
     }
-    const auto hits = detector.detect(audio.data(), audio.size(), 0);
+    const bool have_timecode = (signal_ && signal_->timecode) || !timecodes_.empty();
+    const size_t diagnostic_window = have_timecode ? 48000 * 2 : 48000 * 6;
+    const size_t diagnostic_start = audio.size() > diagnostic_window ? audio.size() - diagnostic_window : 0;
+    const auto hits = detector.detect(audio.data() + diagnostic_start, audio.size() - diagnostic_start, diagnostic_start);
     report.audio_hits = hits;
     for (const auto& packet : timecode_stream_.scan(true)) {
         const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };

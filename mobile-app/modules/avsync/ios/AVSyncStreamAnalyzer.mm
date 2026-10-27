@@ -159,7 +159,7 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  const double recentWindow=s.qr?std::max(2000.0,3500.0/std::max(1,s.qr->rate)):2000.0;
  NSMutableArray *events=[NSMutableArray array];
  for(const auto&e:report.events){NSMutableDictionary*item=[@{@"seq":@(e.seq),@"videoTimeMs":@(e.video_time_ms),@"audioTimeMs":@(e.audio_time_ms),@"reason":[NSString stringWithUTF8String:e.reason.c_str()],@"valid":@(e.grade!="invalid")}mutableCopy];if(e.av_offset_ms)item[@"offset_ms"]=@(*e.av_offset_ms);[events addObject:item];}
- for(const auto&e:report.events)if(e.av_offset_ms&&e.grade!="invalid"&&std::isfinite(*e.av_offset_ms)&&e.video_time_ms>=now-recentWindow)offsets.push_back(*e.av_offset_ms);
+ for(const auto&e:report.events)if(e.av_offset_ms&&e.grade!="invalid"&&std::isfinite(*e.av_offset_ms)&&std::max(e.video_time_ms,e.audio_time_ms)>=now-recentWindow)offsets.push_back(*e.av_offset_ms);
  double fps=s.frames*1000.0/std::max(1.0,s.lastVideo-s.origin);
  NSMutableDictionary* result=[@{@"kind":@"status",@"fps":@(fps),@"locatedFrames":@(s.session->located_frames()),@"validFrames":@(s.session->valid_frames()),@"eventCount":@(offsets.size()),@"events":events}mutableCopy];
  const int recentLocated=s.session->located_frames()-s.previousLocated,recentValid=s.session->valid_frames()-s.previousValid;
@@ -220,7 +220,7 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   else if([stage isEqual:@"pairing"])result[@"message"]=@"Video and chirps detected, but event identities do not pair.";
   else result[@"message"]=@"Waiting for at least three consistent AV pairs; no measurement published.";
  }
- s.session->trim_before(now-6000);
+ s.session->trim_before(now-12000);
  return result;
 }
 @end

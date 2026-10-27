@@ -11,6 +11,32 @@
 
 using namespace avsync;
 
+TEST_CASE("full signal stays readable with lifted camera blacks and mild optical softening") {
+    Yuv422p10 picture; picture.resize(1280,720);
+    QrPayload payload; payload.test_id="camera-exposure"; payload.k=17; payload.tk=1000;
+    PictureInfo info; info.qr_json=qr_payload_json(payload); info.title="TEST SIGNAL";
+    info.source="Optical fixture"; info.subtitle="Exposure and softening"; info.period_ms=500;
+    render_picture(picture,info,17,0,25,true);
+    for(bool soften:{false,true}) {
+        constexpr int width=960,height=540,left=80,top=40;
+        std::vector<uint16_t> raw(width*height,300), pixels;
+        for(int y=0;y<360;++y)for(int x=0;x<640;++x)
+            raw[(y+top)*width+x+left]=uint16_t(170+picture.y[(y*2)*1280+x*2]*0.65);
+        pixels=raw;
+        if(soften)for(int y=1;y<height-1;++y)for(int x=1;x<width-1;++x){
+            int sum=0;for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)sum+=raw[(y+dy)*width+x+dx];
+            pixels[y*width+x]=uint16_t(sum/9);
+        }
+        const auto located=read_located_marker(pixels.data(),width,height,width);
+        REQUIRE(located.located);
+        CHECK(std::abs(located.pose.origin_x-left)<=6);
+        CHECK(std::abs(located.pose.origin_y-top)<=6);
+        CHECK(located.reading.strip_ok);
+        CHECK(located.reading.seq_low24==17);
+        CHECK(located.reading.state==MarkerReading::State::White);
+    }
+}
+
 namespace {
 
 std::string fixture(const char* name)

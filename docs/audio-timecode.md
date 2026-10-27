@@ -74,6 +74,9 @@ audio reconstructs it independently from its packet. Coded events are paired by
 identity rather than the legacy ±2-period window. Online pairing keeps a bounded
 10-second waiting window; this is an implementation retention limit, not modulo
 ambiguity. Different source IDs or unverified legacy chirps cannot fill a coded pair.
+The phone retains 12 seconds of capture history and uses the later received
+side of a pair for freshness. A correctly identified multi-second AV delay is
+not discarded merely because its video arrived more than two seconds ago.
 
 The audio writer latches complete telegrams. Changing an offset cannot rewrite
 one already being transmitted. A colliding live event is skipped, counted in
@@ -128,3 +131,8 @@ Camera and file QR decoding share a Vision reader with a compatible revision-2
 fallback; the simulator uses its CPU path. The native tests exercise the actual
 rendered QR, not only injected metadata. Set `AVSYNC_NATIVE_OUT` to an empty
 directory to retain synthetic simulator artifacts for debugging.
+
+The native regression also verifies +3217-ms AV and +3337-ms estimated audio
+latency through the publication layer. Digital and camera picture searches are
+both preserved: the camera path is used when the digital search cannot produce
+a readable strip. Full-renderer exposure/softening tests cover the shared entry.
