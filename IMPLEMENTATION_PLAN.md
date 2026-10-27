@@ -699,3 +699,15 @@ keeps original pixels for QR, adopts source strip rate while retaining received
 MXL times, and publishes no video event from an invalid/lost pose. Optical AV
 uncertainty is unknown. See docs/phone-generator.md for lifecycle, test commands
 and hardware limits. Validation results are recorded after execution.
+
+
+Local phone-source validation: Core/Picture CTest and all 30 JS tests pass;
+the complete existing native capture/calibration regression suite stays green.
+The actual UIKit generator renderer/QR and every 60-Hz strip/flash phase pass
+at 1/2 Hz; its audio independently decodes with the protected estimated flag,
+including G.711 A/µ-law at 8 kHz. Full simulator and generic iPhone builds pass.
+Simulator UI inspection verified both rates, Stop, Close and restart, and
+backgrounding stops output until explicitly restarted. It exposed a delayed
+dismissal-completion callback that left JS busy; cleanup now resolves before
+the animation ends, verified by a second start. Physical output/capture timing
+and a new physical-device installation remain unverified.
