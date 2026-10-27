@@ -640,3 +640,19 @@ identity. File analysis now also attempts QR lookup on the locator's rectified
 canonical picture before configuring its marker tracker. This restores source,
 profile and event-rate adoption without changing locator geometry/scoring or
 inventing video identity from the manifest.
+
+
+## Linux integration feedback: preserve QR pixels in padded canvases (2026-10-27)
+
+A standalone rendered v3 reproduction decoded the original 1280x720 QR and
+the exact 640x360 tile crop, but not a second bilinear rectification whose
+pose differed by two pixels. QR lookup now retains its fast standard geometry
+ROI and falls back to scanning the original full frame with ZXing when that
+ROI fails. This recovers tile metadata before rectification and avoids
+relaxing locator tolerances or fabrication from audio/manifest identity.
+The real ProRes/downscaled recording also required ZXing's global-histogram
+binarizer as a final retry on the same raw pixels; its default local binarizer
+could not read the roughly 1.5-pixel modules. QR error correction/parsing and
+all measurement gates remain unchanged. The unchanged Stage-2 encoded
+scaling/padding test is the integration regression, supplemented by a rendered
+v3 full-canvas QR unit test that verifies exact payload/source/rate recovery.
