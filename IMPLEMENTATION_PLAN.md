@@ -617,3 +617,15 @@ The full CLI correctly rejects Matroska's 1-ms timestamp scale by default
 shifts. The timecode integration test and example now explicitly request
 `--allow-container-shift` for their intentional MKV/H.264 variant. No container
 checks, codec gates, analysis tolerances or strict defaults were changed.
+
+
+## Linux integration feedback: coded MXL index diagnostics (2026-10-27)
+
+The coded MXL audio path now supplies `have_grain_time` and `grain_tai_ns`,
+just as the legacy path does. The detected chirp onset on the 48-kHz input
+timeline is rounded to its nearest sample index relative to the current block,
+then converted through the MXL SDK's index-to-timestamp helper. This restores
+content-versus-grain diagnostics without changing sub-sample AV measurements,
+the stored chirp arrival mapping or the packet-completion time. File/phone
+observations still do not claim MXL grain timestamps. The unchanged closed-loop
+`tests/integration/live.sh` exercises the missing-field regression.

@@ -759,7 +759,17 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 const auto& packets = timecode_stream.scan();
                 for (const auto& packet : packets) {
                     const auto key = std::make_pair(packet.source_id, packet.video_send_ns);
-                    if (heard_timecodes.insert(key).second) pairer->observe_audio(audio_observation(packet));
+                    if (heard_timecodes.insert(key).second) {
+                        auto observation = audio_observation(packet);
+                        // The decoder reports chirp onset on the input sample timeline.
+                        // Preserve that sample's MXL index time, not packet completion.
+                        const auto relative_sample = static_cast<int64_t>(std::llround((packet.time_ms - block_start_ms) * 48.0));
+                        const auto sample_index = static_cast<uint64_t>(std::max<int64_t>(0,
+                            static_cast<int64_t>(audio_cursor) + relative_sample));
+                        observation.have_grain_time = true;
+                        observation.grain_tai_ns = static_cast<int64_t>(time_of_index(Rate{48000, 1}, sample_index));
+                        pairer->observe_audio(observation);
+                    }
                 }
                 audio_window.insert(audio_window.end(), mono.begin(), mono.end());
                 const size_t keep = 48000;
