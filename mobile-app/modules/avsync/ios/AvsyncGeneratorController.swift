@@ -201,7 +201,11 @@ final class AvsyncGeneratorController: UIViewController {
     let result: [String: Any] = ["source": sourceID, "eventRate": rate, "skippedDisplayFrames": lateFrames, "audioPresentationLatencyMs": outputLatency*1000, "estimated": true]
     stop("Closed")
     for token in notices { NotificationCenter.default.removeObserver(token) }; notices.removeAll()
-    dismiss(animated: true) { [onClose] in onClose?(result) }
+    // Playback has stopped and cleanup is complete. Resolve independently of
+    // UIKit's dismissal animation (which can outlive the presented controller).
+    let callback = onClose; onClose = nil
+    dismiss(animated: true)
+    callback?(result)
   }
   override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); if !finishing { stop("Signal stopped") } }
   deinit { link?.invalidate(); for token in notices { NotificationCenter.default.removeObserver(token) } }
