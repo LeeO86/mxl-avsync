@@ -260,3 +260,36 @@ TEST_CASE("kernel clock maps to sync_state")
     clock.unsynced = true;
     CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
 }
+
+
+TEST_CASE("text preserves antialiased coverage, contrast and clipped row padding")
+{
+    constexpr int width = 96, height = 64, stride = 104;
+    for (const uint16_t foreground : {uint16_t(kYWhite), uint16_t(kYBlack)}) {
+        const uint16_t background = foreground == kYWhite ? kYBlack : kYWhite;
+        std::vector<uint16_t> pixels((height + 2) * stride, 1023);
+        uint16_t* start = pixels.data() + stride + 3;
+        for (int y = 0; y < height; ++y) std::fill(start + y * stride, start + y * stride + width, background);
+        draw_text({start, width, height, stride}, -4, -2, "S", 6, foreground);
+        int solid = 0, fringe = 0, untouched = 0;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const uint16_t value = start[y * stride + x];
+                CHECK(value >= kYBlack);
+                CHECK(value <= kYWhite);
+                solid += value == foreground;
+                untouched += value == background;
+                fringe += value != foreground && value != background;
+            }
+        }
+        CHECK(solid > 100);
+        CHECK(fringe > 100);
+        CHECK(untouched > 100);
+        bool padding_unchanged = true;
+        for (int y = 0; y < height + 2; ++y) for (int x = 0; x < stride; ++x) {
+            if (y == 0 || y == height + 1 || x < 3 || x >= width + 3)
+                padding_unchanged &= pixels[y * stride + x] == 1023;
+        }
+        CHECK(padding_unchanged);
+    }
+}

@@ -117,7 +117,8 @@ TEST_CASE("result picture contrast, margin, latency, senders and count")
     const uint16_t background = pass.y[0];
     bool border = true;
     bool ink = false;
-    int worst = 10000;
+    // Antialiased fringes approach the background; require strong foreground ink.
+    int strongest = 0;
     for (int y = 0; y < pass.height; ++y) {
         for (int x = 0; x < pass.width; ++x) {
             const uint16_t sample = pass.y[static_cast<size_t>(y) * static_cast<size_t>(pass.width) + static_cast<size_t>(x)];
@@ -127,13 +128,13 @@ TEST_CASE("result picture contrast, margin, latency, senders and count")
             }
             if (!edge && sample != background) {
                 ink = true;
-                worst = std::min(worst, std::abs(static_cast<int>(sample) - static_cast<int>(background)));
+                strongest = std::max(strongest, std::abs(static_cast<int>(sample) - static_cast<int>(background)));
             }
         }
     }
     CHECK(border);
     CHECK(ink);
-    CHECK(worst >= 300);
+    CHECK(strongest >= 300);
     for (const char* grade : {"warn", "fail", "invalid"}) {
         ResultPicture pictured = base;
         pictured.grade = grade;
@@ -143,10 +144,10 @@ TEST_CASE("result picture contrast, margin, latency, senders and count")
         }
         const Yuv422p10 frame = paint(pictured);
         const uint16_t fill = frame.y[0];
-        int gap = 10000;
+        int gap = 0;
         for (uint16_t sample : frame.y) {
             if (sample != fill) {
-                gap = std::min(gap, std::abs(static_cast<int>(sample) - static_cast<int>(fill)));
+                gap = std::max(gap, std::abs(static_cast<int>(sample) - static_cast<int>(fill)));
             }
         }
         CHECK(gap >= 300);
@@ -285,9 +286,12 @@ TEST_CASE("large qr stays decodable and the sync square moves")
             }
         }
         const int runs = static_cast<int>(found.size() / 2);
-        if (runs > best_runs) {
+        // The first complete row is the boxes' top padding. Maximizing black
+        // runs can instead select holes inside antialiased glyphs below it.
+        if (runs >= 7) {
             best_runs = runs;
             boxes = std::move(found);
+            break;
         }
     }
     CHECK(best_runs >= 7);

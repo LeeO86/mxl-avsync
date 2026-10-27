@@ -8,20 +8,6 @@ namespace {
 
 constexpr int64_t kNinetyDaysMs = 90LL * 24 * 60 * 60 * 1000;
 
-VideoFormat canonical_format(int width, int height, int event_rate)
-{
-    VideoFormat format;
-    format.token = "phone";
-    format.width = width;
-    format.height = height;
-    // The phone tracker only needs a stable period. 50p keeps the file-plan grid
-    // when the test picture was drawn at 50 frames per second.
-    format.frame = Rate{50, 1};
-    format.interlaced = false;
-    (void)event_rate;
-    return format;
-}
-
 } // namespace
 
 CalibrationState calibration_state(const CalibrationRecord* record, std::string_view os_version, int64_t now_unix_ms)
@@ -65,39 +51,65 @@ void PhoneSession::set_calibration(const CalibrationRecord& record, std::string_
 
 void PhoneSession::push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms)
 {
-    if (!tracker_ready_) {
-        const LocatedMarker located = read_located_marker(luma, width, height, stride);
-        if (!located.located) {
-            return;
-        }
-        canonical_w_ = located.width;
-        canonical_h_ = located.height;
-        tracker_ = MarkerTracker(canonical_format(canonical_w_, canonical_h_, event_rate_), event_rate_);
-        tracker_ready_ = true;
+    if (!cached_pose_.found || frame_start_ms - pose_time_ms_ > 150) {
+        cached_pose_ = locate_picture(luma, width, height, stride);
+        pose_time_ms_ = frame_start_ms;
     }
-    const LocatedMarker located = read_located_marker(luma, width, height, stride);
-    if (!located.located) {
+    LocatedMarker located = read_located_marker_at_pose(luma, width, height, stride, cached_pose_, 640);
+    if (located.located && !located.reading.strip_ok) {
+        cached_pose_ = locate_picture(luma, width, height, stride);
+        pose_time_ms_ = frame_start_ms;
+        located = read_located_marker_at_pose(luma, width, height, stride, cached_pose_, 640);
+    }
+    current_picture_ = located.pose;
+    current_picture_.found = located.located;
+    picture_code_confirmed_ = false;
+    if (!located.located) { pending_frames_ = 0; return; }
+    ++located_frames_;
+    const auto& reading = located.reading;
+    if (!reading.strip_ok || reading.quality == "invalid" || reading.state == MarkerReading::State::Invalid) {
+        pending_frames_ = 0; return;
+    }
+    ++valid_frames_;
+    decoded_seq_ = reading.seq_low24;
+    last_valid_frame_ms_ = frame_start_ms;
+    // A decoded event number and the marker phase must agree. Monitor refresh,
+    // rolling shutter and moire can toggle the block without a new event.
+    const bool white = reading.state == MarkerReading::State::White;
+    if (white != bool(reading.seq_low24 & 1u)) { ++phase_rejected_frames_; pending_frames_ = 0; return; }
+    const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, height / 2, height);
+    if (!pending_frames_ || pending_seq_ != reading.seq_low24) {
+        pending_seq_ = reading.seq_low24; pending_time_ms_ = time_ms; pending_frames_ = 1;
+    } else ++pending_frames_;
+    // Confirm across frames but retain the FIRST frame's timestamp.
+    if (pending_frames_ < 3) return;
+    picture_code_confirmed_ = true;
+    confirmed_picture_seq_ = pending_seq_;
+    confirmed_picture_time_ms_ = frame_start_ms;
+    auto anchor = [&] {
+        locked_seq_ = pending_seq_; unwrapped_seq_ = pending_seq_;
+        last_seen_ms_ = time_ms; have_transition_ = false;
+    };
+    if (!locked_seq_) { anchor(); return; }
+    int32_t delta = static_cast<int32_t>((pending_seq_ - *locked_seq_) & 0xFFFFFFu);
+    if (delta >= 0x800000) delta -= 0x1000000;
+    if (delta == 0) { last_seen_ms_ = time_ms; return; }
+    if (delta != 1) {
+        ++sequence_rejected_frames_;
+        if (time_ms - last_seen_ms_ > 1500) anchor();
         return;
     }
-    std::vector<uint16_t> canonical = located.canonical;
-    if (located.width != canonical_w_ || located.height != canonical_h_) {
-        canonical.assign(static_cast<size_t>(canonical_w_ * canonical_h_), kYBackground);
-        for (int y = 0; y < canonical_h_; ++y) {
-            const int sy = std::min(located.height - 1, y * located.height / canonical_h_);
-            for (int x = 0; x < canonical_w_; ++x) {
-                const int sx = std::min(located.width - 1, x * located.width / canonical_w_);
-                canonical[static_cast<size_t>(y) * canonical_w_ + x] = located.canonical[static_cast<size_t>(sy) * located.width + sx];
-            }
-        }
+    const double period = 1000.0 / std::max(1, event_rate_);
+    if (have_transition_ && std::abs(pending_time_ms_ - last_transition_ms_ - period) > period * 0.25) {
+        ++timing_resets_; anchor(); return;
     }
-    const FrameGeometry geo = frame_geometry(canonical_w_, canonical_h_);
-    const int row = geo.marker_y + geo.marker_side / 2;
-    const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, row, canonical_h_);
-    const int64_t frame_index = static_cast<int64_t>(std::llround(frame_start_ms / 20.0));
-    const auto obs = tracker_->push(canonical.data(), canonical_w_, frame_index, time_ms);
-    if (obs.event) {
-        videos_.push_back(obs);
-    }
+    ++unwrapped_seq_; locked_seq_ = pending_seq_; last_seen_ms_ = time_ms;
+    last_transition_ms_ = pending_time_ms_; have_transition_ = true;
+    VideoObservation obs;
+    obs.event = true; obs.seq = unwrapped_seq_; obs.time_ms = pending_time_ms_;
+    obs.marker_white = white; obs.strip_ok = true; obs.quality = reading.quality;
+    obs.contrast = reading.contrast;
+    videos_.push_back(obs);
 }
 
 void PhoneSession::push_audio(const float* samples, size_t count, double start_ms, int sample_rate)
@@ -120,13 +132,35 @@ void PhoneSession::push_audio(const float* samples, size_t count, double start_m
     audio_.insert(audio_.end(), samples, samples + count);
 }
 
+void PhoneSession::trim_before(double time_ms)
+{
+    videos_.erase(std::remove_if(videos_.begin(), videos_.end(), [&](const VideoObservation& v) { return v.time_ms < time_ms; }), videos_.end());
+    if (!audio_set_ || time_ms <= audio_origin_ms_) return;
+    const size_t drop = std::min(audio_.size(), static_cast<size_t>((time_ms - audio_origin_ms_) * audio_rate_ / 1000.0));
+    audio_.erase(audio_.begin(), audio_.begin() + drop);
+    audio_origin_ms_ += drop * 1000.0 / audio_rate_;
+}
+
 PhoneReport PhoneSession::finish(const std::string& test_id)
 {
     PhoneReport report;
+    report.video_events = videos_.size();
+    report.audio_samples = audio_.size();
+    report.phase_rejected_frames = phase_rejected_frames_;
+    report.sequence_rejected_frames = sequence_rejected_frames_;
+    report.timing_resets = timing_resets_;
+    report.pending_frames = pending_frames_;
+    report.decoded_seq = decoded_seq_;
+    report.locked_seq = locked_seq_;
+    report.last_valid_frame_ms = last_valid_frame_ms_;
+    if (!videos_.empty()) report.last_video_event_ms = videos_.back().time_ms;
+    double peak = 0;
+    for (float sample : audio_) peak = std::max(peak, std::abs(static_cast<double>(sample)));
+    if (peak > 1e-6) report.audio_peak_dbfs = 20 * std::log10(peak);
     report.calibration = calibration_state_name(calibration_state_);
     report.show_grade_colour = calibration_state_ == CalibrationState::Valid;
     report.uncertainty_ms = report.show_grade_colour ? calibration_.spread_ms : 0;
-    if (videos_.empty() || audio_.empty()) {
+    if (audio_.empty()) {
         return report;
     }
     AudioDetectConfig detect;
@@ -142,6 +176,8 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
         detector = AudioDetector(detect);
     }
     const auto hits = detector.detect(audio.data(), audio.size(), 0);
+    report.audio_hits = hits;
+    if (videos_.empty()) return report;
     ReferenceInfo reference;
     reference.type = "none";
     reference.sync_state = "unknown";

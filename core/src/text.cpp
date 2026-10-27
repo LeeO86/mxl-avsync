@@ -67,12 +67,15 @@ void draw_text(LumaView view, int x, int y, std::string_view text, int scale, ui
         const uint8_t* src = base + static_cast<std::ptrdiff_t>(row) * pixels.stride;
         uint16_t* dst = view.data + static_cast<size_t>(yy) * static_cast<size_t>(view.stride);
         for (int col = 0; col < width; ++col) {
-            if (src[col] < 96) {
+            const uint32_t coverage = src[col];
+            if (coverage == 0) {
                 continue;
             }
             const int xx = x + col;
             if (xx >= 0 && xx < view.width) {
-                dst[xx] = y_value;
+                // Preserve Blend2D's grayscale coverage in the 10-bit raster.
+                // Thresholding the A8 mask discarded antialiasing at every edge.
+                dst[xx] = static_cast<uint16_t>((dst[xx] * (255 - coverage) + y_value * coverage + 127) / 255);
             }
         }
     }

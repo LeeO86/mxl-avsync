@@ -1,0 +1,256 @@
+{
+  "audio": {
+    "channels": 2,
+    "chirp": {
+      "high_hz": 2500.0,
+      "level_dbfs": -12.0,
+      "low_hz": 700.0,
+      "ms": 30
+    },
+    "codec": "aac",
+    "sample_rate_hz": 48000
+  },
+  "container": {
+    "audio_start_pts": 0,
+    "audio_time_base": "1/48000",
+    "checks": {
+      "ok": null,
+      "notes": [
+        "Compatibility transcode: see verification report and ffprobe metadata in index.json; source checks superseded."
+      ]
+    },
+    "format": "mp4",
+    "video_start_pts": 0,
+    "video_time_base": "1/60000"
+  },
+  "duration_ms": 10000.0,
+  "events": [
+    {
+      "audio_sample": 48048,
+      "audio_timeline_ms": 1001.0,
+      "chirp_id": 1,
+      "event_id": "EVT-000001",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 1,
+      "video_frame": 60,
+      "video_timeline_ms": 1001.0
+    },
+    {
+      "audio_sample": 72072,
+      "audio_timeline_ms": 1501.5,
+      "chirp_id": 2,
+      "event_id": "EVT-000002",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 2,
+      "video_frame": 90,
+      "video_timeline_ms": 1501.5
+    },
+    {
+      "audio_sample": 96096,
+      "audio_timeline_ms": 2002.0,
+      "chirp_id": 3,
+      "event_id": "EVT-000003",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 3,
+      "video_frame": 120,
+      "video_timeline_ms": 2002.0
+    },
+    {
+      "audio_sample": 120120,
+      "audio_timeline_ms": 2502.5,
+      "chirp_id": 0,
+      "event_id": "EVT-000004",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 4,
+      "video_frame": 150,
+      "video_timeline_ms": 2502.5
+    },
+    {
+      "audio_sample": 144144,
+      "audio_timeline_ms": 3003.0,
+      "chirp_id": 1,
+      "event_id": "EVT-000005",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 5,
+      "video_frame": 180,
+      "video_timeline_ms": 3003.0
+    },
+    {
+      "audio_sample": 168168,
+      "audio_timeline_ms": 3503.5,
+      "chirp_id": 2,
+      "event_id": "EVT-000006",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 6,
+      "video_frame": 210,
+      "video_timeline_ms": 3503.5
+    },
+    {
+      "audio_sample": 192192,
+      "audio_timeline_ms": 4004.0,
+      "chirp_id": 3,
+      "event_id": "EVT-000007",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 7,
+      "video_frame": 240,
+      "video_timeline_ms": 4004.0
+    },
+    {
+      "audio_sample": 216216,
+      "audio_timeline_ms": 4504.5,
+      "chirp_id": 0,
+      "event_id": "EVT-000008",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 8,
+      "video_frame": 270,
+      "video_timeline_ms": 4504.5
+    },
+    {
+      "audio_sample": 240240,
+      "audio_timeline_ms": 5005.0,
+      "chirp_id": 1,
+      "event_id": "EVT-000009",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 9,
+      "video_frame": 300,
+      "video_timeline_ms": 5005.0
+    },
+    {
+      "audio_sample": 264264,
+      "audio_timeline_ms": 5505.5,
+      "chirp_id": 2,
+      "event_id": "EVT-000010",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 10,
+      "video_frame": 330,
+      "video_timeline_ms": 5505.5
+    },
+    {
+      "audio_sample": 288288,
+      "audio_timeline_ms": 6006.0,
+      "chirp_id": 3,
+      "event_id": "EVT-000011",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 11,
+      "video_frame": 360,
+      "video_timeline_ms": 6006.0
+    },
+    {
+      "audio_sample": 312312,
+      "audio_timeline_ms": 6506.5,
+      "chirp_id": 0,
+      "event_id": "EVT-000012",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 12,
+      "video_frame": 390,
+      "video_timeline_ms": 6506.5
+    },
+    {
+      "audio_sample": 336336,
+      "audio_timeline_ms": 7007.0,
+      "chirp_id": 1,
+      "event_id": "EVT-000013",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 13,
+      "video_frame": 420,
+      "video_timeline_ms": 7007.0
+    },
+    {
+      "audio_sample": 360360,
+      "audio_timeline_ms": 7507.5,
+      "chirp_id": 2,
+      "event_id": "EVT-000014",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 14,
+      "video_frame": 450,
+      "video_timeline_ms": 7507.5
+    },
+    {
+      "audio_sample": 384384,
+      "audio_timeline_ms": 8008.0,
+      "chirp_id": 3,
+      "event_id": "EVT-000015",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 15,
+      "video_frame": 480,
+      "video_timeline_ms": 8008.0
+    },
+    {
+      "audio_sample": 408408,
+      "audio_timeline_ms": 8508.5,
+      "chirp_id": 0,
+      "event_id": "EVT-000016",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 0,
+      "rounding_residual_us": 0.0,
+      "seq": 16,
+      "video_frame": 510,
+      "video_timeline_ms": 8508.5
+    },
+    {
+      "audio_sample": 432432,
+      "audio_timeline_ms": 9009.0,
+      "chirp_id": 1,
+      "event_id": "EVT-000017",
+      "expected_av_offset_ms": 0.0,
+      "marker_phase": 1,
+      "rounding_residual_us": 0.0,
+      "seq": 17,
+      "video_frame": 540,
+      "video_timeline_ms": 9009.0
+    }
+  ],
+  "generator": {
+    "core": "1.0.0",
+    "version": "1.0.0"
+  },
+  "mode": "FILE",
+  "schema": "mxl-avsync-manifest/1",
+  "test_id": "TEST-1080p59.94_h264_aac_sync",
+  "timeline": "file",
+  "video": {
+    "codec": "h264",
+    "fps_den": 1001,
+    "fps_num": 60000,
+    "height": 1080,
+    "scan": "progressive",
+    "width": 1920,
+    "pixel_format": "yuv420p"
+  },
+  "transcode": {
+    "source_video_codec": "prores",
+    "source_audio_codec": "pcm24",
+    "encoder": "libx264",
+    "audio": "encoded from the PCM reference"
+  }
+}

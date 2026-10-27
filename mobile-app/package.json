@@ -4,13 +4,22 @@
   "private": true,
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "test": "node --test src/display.test.mjs src/measure.test.mjs src/session.test.mjs"
+    "test": "node --test src/*.test.mjs",
+    "start": "expo start --dev-client --lan",
+    "ios": "expo run:ios",
+    "ios:device": "expo run:ios --device",
+    "android": "expo run:android",
+    "test:ios-native": "python3 tests/native/run.py"
   },
   "dependencies": {
+    "@expo/vector-icons": "~14.0.4",
     "expo": "~52.0.0",
+    "expo-asset": "~11.0.5",
     "expo-av": "~15.0.2",
     "expo-camera": "~16.0.18",
+    "expo-dev-client": "~5.0.20",
+    "expo-font": "~13.0.4",
     "react": "18.3.1",
-    "react-native": "0.76.0"
+    "react-native": "0.76.9"
   }
 }

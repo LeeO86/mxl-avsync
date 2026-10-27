@@ -49,3 +49,7 @@ AVSYNC_ROLE=generator AVSYNC_STATE_DIR=/tmp/avsync ./build/mxl-avsync serve
 ## Licence
 
 MIT (`LICENSE`).
+
+## Ready-to-play test clips
+
+See [testfiles/README.md](testfiles/README.md) for eight verified AV-sync clips in MP4, MOV and MKV (720p to 4K), known offsets, manifests, analysis reports and regeneration commands.

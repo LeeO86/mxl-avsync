@@ -259,6 +259,7 @@ struct LocatedMarker {
     std::vector<uint16_t> canonical;
 };
 LocatedMarker read_located_marker(const uint16_t* luma, int width, int height, int stride);
+LocatedMarker read_located_marker_at_pose(const uint16_t* luma, int width, int height, int stride, const PicturePose& pose, int canonical_width = 0);
 
 // Row time inside one rolling-shutter frame. readout_ms is the full-frame readout; 0 is global shutter.
 double marker_row_time_ms(double frame_start_ms, double readout_ms, int row, int height);
@@ -441,6 +442,18 @@ OffsetWords describe_offset(double ms);
 // Phone measurement on one clock. Video frames may contain a scaled or offset test picture.
 struct PhoneReport {
     std::vector<Measurement> events;
+    std::vector<AudioHit> audio_hits;
+    size_t video_events = 0;
+    size_t audio_samples = 0;
+    double audio_peak_dbfs = -120;
+    int phase_rejected_frames = 0;
+    int sequence_rejected_frames = 0;
+    int timing_resets = 0;
+    int pending_frames = 0;
+    std::optional<uint32_t> decoded_seq;
+    std::optional<uint32_t> locked_seq;
+    double last_valid_frame_ms = -1e30;
+    double last_video_event_ms = -1e30;
     std::string calibration = "missing"; // valid, missing, expired
     bool show_grade_colour = false;
     double uncertainty_ms = 0;
@@ -453,16 +466,43 @@ public:
     void push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms);
     void push_audio(const float* samples, size_t count, double start_ms, int sample_rate);
     PhoneReport finish(const std::string& test_id = "PHONE");
+    void trim_before(double time_ms);
+    int located_frames() const { return located_frames_; }
+    int valid_frames() const { return valid_frames_; }
+    const PicturePose& current_picture() const { return current_picture_; }
+    bool picture_code_confirmed() const { return picture_code_confirmed_; }
+    std::optional<uint32_t> confirmed_picture_seq() const { return confirmed_picture_seq_; }
+    double confirmed_picture_time_ms() const { return confirmed_picture_time_ms_; }
+    std::optional<VideoObservation> latest_video_event() const {
+        return videos_.empty() ? std::nullopt : std::optional<VideoObservation>(videos_.back());
+    }
 
 private:
+    PicturePose cached_pose_;
+    PicturePose current_picture_;
+    bool picture_code_confirmed_ = false;
+    std::optional<uint32_t> confirmed_picture_seq_;
+    double confirmed_picture_time_ms_ = -1e30;
+    double pose_time_ms_ = -1e30;
+    int located_frames_ = 0;
+    int valid_frames_ = 0;
+    int phase_rejected_frames_ = 0;
+    int sequence_rejected_frames_ = 0;
+    int timing_resets_ = 0;
+    std::optional<uint32_t> decoded_seq_;
+    double last_valid_frame_ms_ = -1e30;
     int event_rate_;
     GradeWindows windows_;
     CalibrationState calibration_state_ = CalibrationState::Missing;
     CalibrationRecord calibration_{};
-    bool tracker_ready_ = false;
-    int canonical_w_ = 0;
-    int canonical_h_ = 0;
-    std::optional<MarkerTracker> tracker_;
+    std::optional<uint32_t> locked_seq_;
+    uint64_t unwrapped_seq_ = 0;
+    uint32_t pending_seq_ = 0;
+    int pending_frames_ = 0;
+    double pending_time_ms_ = 0;
+    double last_seen_ms_ = -1e30;
+    double last_transition_ms_ = 0;
+    bool have_transition_ = false;
     std::vector<VideoObservation> videos_;
     std::vector<float> audio_;
     double audio_origin_ms_ = 0;

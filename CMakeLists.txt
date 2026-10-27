@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(AVSYNC_CORE_ONLY "Build only avsync-core and its tests" OFF)
+option(AVSYNC_BUILD_TESTFILE_TOOL "Build the portable testfile generator/analyzer" OFF)
 option(AVSYNC_WITH_FFMPEG "Build the file generator and analyzer" ON)
 # Live MXL is linked when find_package(mxl) succeeds. avsync-core stays free of libmxl.
 
@@ -101,6 +102,10 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     target_include_directories(avsync-file PUBLIC generator app core/include third_party third_party/nayuki)
     target_compile_definitions(avsync-file PUBLIC AVSYNC_ICON_PATH="${CMAKE_SOURCE_DIR}/web/icon.png")
     target_link_libraries(avsync-file PUBLIC avsync-core ZXing::ZXing PkgConfig::FFMPEG)
+    if(AVSYNC_BUILD_TESTFILE_TOOL)
+        add_executable(avsync-testfile-tool testfiles/tool.cpp)
+        target_link_libraries(avsync-testfile-tool PRIVATE avsync-file)
+    endif()
     add_executable(avsync-picture-tests tests/unit/test_picture.cpp)
     target_include_directories(avsync-picture-tests PRIVATE third_party/doctest)
     target_compile_definitions(avsync-picture-tests PRIVATE AVSYNC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")

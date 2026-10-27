@@ -1,408 +1,124 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
-import { AIM_TEXT, encodeWav, formatResultWhen, measureSentence, offsetText, selectHighestFrameRate, spikeBucket, statusLine, waveformPeaks } from './src/measure.mjs';
-import {
-  clearCalibration,
-  clearLive,
-  clearResults,
-  completeMeasurement,
-  createSession,
-  saveCalibration,
-  setLive,
-} from './src/session.mjs';
-import { appendAudio, appendFrame, createRecording, selectedOffsetMs, spikeAbsoluteMs, stepSelection } from './src/wizard.mjs';
-function loadNative() {
-  try {
-    return require('./modules/avsync').default;
-  } catch (err) {
-    return null;
-  }
+import { useEffect, useRef, useState } from 'react';
+import { Image, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, Text, TextInput, View } from 'react-native';
+import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { Audio } from 'expo-av';
+import { requireNativeViewManager } from 'expo-modules-core';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import native from './modules/avsync';
+import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
+import { checkClock, clockSummary } from './src/clock.mjs';
+import { offsetText, measureSentence, formatResultWhen } from './src/measure.mjs';
+import { validCalibration, prepareReading, makeCalibration, nearestFrame } from './src/workflow.mjs';
+
+const NativeCamera = native?.supportsLiveCapture ? requireNativeViewManager('Avsync') : null;
+const bg = '#121417', ink = '#e7ecf1', muted = '#9aa7b5', orange = '#ffc26b';
+const text = { color: ink, fontSize: 16, lineHeight: 23 };
+const button = { padding: 12, borderRadius: 8, backgroundColor: '#2a3644', marginTop: 10, alignItems: 'center' };
+const round = { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2a3644', alignItems: 'center', justifyContent: 'center' };
+function Button({ title, onPress, disabled }) { return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[button, disabled && { opacity: 0.35 }]}><Text style={text}>{title}</Text></Pressable>; }
+function SignalPill({ value, icon }) {
+ const color = value.tone === 'green' ? '#76e2a3' : value.tone === 'orange' ? orange : muted;
+ return <View accessible accessibilityLabel={value.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18, backgroundColor: '#121417e8', borderWidth: 1, borderColor: `${color}66` }}><Ionicons name={icon} size={15} color={color} /><Text style={{ color, fontSize: 12, fontWeight: '600' }}>{value.label}</Text></View>;
+}
+function LatencyPanel({ values, hint, clock, onCheck, checking, error }) {
+ const format = value => value === null ? '—' : `${value < 0 ? '−' : ''}${Math.abs(value).toFixed(0)} ms`;
+ return <View style={{ marginTop: 10, backgroundColor: '#1c2128', borderRadius: 10, padding: 10 }}>
+  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: orange, fontSize: 12, fontWeight: '600' }}>ESTIMATED LATENCY</Text><Pressable accessibilityRole="button" accessibilityLabel="Check phone clock" disabled={checking} onPress={onCheck}><Text style={{ color: muted, fontSize: 12 }}>{checking ? 'Checking…' : 'Check clock'}</Text></Pressable></View>
+  <View style={{ flexDirection: 'row', gap: 24, marginTop: 5 }}><Text style={{ color: ink, fontSize: 17 }}>Video {format(values.video)}</Text><Text style={{ color: ink, fontSize: 17 }}>Audio {format(values.audio)}</Text></View>
+  <Text style={{ color: muted, fontSize: 10, marginTop: 4 }}>{values.video === null ? hint : 'Live QR → phone capture · includes phone capture delay'}</Text>
+  <Text style={{ color: error ? orange : muted, fontSize: 10, marginTop: 4 }}>{error || clock}</Text>
+ </View>;
+}
+function initialState() { try { return JSON.parse(native?.loadState() || 'null') || { calibration: null, results: [] }; } catch { return { calibration: null, results: [] }; } }
+
+function Waveform({ take }) {
+ const values = take.waveform || [], max = Math.max(0.001, ...values);
+ return <View style={{ height: 60, marginTop: 10, justifyContent: 'center' }}>
+  <View style={{ flexDirection: 'row', alignItems: 'center', height: 56 }}>{values.map((v, i) => <View key={i} style={{ flex: 1, height: Math.max(2, v / max * 54), backgroundColor: '#7aa2ff', marginRight: 1 }} />)}</View>
+  <View style={{ position: 'absolute', left: `${Math.min(100, Math.max(0, (take.spikeTimeMs - (take.waveformStartMs || 0)) / (take.waveformDurationMs || take.durationMs) * 100))}%`, width: 2, top: 0, bottom: 0, backgroundColor: orange }} />
+ </View>;
 }
 
-function loadCamera() {
-  try {
-    return require('expo-camera');
-  } catch (err) {
-    return null;
-  }
+function CalibrationReview({ take, onSave, onRepeat, onCancel }) {
+ const [selected, setSelected] = useState(() => nearestFrame(take.frames, take.spikeTimeMs));
+ const sound = useRef(null);
+ useEffect(() => () => { sound.current?.unloadAsync(); }, []);
+ const frame = take.frames[selected], delta = frame.timeMs - take.spikeTimeMs;
+ const replay = async () => { await sound.current?.unloadAsync(); const result = await Audio.Sound.createAsync({ uri: take.uri }, { shouldPlay: true }); sound.current = result.sound; };
+ return <ScrollView contentContainerStyle={{ padding: 20 }}>
+  <Text style={{ ...text, fontSize: 22 }}>Match the sound</Text>
+  <Text style={{ color: muted, lineHeight: 21, marginVertical: 10 }}>Select the first frame where the hands or object make contact. There are frames on BOTH sides of the sound.</Text>
+  <Image source={{ uri: frame.uri }} resizeMode="contain" style={{ width: '100%', height: 280, backgroundColor: '#000', borderRadius: 12 }} />
+  <View style={{ flexDirection: 'row', gap: 12 }}><View style={{ flex: 1 }}><Button title="← Previous" disabled={!selected} onPress={() => setSelected(i => i - 1)} /></View><View style={{ flex: 1 }}><Button title="Next →" disabled={selected === take.frames.length - 1} onPress={() => setSelected(i => i + 1)} /></View></View>
+  <Text style={{ ...text, marginTop: 10 }}>Frame {selected + 1}/{take.frames.length} · {delta >= 0 ? '+' : ''}{delta.toFixed(1)} ms from sound</Text>
+  <Text style={{ color: muted }}>{take.framesBefore ?? take.frames.filter(f => f.timeMs < take.spikeTimeMs).length} before · {take.framesAfter ?? take.frames.filter(f => f.timeMs > take.spikeTimeMs).length} after · {take.fps.toFixed(0)} fps</Text>
+  <Waveform take={take} />
+  <Text style={text}>Correction {offsetText(take.spikeTimeMs - frame.timeMs)}</Text>
+  <Button title="Replay sound" onPress={replay} /><Button title="Save calibration" onPress={() => onSave(selected)} /><Button title="Repeat" onPress={onRepeat} /><Button title="Cancel" onPress={onCancel} />
+ </ScrollView>;
 }
-
-const METER_HZ = 25;
-
-function bytesToBase64(bytes) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes[i];
-    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    const triple = (a << 16) | (b << 8) | c;
-    out += chars[(triple >> 18) & 63];
-    out += chars[(triple >> 12) & 63];
-    out += i + 1 < bytes.length ? chars[(triple >> 6) & 63] : '=';
-    out += i + 2 < bytes.length ? chars[triple & 63] : '=';
-  }
-  return out;
-}
-
-async function startMicrophone(setRecording) {
-  try {
-    const { Audio } = require('expo-av');
-    const permission = await Audio.requestPermissionsAsync();
-    if (!permission.granted) return null;
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-    const mic = new Audio.Recording();
-    await mic.prepareToRecordAsync({
-      isMeteringEnabled: true,
-      android: { extension: '.m4a', outputFormat: 2, audioEncoder: 3, sampleRate: 44100, numberOfChannels: 1, bitRate: 128000 },
-      ios: { extension: '.m4a', outputFormat: 'aac ', audioQuality: 96, sampleRate: 44100, numberOfChannels: 1, bitRate: 128000 },
-      web: {},
-    });
-    mic.setProgressUpdateInterval(1000 / METER_HZ);
-    mic.setOnRecordingStatusUpdate((status) => {
-      if (!status.isRecording || status.metering == null) return;
-      const linear = Math.max(0, Math.min(1, 10 ** (status.metering / 20)));
-      setRecording((current) => (current && current.step === 'recording' ? appendAudio(current, [linear]) : current));
-    });
-    await mic.startAsync();
-    return mic;
-  } catch (err) {
-    return null;
-  }
-}
-
-const ink = '#e7ecf1';
-const muted = '#9aa7b5';
-const panel = '#1c2128';
-const bg = '#121417';
-
-function GearButton({ onPress }) {
-  return (
-    <Pressable accessibilityLabel="Settings" onPress={onPress} style={iconButton}>
-      <Text style={{ color: ink, fontSize: 20 }}>⚙</Text>
-    </Pressable>
-  );
-}
-
-function ClearButton({ onPress }) {
-  return (
-    <Pressable accessibilityLabel="Clear reading" onPress={onPress} style={iconButton}>
-      <Text style={{ color: ink, fontSize: 22 }}>✕</Text>
-    </Pressable>
-  );
-}
-
-function FrameGuide() {
-  return (
-    <View pointerEvents="none" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ width: '88%', aspectRatio: 16 / 9, borderWidth: 2, borderColor: '#ffffff', borderRadius: 4 }} />
-    </View>
-  );
-}
-
-function CameraPane() {
-  const camera = useMemo(() => loadCamera(), []);
-  if (camera && camera.CameraView && camera.useCameraPermissions) {
-    return <DeviceCamera camera={camera} />;
-  }
-  return (
-    <View style={{ flex: 1, backgroundColor: '#000', margin: 12, borderRadius: 12, overflow: 'hidden' }}>
-      <FrameGuide />
-    </View>
-  );
-}
-
-function DeviceCamera({ camera }) {
-  const CameraView = camera.CameraView;
-  const [permission, requestPermission] = camera.useCameraPermissions();
-  const chosen = selectHighestFrameRate(camera.availableFormats || []);
-  const rateLabel = chosen ? `${chosen.maxFps ?? chosen.fps ?? chosen.max} fps` : '';
-  useEffect(() => {
-    if (permission && !permission.granted) requestPermission();
-  }, [permission, requestPermission]);
-  return (
-    <View style={{ flex: 1, backgroundColor: '#000', margin: 12, borderRadius: 12, overflow: 'hidden' }}>
-      <CameraView style={{ flex: 1 }} facing="back" active mode="video" videoQuality="2160p" />
-      <FrameGuide />
-      {rateLabel ? (
-        <Text style={{ position: 'absolute', left: 16, bottom: 12, color: '#fff', fontSize: 12 }}>{rateLabel}</Text>
-      ) : null}
-    </View>
-  );
-}
-
-function MeasureScreen({ session, onClear }) {
-  const live = session.live;
-  const ms = live ? live.offset_ms : null;
-  return (
-    <View style={{ flex: 1 }}>
-      <CameraPane />
-      <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={{ color: ink, fontSize: 56 }}>{offsetText(ms)}</Text>
-          <ClearButton onPress={onClear} />
-        </View>
-        <Text style={{ color: ink, fontSize: 20, marginTop: 4 }}>{measureSentence(ms)}</Text>
-        <Text style={{ color: muted, marginTop: 16 }}>
-          {statusLine({
-            quality: live ? live.quality : null,
-            calibrated: Boolean(session.calibration),
-            uncertaintyMs: live ? live.uncertaintyMs : null,
-          })}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-function ResultsScreen({ session }) {
-  return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
-      {session.results.length === 0 ? (
-        <Text style={{ color: muted }}>No saved results</Text>
-      ) : (
-        session.results.map((item) => (
-          <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2c3540' }}>
-            <Text style={{ color: ink, fontSize: 18 }}>{offsetText(item.offset_ms)}</Text>
-            <Text style={{ color: muted }}>{formatWhen(item.at)}</Text>
-          </View>
-        ))
-      )}
-    </ScrollView>
-  );
-}
-
-function formatWhen(unixMs) {
-  return formatResultWhen(unixMs);
-}
-
-function SettingsSheet({ onClose, onClearCalibration, onRepeat, onClearResults }) {
-  return (
-    <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
-      <View style={{ backgroundColor: panel, padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-          <Image source={require('./assets/icon.png')} style={{ width: 28, height: 28, borderRadius: 6, marginRight: 10 }} />
-          <Text style={{ color: ink, fontSize: 18 }}>Settings</Text>
-        </View>
-        <SettingsRow label="Clear saved calibration" onPress={onClearCalibration} />
-        <SettingsRow label="Repeat calibration" onPress={onRepeat} />
-        <SettingsRow label="Clear results" onPress={onClearResults} />
-        <SettingsRow label="Close" onPress={onClose} />
-      </View>
-    </View>
-  );
-}
-
-function SettingsRow({ label, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={{ paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#2c3540' }}>
-      <Text style={{ color: ink, fontSize: 16 }}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function Waveform({ samples, spikeIndex }) {
-  const peaks = waveformPeaks(samples, 48);
-  const bucket = spikeBucket(spikeIndex, samples.length, peaks.length || 1);
-  const max = Math.max(0.001, ...peaks);
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', height: 64, marginTop: 12 }}>
-      {peaks.map((peak, index) => (
-        <View key={index} style={{ flex: 1, alignItems: 'center', height: 64, justifyContent: 'center' }}>
-          {index === bucket ? (
-            <View style={{ position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#e7ecf1' }} />
-          ) : null}
-          <View style={{ width: 3, height: Math.max(2, (peak / max) * 56), backgroundColor: '#7aa2ff', borderRadius: 1 }} />
-        </View>
-      ))}
-    </View>
-  );
-}
-
-async function replayTake(samples, sampleRate) {
-  try {
-    const { Audio } = require('expo-av');
-    const wav = encodeWav(samples, sampleRate);
-    const { sound } = await Audio.Sound.createAsync({ uri: `data:audio/wav;base64,${bytesToBase64(wav)}` });
-    await sound.playAsync();
-  } catch (err) {
-    return false;
-  }
-  return true;
-}
-
-function CalibrationWizard({ onClose, onSave }) {
-  const [phase, setPhase] = useState('aim');
-  const [recording, setRecording] = useState(null);
-  const startedAt = useMemo(() => ({ current: 0 }), []);
-  const micRef = useMemo(() => ({ current: null }), []);
-
-  const begin = () => {
-    startedAt.current = Date.now();
-    setRecording(createRecording(METER_HZ, 0));
-    setPhase('recording');
-    startMicrophone(setRecording).then((mic) => {
-      micRef.current = mic;
-    });
-  };
-
-  useEffect(() => {
-    if (recording && recording.step === 'pick' && micRef.current) {
-      const mic = micRef.current;
-      micRef.current = null;
-      mic.stopAndUnloadAsync?.();
-    }
-  }, [recording, micRef]);
-
-  useEffect(() => {
-    if (phase !== 'recording') return undefined;
-    const timer = setInterval(() => {
-      setRecording((current) => {
-        if (!current || current.step !== 'recording') return current;
-        return appendFrame(current, { timeMs: Date.now() - startedAt.current });
-      });
-    }, 50);
-    return () => clearInterval(timer);
-  }, [phase, startedAt]);
-
-  const finish = () => {
-    if (!recording) return;
-    const offset = selectedOffsetMs(recording);
-    onSave({
-      offset_ms: offset,
-      savedAt: Date.now(),
-      spikeTimeMs: spikeAbsoluteMs(recording),
-      frameTimeMs: recording.frames[recording.selected] ? recording.frames[recording.selected].timeMs : null,
-      samples: recording.samples,
-      sampleRate: recording.sampleRate,
-    });
-  };
-
-  if (phase === 'aim' || !recording) {
-    return (
-      <View style={sheet}>
-        <Text style={{ color: ink, fontSize: 22, marginBottom: 12 }}>Calibration</Text>
-        <Text style={{ color: ink, fontSize: 16, lineHeight: 22 }}>{AIM_TEXT}</Text>
-        <Pressable onPress={begin} style={primaryButton}><Text style={primaryText}>Start</Text></Pressable>
-        <Pressable onPress={onClose} style={{ marginTop: 12 }}><Text style={{ color: muted }}>Cancel</Text></Pressable>
-      </View>
-    );
-  }
-
-  if (recording.step === 'recording') {
-    const cancel = () => {
-      const mic = micRef.current;
-      micRef.current = null;
-      mic?.stopAndUnloadAsync?.();
-      onClose();
-    };
-    return (
-      <View style={sheet}>
-        <Text style={{ color: ink, fontSize: 22 }}>Listening</Text>
-        <Text style={{ color: muted, marginTop: 8 }}>Recording stops when a sharp sound is heard.</Text>
-        <Pressable onPress={cancel} style={{ marginTop: 12 }}><Text style={{ color: muted }}>Cancel</Text></Pressable>
-        <CameraPane />
-      </View>
-    );
-  }
-
-  const frame = recording.frames[recording.selected];
-  const offset = selectedOffsetMs(recording);
-  return (
-    <View style={sheet}>
-      <Text style={{ color: ink, fontSize: 22 }}>Match the sound</Text>
-      <View style={{ marginTop: 16, height: 160, borderRadius: 8, backgroundColor: '#0e1114', alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: ink, fontSize: 18 }}>{frame ? frame.label || `${Math.round(frame.timeMs)} ms` : 'No frame'}</Text>
-      </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
-        <Pressable onPress={() => setRecording(stepSelection(recording, -1))} style={chip}><Text style={{ color: ink }}>Left</Text></Pressable>
-        <Pressable onPress={() => setRecording(stepSelection(recording, 1))} style={chip}><Text style={{ color: ink }}>Right</Text></Pressable>
-      </View>
-      <Text style={{ color: ink, marginTop: 12 }}>{offsetText(offset)}</Text>
-      <Text style={{ color: muted }}>{measureSentence(offset)}</Text>
-      <Waveform samples={recording.samples} spikeIndex={recording.spike ? recording.spike.index : 0} />
-      <Pressable onPress={() => replayTake(recording.samples, recording.sampleRate)} style={chip}>
-        <Text style={{ color: ink }}>Replay</Text>
-      </Pressable>
-      <Pressable onPress={finish} style={primaryButton}><Text style={primaryText}>Save calibration</Text></Pressable>
-    </View>
-  );
-}
-
-const sheet = { flex: 1, backgroundColor: bg, padding: 20 };
-const primaryButton = { marginTop: 20, backgroundColor: '#2a3644', padding: 14, borderRadius: 8, alignItems: 'center' };
-const primaryText = { color: ink, fontSize: 16 };
-const chip = { marginTop: 12, backgroundColor: '#2a3644', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 };
-const iconButton = { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2a3644', alignItems: 'center', justifyContent: 'center' };
 
 export default function App() {
-  const native = useMemo(() => loadNative(), []);
-  const [tab, setTab] = useState('measure');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [session, setSession] = useState(() => createSession());
-
-  useEffect(() => {
-    if (!native || !native.subscribe) return undefined;
-    return native.subscribe((report) => {
-      if (typeof report.offset_ms !== 'number') return undefined;
-      setSession((current) => (
-        report.complete
-          ? completeMeasurement(current, report, Date.now())
-          : setLive(current, report)
-      ));
-      return undefined;
-    });
-  }, [native]);
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Image source={require('./assets/icon.png')} style={{ width: 28, height: 28, borderRadius: 6, marginRight: 10 }} />
-          <Text style={{ color: muted, letterSpacing: 1 }}>{tab === 'measure' ? 'MEASURE' : 'RESULTS'}</Text>
-        </View>
-        <GearButton onPress={() => setSettingsOpen(true)} />
-      </View>
-      {tab === 'measure' ? (
-        <MeasureScreen session={session} onClear={() => setSession(clearLive)} />
-      ) : (
-        <ResultsScreen session={session} />
-      )}
-      <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#2c3540' }}>
-        <TabButton label="Measure" active={tab === 'measure'} onPress={() => setTab('measure')} />
-        <TabButton label="Results" active={tab === 'results'} onPress={() => setTab('results')} />
-      </View>
-      {settingsOpen ? (
-        <SettingsSheet
-          onClose={() => setSettingsOpen(false)}
-          onClearCalibration={() => setSession(clearCalibration)}
-          onClearResults={() => setSession(clearResults)}
-          onRepeat={() => {
-            setSettingsOpen(false);
-            setWizardOpen(true);
-          }}
-        />
-      ) : null}
-      {wizardOpen ? (
-        <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}>
-          <CalibrationWizard
-            onClose={() => setWizardOpen(false)}
-            onSave={(calibration) => {
-              setSession((current) => saveCalibration(current, calibration));
-              setWizardOpen(false);
-            }}
-          />
-        </View>
-      ) : null}
-    </SafeAreaView>
-  );
-}
-
-function TabButton({ label, active, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={{ flex: 1, paddingVertical: 14, alignItems: 'center' }}>
-      <Text style={{ color: active ? ink : muted, fontWeight: active ? '700' : '400' }}>{label}</Text>
-    </Pressable>
-  );
+ const [session, setSession] = useState(initialState);
+ const [live, setLive] = useState(null), [tab, setTab] = useState('measure');
+ const [settings, setSettings] = useState(false), [flow, setFlow] = useState(null), [take, setTake] = useState(null);
+ const [running, setRunning] = useState(true), [status, setStatus] = useState({ message: 'Looking for test signal…' }), [notice, setNotice] = useState(null);
+ const [cameraPermission, requestCamera] = useCameraPermissions(), [micPermission, requestMic] = useMicrophonePermissions();
+ const camera = useRef(null), lastReportAt = useRef(-Infinity);
+ const [tick, setTick] = useState(() => performance.now());
+ const [clockCheck, setClockCheck] = useState(null), [clockBusy, setClockBusy] = useState(false), [clockError, setClockError] = useState(null);
+ useEffect(() => { const timer = setInterval(() => setTick(performance.now()), 200); return () => clearInterval(timer); }, []);
+ const age = Math.max(0, tick - lastReportAt.current);
+ const feedback = signalFeedback(status, age, running && !flow), latency = latencyValues(status, age, running && !flow);
+ const taiUtcSeconds = Number.isFinite(session.taiUtcSeconds) ? session.taiUtcSeconds : 37;
+ const [taiDraft, setTaiDraft] = useState(String(taiUtcSeconds));
+ useEffect(() => { if (settings) setTaiDraft(String(taiUtcSeconds)); }, [settings, taiUtcSeconds]);
+ useEffect(() => { if (running && age > 1600) setLive(null); }, [running, age]);
+ const runClockCheck = async () => { setClockBusy(true); setClockError(null); try { setClockCheck(await checkClock()); } catch (error) { setClockCheck(null); setClockError(`Clock check unavailable: ${error.message}`); } finally { setClockBusy(false); } };
+ const os = native?.deviceVersion() || String(Platform.Version);
+ const calibration = validCalibration(session.calibration, os, Date.now());
+ useEffect(() => { native?.saveState(JSON.stringify(session)); }, [session]);
+ const ask = async () => { await requestCamera(); await requestMic(); };
+ const cancelCalibration = () => { setFlow(null); camera.current?.resumeAnalysis(); };
+ const report = event => {
+  const value = event.nativeEvent;
+  lastReportAt.current = performance.now();
+  setStatus(value);
+  if (value.kind === 'calibration') { setTake(value); setFlow('review'); }
+  else if (value.kind === 'error') { setNotice(value.message); if (flow === 'listening') { setFlow('aim'); camera.current?.resumeAnalysis(); } }
+  else if (value.kind === 'status' && !flow) setLive(null);
+  else if (value.kind === 'reading' && !flow) { setLive(prepareReading(value, calibration, Date.now())); setNotice(null); }
+ };
+ const save = () => { if (live) { setSession(s => ({ ...s, results: [{ ...live, id: String(Date.now()), at: Date.now() }, ...s.results].slice(0, 50) })); setNotice('Measurement saved'); } };
+ const exportResult = async item => { try { await Share.share({ message: JSON.stringify({ ...item, mode: 'LIVE', reference: { type: 'none' }, accuracy: 'unvalidated' }, null, 2) }); } catch (e) { setNotice(e.message); } };
+ const startCalibration = () => { setSettings(false); setRunning(true); setFlow('aim'); setNotice(null); };
+ return <SafeAreaView style={{ flex: 1, backgroundColor: bg }}>
+  <StatusBar barStyle="light-content" />
+  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8 }}>
+   <View style={{ flexDirection: 'row', alignItems: 'center' }}><Image source={require('./assets/icon.png')} style={{ width: 28, height: 28, borderRadius: 6, marginRight: 10 }} /><Text style={{ color: muted, letterSpacing: 1 }}>{flow ? 'CALIBRATION' : tab === 'measure' ? 'MEASURE' : 'RESULTS'}</Text></View>
+   <Pressable accessibilityLabel="Settings" onPress={() => setSettings(true)} style={round}><Ionicons name="settings-outline" size={24} color={ink} /></Pressable>
+  </View>
+  {flow === 'review' ? <CalibrationReview take={take} onCancel={() => { setFlow(null); setTake(null); }} onRepeat={() => { setTake(null); setFlow('aim'); }} onSave={index => { const value = makeCalibration(take, index, os, Date.now()); setSession(s => ({ ...s, calibration: value })); setLive(null); setTake(null); setFlow(null); }} />
+   : tab === 'measure' || flow ? <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: '#000', margin: 12, borderRadius: 12, overflow: 'hidden', justifyContent: 'center' }}>
+     {!NativeCamera ? <Text style={{ ...text, padding: 20 }}>Install the new native build to enable high-frame-rate live capture.</Text>
+      : cameraPermission?.granted && micPermission?.granted ? <NativeCamera ref={camera} active={running || Boolean(flow)} taiUtcOffset={taiUtcSeconds} onReport={report} style={{ flex: 1 }} />
+      : <View style={{ padding: 20 }}><Text style={text}>Allow camera and microphone for live AV sync measurement.</Text><Button title="Allow access" onPress={ask} /></View>}
+     {!flow && <View pointerEvents="none" style={{ position: 'absolute', left: 12, right: 12, top: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}><SignalPill value={feedback.audio} icon="pulse-outline" /><SignalPill value={feedback.picture} icon="scan-outline" /></View>}
+     {status.configuredFps > 0 && <Text style={{ position: 'absolute', left: 14, bottom: 12, color: ink, backgroundColor: '#0009', padding: 5, borderRadius: 5 }}>{status.configuredFps.toFixed(0)} fps camera · {(status.fps || 0).toFixed(0)} fps processed</Text>}
+     {flow && <View style={{ position: 'absolute', top: 12, left: 12, right: 12, padding: 12, borderRadius: 8, backgroundColor: '#121417db' }}><Text style={text}>{flow === 'listening' ? 'Listening… Capture continues for 700 ms AFTER the sound.' : 'Aim at one visible clap or tap. Start, wait a second, then make the sound.'}</Text></View>}
+    </View>
+    {flow ? <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>{flow === 'aim' && <Button title="Start calibration" disabled={!NativeCamera || !cameraPermission?.granted || !micPermission?.granted} onPress={() => { setFlow('listening'); camera.current?.beginCalibration(); }} />}<Button title="Cancel" onPress={cancelCalibration} />{notice && <Text style={{ color: orange }}>{notice}</Text>}</View>
+     : <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: live && !calibration ? orange : ink, fontSize: 56 }}>{offsetText(live?.offset_ms)}</Text><Pressable accessibilityLabel="Clear reading" onPress={() => { setLive(null); camera.current?.resumeAnalysis(); }} style={round}><Ionicons name="close-outline" size={28} color={ink} /></Pressable></View>
+      <Text style={{ color: ink, fontSize: 20, marginTop: 4 }}>{measureSentence(live?.offset_ms)}</Text>
+      <Text style={{ color: muted, marginTop: 12 }}>Quality: {live?.quality || '—'} · Calibration: {calibration ? 'set' : 'missing (0 ms)'} · Uncertainty: unknown</Text>
+      <Text style={{ color: notice ? orange : muted, marginTop: 8, fontSize: 12 }}>{notice || (status.kind === 'reading' ? `${status.eventCount} matched events · live updates` : status.message || 'Looking for test signal…')}</Text>
+      <LatencyPanel values={latency} hint={!running ? 'Analysis paused' : age > 1600 ? 'Waiting for capture updates' : latencyHint(status.latency?.state)} clock={clockSummary(clockCheck)} onCheck={runClockCheck} checking={clockBusy} error={clockError} />
+      <View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1 }}><Button title={running ? 'Pause' : 'Live analysis'} onPress={() => setRunning(v => !v)} /></View><View style={{ flex: 1 }}><Button title="Save result" disabled={!live} onPress={save} /></View></View>
+     </View>}
+   </View> : <ScrollView contentContainerStyle={{ padding: 20 }}>{session.results.length ? session.results.map(item => <Pressable key={item.id} onPress={() => exportResult(item)} style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#2c3540' }}><Text style={{ color: item.calibrated ? ink : orange, fontSize: 22 }}>{offsetText(item.offset_ms)}</Text><Text style={{ color: muted }}>{formatResultWhen(item.at)} · {item.calibrated ? 'Calibrated' : '0 ms correction'} · tap to export</Text></Pressable>) : <Text style={{ color: muted }}>No saved results</Text>}</ScrollView>}
+  {!flow && <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#2c3540' }}>{['measure', 'results'].map(value => <Pressable key={value} onPress={() => setTab(value)} style={{ flex: 1, paddingVertical: 14, alignItems: 'center' }}><Text style={{ color: tab === value ? ink : muted, fontWeight: tab === value ? '700' : '400' }}>{value === 'measure' ? 'Measure' : 'Results'}</Text></Pressable>)}</View>}
+  {settings && <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: '#0007', justifyContent: 'flex-end' }}><View style={{ backgroundColor: '#1c2128', padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}><Text style={{ ...text, fontSize: 18 }}>Settings</Text><Text style={{ color: muted, fontSize: 12, marginTop: 12 }}>Latency uses the live QR's TAI timestamp and phone UTC. Capture and source clock accuracy are unknown. The HTTPS check detects gross clock errors and does not calibrate latency.</Text><View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}><Text style={{ color: ink, flex: 1 }}>Source TAI−UTC (seconds)</Text><TextInput accessibilityLabel="Source TAI minus UTC seconds" keyboardType="number-pad" value={taiDraft} onChangeText={value => { if (/^\d{0,3}$/.test(value)) setTaiDraft(value); }} style={{ color: ink, backgroundColor: '#121417', borderRadius: 6, padding: 8, minWidth: 48, textAlign: 'center' }} /><Pressable accessibilityRole="button" disabled={!taiDraft || Number(taiDraft) > 100} onPress={() => { setSession(previous => ({ ...previous, taiUtcSeconds: Number(taiDraft) })); setStatus(previous => ({ ...previous, latency: { state: 'waiting_for_live_qr' } })); }} style={{ padding: 8 }}><Text style={{ color: !taiDraft || Number(taiDraft) > 100 ? muted : orange }}>Apply</Text></Pressable></View><Text style={{ color: muted, fontSize: 11 }}>Time check: worldtime.timezone.io · only when requested</Text>{[['Repeat calibration', startCalibration], ['Clear saved calibration (use 0 ms)', () => { setSession(s => ({ ...s, calibration: null })); setLive(null); setSettings(false); }], ['Clear results', () => setSession(s => ({ ...s, results: [] }))], ['Close', () => setSettings(false)]].map(([label, onPress]) => <Pressable key={label} onPress={onPress} style={{ paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#2c3540' }}><Text style={text}>{label}</Text></Pressable>)}</View></View>}
+ </SafeAreaView>;
 }

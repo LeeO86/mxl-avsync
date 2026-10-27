@@ -464,3 +464,97 @@ That is seq, `video_content_vs_grain_ms`, `audio_content_vs_grain_ms`, `content_
 ## Next step
 
 Left on purpose: the AMWA suite (no Docker, and no mDNS registry on this host), a separate interlaced file mux (the plan does not ask for one), stage 4 (per-channel sequences, programme lip-sync, IS-07), the phone on a device, the LED/piezo rig, and the ST 2110 hour run.
+
+## Mac iPhone development setup (2026-10-25)
+
+Added an Expo development client and device/LAN start scripts on SDK 52, with its compatible React Native patch. Replaced the unsupported Unicode settings glyph with Ionicons. The existing Swift capture source is an unregistered scaffold: callbacks discard samples, there is no podspec/Expo module registration or C++ PhoneSession bridge, and the JS module is a report store only. A development build currently tests the UI and Expo camera/audio APIs; it does not validate synchronized native measurement. Native bridging and real-device calibration remain pending.
+
+## Recorded iPhone workflow (2026-10-25)
+
+Replaces the nonfunctional mobile placeholder: calibration had used JS timer frames and audio metering, and measurement had no capture/analysis call. The local `Avsync` Expo module now links the repository C++ detector sources through CocoaPods. AVFoundation decodes actual camera movies, preserving audio/video media PTS, applying video display orientation, and passing luma/PCM into PhoneSession. Calibration locates a sharp sound and extracts real frames around it for manual contact selection. Replay uses the actual movie. Recording, analysis, errors, result export, persistent calibration/results and OS/90-day expiry are wired into the UI.
+
+Explicit deviations from §12: a bounded 5-second calibration take and 8-second test take replace live detection/automatic stop on a transient; capture uses Expo camera movie recording and media PTS, not the specified raw host-clock capture; frame rate is observed rather than forced to at least 60 fps; rolling-shutter readout is not corrected; test event rate is currently fixed at 2/s. Manual clap/tap calibration is an approximate reference, not a validated replacement for the LED/piezo rig. Uncertainty remains unknown and no validated grade or absolute latency is shown. Android analysis remains unsupported. These limits are shown in the app/README. The prior statement that no C++ bridge or Expo registration exists is superseded by this implementation; the old raw capture scaffold remains excluded from the build.
+
+Validation: 17 JS tests; native iOS decoder test measured +34.999975 ms on a deterministic +35 ms encoded video, five matched events/150 frames, actual calibration JPEGs and waveform, and explicit failures for absent audio/markers. Real-device optical/acoustic accuracy is still unvalidated.
+
+## Native live capture and original UI (2026-10-26)
+
+User requested restoration of the original camera-first UI, continuous analysis, maximum camera FPS, post-transient calibration frames and measurement with zero correction when uncalibrated. The native Expo view now uses AVCaptureVideoDataOutput and AVCaptureAudioDataOutput in one session, with PCM16/32 conversion and shared sample timestamps. It selects the maximum supported frame-rate range, sets activeFormat and both frame durations, and reports configured versus processed FPS. C++ analysis publishes roughly once per second from bounded windows. This supersedes the movie-only measurement workflow; the file analyzer remains for debugging/tests. The use of AVCaptureAudioDataOutput rather than AVAudioEngine is an explicit implementation choice to keep both tracks in one capture-session clock.
+
+Calibration uses the same raw capture path, retaining about 750 ms before a transient and waiting for at least 700 ms of both tracks after it. It rejects takes without frames on both sides; no fixed 100-frame truncation remains. Review preserves frame stepping, sound replay and before/after counts. Missing/expired calibration means 0 ms correction; legacy movie-path calibrations are invalidated by capture-path version. The original dark preview, guide, result, tabs and settings layout is restored.
+
+A user camera recording reproduced the corner search selecting QR/text/code squares instead of four image corners and expanding corner boxes into nearby text. The locator now uses local contrast, spatial corner constellations and geometry/reference-strip ranking, without that expansion. Phone rectification uses fixed 640×360 geometry to avoid integer strip-width drift. A cached pose reduces repeated searches. The previously unrecognized, non-occluded user recording now produces three matched events; this demonstrates recognition, not independently validated offset accuracy. The separate recording containing a browser context-menu obstruction is not a valid full-picture validation case.
+
+Validation: 17 JS tests including explicit zero correction without calibration; four existing C++ locator/phone/calibration tests (33 assertions); native encoded-signal, orientation and missing-track tests, live PCM16 analysis, post-transient buffering and 240 fps frame-count regression. Native iPhone build succeeded. Physical capture accuracy/rolling-shutter validation remains open; processed FPS may be lower than the configured sensor rate and is shown separately. Android remains unsupported.
+
+## Reject inconsistent phone measurements (2026-10-26)
+
+User-reported large fluctuations were confirmed from the app's saved results: two pairs in each result, with within-result spreads of about 493 ms and 1019 ms; configured capture was 240 fps and processed capture about 222–224 fps. The saved calibration was only about 7.1 ms, so calibration magnitude cannot explain those spreads. The old cache did not retain individual live event details, so it cannot conclusively separate all optical/pairing issues from real source-path variation.
+
+A concrete acceptance bug was reproduced: parity-valid wrong event codes and repeated block flicker could become extra video events. Phone-specific tracking now requires marker phase/event-number agreement, three-frame confirmation while retaining the first frame timestamp, sequential IDs and plausible event timing. A ring trim keeps six seconds of samples while retaining sequence/pose lock, replacing periodic destructive resets. Publishing requires at least three consistent pairs with spread bounded by max(50 ms, three processed-frame intervals); otherwise the UI clears the number and asks for consistent events. This spread gate is an acceptance criterion, not a capture-accuracy claim. It deliberately withholds a number if the real source offset varies too much as well.
+
+Added a bounded cache-only diagnostic history (120 reports with individual event timestamps/IDs, reasons and raw offsets), preserved across restarts, without live camera/audio recordings. Regression tests cover three-frame parity-valid sequence corruption and flicker at 240 fps, unchanged +35 ms timing, preserved state under rolling trim, and suppression of alternating +35/+235 ms offsets. The capture path and calibration format are unchanged.
+
+## Curated test files (2026-10-26)
+
+Added `testfiles/` with eight real-renderer clips: 1080p50 H.264/AAC at 0/+100/−100 ms, 1080p25 and 1080p59.94 H.264/AAC at 0 ms, 720p50 ProRes HQ/PCM24 at 0 ms, 1080p50 H.264/PCM16 MKV at +35 ms, and 2160p50 HEVC/AAC at 0 ms. Delivery MP4s use 8-bit 4:2:0, with hvc1 for HEVC. Each has an event manifest, decoded analysis report and indexed actual stream metadata/hash. All eight final files passed at least three matched events with ≤2 ms error against their named offset. All are below 95 MiB per clip.
+
+The optional `AVSYNC_BUILD_TESTFILE_TOOL` target exposes just the existing file tools, allowing generation on this Mac without compiling Linux live-service code. The Python driver uses a ProRes/PCM reference and FFmpeg delivery encoding: direct H.264/AAC generation in the current Mac FFmpeg 8.1.1 environment reproduced about −18.7 ms actual offset from a requested 0 ms clip. That direct generator path remains a known issue; final fixtures avoid it and are independently decoded/checked. Intermediate container checks are explicitly superseded after transcode rather than falsely reported as final checks. Pixel-format and timestamp compatibility are documented in the testfiles README.
+
+
+## Phone failure-stage diagnostics (2026-10-26)
+
+The on-device cache from a failed browser test contained 120 status reports and no paired events. For 112 reports, cumulative located/valid-frame counters stayed unchanged while the UI incorrectly claimed that picture code had been found and it was listening. The cache did not contain independent video-event/audio-hit evidence, so it cannot identify the failed capture stage retrospectively or establish that Safari caused it.
+
+Diagnostic schema 2 separates recent located/decoded-frame counts, accepted buffered video events, sequence/phase/timing rejection counts, pending/locked/decoded identities, last-valid/event ages, buffered audio level/sample count, recognized chirp identities/times/correlation, and paired events. Chirp detection now also runs when no video event was accepted, making audio failure distinguishable from video failure. Status messages use current interval picture counts instead of cumulative lifetime counters. The bounded cache still stores numeric/event diagnostics only, not live audio/video recordings. Acceptance thresholds, camera FPS and calibration are unchanged. Offline regressions distinguish picture loss after earlier detection, black video with audible chirps, and valid video with silent audio. A new physical Safari/camera test is pending because the user was unavailable; do not claim this instrumentation fixes optical recognition or validates accuracy.
+
+
+## Visual recognition and optional phone latency estimates (2026-10-26)
+
+User requested gray/orange/green audio/image pills, an actual detected-picture outline and retention of latency as an estimate despite unverified phone UTC accuracy. Audio green means a valid chirp-ID/picture-event association; the four chirp shapes do not encode full timecode. Picture green requires three-frame confirmed code with a short 150 ms visual lease at event boundaries. The native four-corner outline follows actual geometry at up to 10 Hz, handles portrait aspect-fill cropping and expires on absent frames. UI feedback expires independently if native reports stall.
+
+Explicit deviation from the original phone-only-AV requirement (§12): a separate estimated-latency panel maps capture-session timestamps to phone UTC and compares them with a matching LIVE QR's TAI event schedule. It assumes configured TAI−UTC (default 37 s), extrapolates nearby identities using the true grain-grid period, and expires references within three seconds. No capture clock, FILE mode, mismatched QR or unknown per-event sweep audio time suppresses the corresponding estimate. Device/source clock accuracy, rolling-shutter/capture delay and physical accuracy remain unknown. AV calibration is differential and does not correct these per-path estimates. Negative values are retained to expose clock errors.
+
+Vision QR decoding runs separately at most once per second. A user-triggered, three-request HTTPS clock sanity check via worldtime.timezone.io reports API−phone difference bounds and RTT, with expiry/cache/jump/failure checks. This is not PTP/NTP synchronization or an independent accuracy bound; the app neither sets UTC nor silently adjusts estimates. The replacement endpoint was tested after worldtimeapi.org failed. The same native build is required for geometry, Vision and clock mapping; Metro alone only updates UI.
+
+
+## Corrected audio-timecode requirement and text coverage (2026-10-26)
+
+The user explicitly requires full send-time information in audio itself, decodable without image/QR and through a telephone/G.711 path. Four repeating chirp IDs and QR-derived audio latency are insufficient. The earlier interpretation of audio green as a picture-event association is superseded: legacy chirps remain orange; green is reserved for an independently decoded, CRC-validated audio timecode. An experimental native encoder/decoder and offline comparison now exist under `tests/audio-timecode/`; the wire format is still a candidate and is not connected to the production generator or phone app. The current QR-assisted latency panel is a legacy fallback and does not fulfill audio-only measurement.
+
+Candidate direction (proposal, not a finalized wire format): a short known chirp defines the timing anchor; an attached voice-band data burst carries source/session identity, event identity, actual audio-send TAI timestamp, video-relative send offset/time reference, version and integrity/error-correction data. Decoder completion time must not replace the stored arrival time of the chirp anchor. Telephone FSK in the V.23 frequency/rate family is a starting candidate, with a slower fragmented profile if real-phone testing requires it. G.711 A/mu-law at 8 kHz, telephone filtering, AGC, noise, resampling/drift, packet loss/PLC and speaker/microphone echo must be tested; codec-table success alone does not establish call-path compatibility. Audio-only latency still has separate receiver-clock uncertainty.
+
+The reported pixelated generator text was traced to draw_text discarding Blend2D's A8 antialiased mask via a coverage threshold, then writing fully opaque 10-bit pixels. It now composites all nonzero coverage into the existing 10-bit luma. Layout/font sizes and machine-readable marker/strip/QR rendering are unchanged. New text tests require intermediate edge shades, opaque strokes, background preservation, both light/dark text and safe clipping/padding. Result-picture contrast tests now check strong foreground ink rather than requiring antialiased fringes to have full contrast.
+
+
+## Audio-timecode candidate comparison (2026-10-26)
+
+User authorized tests of both rates and prefers **1200 baud**. `tests/audio-timecode/` now provides a dependency-free C++20 encoder/blind decoder, independent wire-vector checks and a Python/FFmpeg driver. A 30-ms chirp retains its centre as the timing anchor; a 10-ms guard precedes a 476-symbol FSK telegram at 1300/2100 Hz. The 25-byte candidate carries version/flags, source/session ID, 32-bit event sequence, 64-bit audio-send TAI ns, signed source audio/video offset ns and CRC-32, with terminated K7/rate-1/2 coding, interleaving and soft Viterbi decoding. This is a custom candidate, not a conformant V.23 modem. Duration is 436.667 ms at 1200 baud and 833.333 ms at 600 baud; the latter was compared at 1 event/s, not silently overlapped at 2/s. Fragmentation is not implemented.
+
+After a separate exploratory run, frozen parameters were tested with 128 packets/condition and a new seed. All 25 non-extreme-noise conditions decoded every complete packet in 1200/600 1-Hz streams and the additional 1200 2-Hz stream. This includes actual 8-kHz G.711 A/µ-law, telephone filtering, AGC, Opus, resampling/drift, noise through 6 dB, echo and 40-ms data erasures. At 0 dB, 1200 1-Hz decoded 65/128 and 1200 2-Hz 62/128, versus 600 1-Hz 128/128; at −6 dB both rates failed. No wrong payload or negative-control timecode was accepted. All full 64-bit timestamps and identities were checked without supplying image/manifest information to the decoder. Full row counts, sample hashes and limitations are in `tests/audio-timecode/results-2026-10-26.json` and its results note. The actual call/acoustic path, streaming implementation and live generator/iPhone integration remain open; this benchmark does not establish physical clock/capture accuracy.
+
+Live integration must also handle telegram overlap when source offsets change, and replace the legacy ±2-period association assumption with full identity/timestamp matching and explicit buffering limits. The offline test checks source offset fields as data; it does not prove video pairing or variable-offset scheduling.
+
+
+## Audio-onset reference and event-rate selection (2026-10-27)
+
+User requests the white visual flash to align with the chirp start, and a choice
+of 1 or 2 chirps/s. The audio-timecode experiment now defaults to an onset
+reference, explicitly signalled by CRC-protected header 0x23; historical 0x21
+packets retain centre semantics. Matched-filter synthesis/detection remains
+centre-based internally; reported arrival and transmitted timestamp refer to
+the same declared point. This is an experimental deviation from specification
+§4/§6's legacy centre reference, not a silent reinterpretation of old files.
+The probe accepts --event-rate 1|2 and validates contradictory periods/overlap.
+1200 baud supports both; the full 600-baud packet supports only 1/s.
+
+Production generator AVSYNC_EVENT_RATE already supports these rates. Live
+generator/phone integration of the new audio format, a white pulse on each event
+instead of the legacy alternating marker, and compact 17/15-byte encoding remain
+pending. No released signal or phone capture behaviour is changed here.
+
+Validation: 128-packet start-reference channel matrix (93 rows, no hard-gate
+violations or wrong payloads); 8-packet historical-centre matrix; dedicated
+1/2-Hz A/µ-law +35-ms timing/reference/mixed-stream/invalid-option regression.
+See tests/audio-timecode/RESULTS-2026-10-27.md for stress failures and remaining
+physical/video/live-integration limits.
