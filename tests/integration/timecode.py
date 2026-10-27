@@ -22,8 +22,10 @@ def main():
                ('legacy',2,'1080p50',35,5)]
         for modem,rate,format,offset,duration in cases:
             stem=f'{modem}-{rate}-{format}-{offset}';movie=folder/(stem+'.mkv')
+            # Matroska intentionally uses a 1-ms container time base. Keep the
+            # CLI's strict default; explicitly opt into this encoded variant.
             run(binary,'generate','--audio-timecode',modem,'--event-rate',rate,'--format',format,
-                '--duration',duration,'--offset',offset,'--container','mkv',
+                '--duration',duration,'--offset',offset,'--container','mkv','--allow-container-shift',
                 '--video-codec','h264','--audio-codec','pcm16','--out',movie)
             def analyze(path,name):
                 report=folder/(name+'.json')

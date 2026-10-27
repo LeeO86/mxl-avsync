@@ -608,3 +608,12 @@ suite exposed and verified a shared compatible Vision QR-reader fallback for
 camera and file analysis. Results and hardware limits are recorded in
 tests/audio-timecode/RESULTS-2026-10-27-COMPACT.md. Linux/live/NMOS testing is
 delegated to the user's peer host on the pushed branch.
+
+
+## Linux integration feedback: explicit Matroska variant (2026-10-27)
+
+The full CLI correctly rejects Matroska's 1-ms timestamp scale by default
+(specification §9.3), while the portable testfile wrapper opts into container
+shifts. The timecode integration test and example now explicitly request
+`--allow-container-shift` for their intentional MKV/H.264 variant. No container
+checks, codec gates, analysis tolerances or strict defaults were changed.

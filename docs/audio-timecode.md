@@ -20,7 +20,7 @@ File example:
 
 ```sh
 build/mxl-avsync generate --format 1080p50 --duration 10 --event-rate 2 \
-  --audio-timecode 1200 --offset 0 --container matroska \
+  --audio-timecode 1200 --offset 0 --container matroska --allow-container-shift \
   --video-codec h264 --audio-codec pcm16 --out /tmp/signal.mkv
 build/mxl-avsync analyze /tmp/signal.mkv --json /tmp/result.json
 ```
