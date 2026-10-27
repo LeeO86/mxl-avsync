@@ -6,7 +6,12 @@
 int main(int argc,char**argv){
  if(argc<2)return 78;
  std::map<std::string,std::string>args;
- for(int i=2;i+1<argc;i+=2)args[argv[i]]=argv[i+1];
+ for(int i=2;i<argc;++i){
+  const std::string key=argv[i];
+  if(key=="--allow-container-shift"||key=="--locate")args[key]="true";
+  else if(i+1<argc)args[key]=argv[++i];
+  else return 78;
+ }
  auto value=[&](std::string key,std::string fallback){return args.count(key)?args[key]:fallback;};
  std::string error;int result=78;
  if(std::string(argv[1])=="generate"){
@@ -17,7 +22,7 @@ int main(int argc,char**argv){
   r.test_id=value("--test-id","TEST-FILES");r.title="AV-SYNC TEST SIGNAL";r.source=r.test_id;r.subtitle="Expected audio offset: "+value("--offset","0")+" ms";
   r.allow_container_shift=true;result=avsync::run_generate(r,error);
  }else if(std::string(argv[1])=="analyze"){
-  avsync::AnalyzeRequest r;r.path=value("--input","");r.manifest=value("--manifest","");r.json_out=value("--json","");result=avsync::run_analyze(r,error);
+  avsync::AnalyzeRequest r;r.path=value("--input","");r.manifest=value("--manifest","");r.json_out=value("--json","");r.locate=args.count("--locate");result=avsync::run_analyze(r,error);
  }
  if(result)std::cerr<<error<<"\n";
  return result;
