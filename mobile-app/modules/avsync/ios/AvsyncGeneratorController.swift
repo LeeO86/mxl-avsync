@@ -65,9 +65,13 @@ final class AvsyncGeneratorController: UIViewController {
       guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
             let value = AVAudioSession.RouteChangeReason(rawValue: raw),
             value != .categoryChange, value != .override else { return }
+      guard self?.plan != nil else { return }
       self?.stop("Audio output changed. Tap Start to re-plan timing.")
     })
-    notices.append(NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in self?.stop("Audio configuration changed. Tap Start to restart.") })
+    notices.append(NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+      guard self?.plan != nil else { return }
+      self?.stop("Audio configuration changed. Tap Start to restart.")
+    })
   }
   override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); start() }
   override func viewDidLayoutSubviews() {
@@ -147,6 +151,7 @@ final class AvsyncGeneratorController: UIViewController {
   }
   @objc private func tick(_ display: CADisplayLink) {
     guard link != nil else { return }
+    guard engine.isRunning else { stop("Audio engine stopped. Tap Start to restart."); return }
     if plan == nil {
       do { try beginPlan(target: display.targetTimestamp) } catch { stop(error.localizedDescription); return }
     }
@@ -190,6 +195,7 @@ final class AvsyncGeneratorController: UIViewController {
     status.text = message; toggle.setTitle("Start signal", for: .normal)
   }
   @objc private func toggleSignal() { if link == nil { start() } else { stop("Signal stopped. Tap Start for a fresh source session.") } }
+  func shutdown() { closeScreen() }
   @objc private func closeScreen() {
     guard !finishing else { return }; finishing = true
     let result: [String: Any] = ["source": sourceID, "eventRate": rate, "skippedDisplayFrames": lateFrames, "audioPresentationLatencyMs": outputLatency*1000, "estimated": true]

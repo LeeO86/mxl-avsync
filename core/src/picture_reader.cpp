@@ -7,6 +7,7 @@ void PictureReader::reset() { pose_ = {}; last_search_ms_ = -1e30; width_ = heig
 LocatedMarker PictureReader::read(const uint16_t* pixels, int width, int height, int stride, double time_ms) {
     if (width != width_ || height != height_) { reset(); width_ = width; height_ = height; }
     LocatedMarker out;
+    if (!pixels || width < 160 || height < 90 || stride < width || !std::isfinite(time_ms)) return out;
     const auto valid = [](const LocatedMarker& p) {
         return p.located && p.reading.geometry_ok && p.reading.strip_ok && p.reading.state != MarkerReading::State::Invalid;
     };

@@ -409,6 +409,7 @@ TEST_CASE("large qr stays decodable and the sync square moves")
 #include "avsync/picture_reader.hpp"
 TEST_CASE("live picture reader keeps direct path and reacquires a moving camera tile after loss") {
     PictureReader reader;
+    CHECK_FALSE(reader.read(nullptr,16,16,16,0).located);
     Yuv422p10 picture;picture.resize(1280,720);
     PictureInfo info; info.title="TEST SIGNAL";
     render_picture(picture,info,5,0,30,true);

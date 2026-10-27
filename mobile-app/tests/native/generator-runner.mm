@@ -23,7 +23,7 @@ int main() { @autoreleasepool {
             assert(CVPixelBufferCreate(kCFAllocatorDefault,width,height,kCVPixelFormatType_32BGRA,(__bridge CFDictionaryRef)@{(id)kCVPixelBufferIOSurfacePropertiesKey:@{}},&pixel)==kCVReturnSuccess);
             CVPixelBufferLockBaseAddress(pixel,0);
             CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
-            CGContextRef context=CGBitmapContextCreate(CVPixelBufferGetBaseAddress(pixel),width,height,8,CVPixelBufferGetBytesPerRow(pixel),space,kCGBitmapByteOrder32Little|kCGImageAlphaPremultipliedFirst);
+            CGContextRef context=CGBitmapContextCreate(CVPixelBufferGetBaseAddress(pixel),width,height,8,CVPixelBufferGetBytesPerRow(pixel),space,CGBitmapInfo(kCGBitmapByteOrder32Little)|CGBitmapInfo(kCGImageAlphaPremultipliedFirst));
             CGContextDrawImage(context,CGRectMake(0,0,width,height),image.CGImage);
             std::vector<uint16_t> luma(width*height);
             auto update_luma=[&] {

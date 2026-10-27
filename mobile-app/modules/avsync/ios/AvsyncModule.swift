@@ -1,6 +1,7 @@
 import ExpoModulesCore
 
 public class AvsyncModule: Module {
+  private weak var generator: AvsyncGeneratorController?
   public func definition() -> ModuleDefinition {
     Name("Avsync")
     Function("supportsLiveCapture") { true }
@@ -12,6 +13,7 @@ public class AvsyncModule: Module {
         promise.reject("GENERATOR_UNAVAILABLE", "Close the current screen and use 1 or 2 events/s."); return
       }
       let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc)
+      self.generator = controller
       controller.onClose = { result in promise.resolve(result) }
       parent.present(controller, animated: true)
     }.runOnQueue(.main)
@@ -21,6 +23,10 @@ public class AvsyncModule: Module {
       Prop("taiUtcOffset") { (view: AvsyncCameraView, seconds: Double) in view.setTaiUtcOffset(seconds) }
       AsyncFunction("beginCalibration") { (view: AvsyncCameraView) in view.beginCalibration() }
       AsyncFunction("resumeAnalysis") { (view: AvsyncCameraView) in view.resumeAnalysis() }
+    }
+    OnDestroy {
+      let controller = self.generator
+      DispatchQueue.main.async { controller?.shutdown() }
     }
     Function("loadState") { () -> String? in
       UserDefaults.standard.string(forKey: "avsync.session.v1")

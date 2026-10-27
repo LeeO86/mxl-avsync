@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "ios:device": "expo run:ios --device",
     "android": "expo run:android",
-    "test:ios-native": "python3 tests/native/run.py"
+    "test:ios-native": "python3 tests/native/run.py",
+    "test:ios-generator": "python3 tests/native/generator.py"
   },
   "dependencies": {
     "@expo/vector-icons": "~14.0.4",
