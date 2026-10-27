@@ -72,6 +72,9 @@ client after updating this branch (`npm install`, `npx pod-install`, then
 cmake --build build --target avsync-core-tests avsync-picture-tests
 ctest --test-dir build --output-on-failure
 node --test mobile-app/src/*.test.mjs tests/web/*.test.cjs
+# Linux with MXL: synthetic 720p60 source in a different camera raster
+cmake --build build --target mxl-avsync avsync-phone-fixture
+python3 tests/integration/phone_generator.py --binary build/mxl-avsync
 # macOS/Xcode, booted arm64 iOS simulator:
 python3 mobile-app/tests/native/generator.py
 ```
@@ -82,6 +85,17 @@ receiver clocks. Picture tests cover direct input, a moving scaled tile,
 picture loss and reacquisition. The native test checks actual UIKit QR images,
 every marker/strip phase at both rates and the actual audio payload/waveform.
 Software tests do not prove physical emission/capture timing or a real call path.
+
+The Linux live regression runs 1/2-Hz phone plans in a 1080p50 camera flow,
+checks the planned +35-ms AV difference, and blanks the picture for three
+seconds while compact audio continues. It requires estimated source/latency
+labels and verifies that no stale video event survives loss, followed by
+successful reacquisition. A received camera frame bounds timing resolution;
+this is not a physical-camera accuracy test. The fixture target exists only
+when MXL is found. The harness uses its own random domain/flow IDs, temporary
+tmpfs media, free loopback test port and process cleanup; it does not use Docker
+or existing NMOS routes. Pass `--out` with a fresh directory to retain logs and
+JSON evidence. Set `MXL_LIB_DIR`/`VCPKG_LIB_DIR` if required by the local loader.
 
 Apple API references: [display targetTimestamp](https://developer.apple.com/documentation/quartzcore/cadisplaylink/targettimestamp),
 [audio buffer scheduling](https://developer.apple.com/documentation/avfaudio/avaudioplayernode/schedulebuffer(_:at:options:completionhandler:)),

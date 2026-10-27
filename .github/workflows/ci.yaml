@@ -124,6 +124,7 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./tests/integration/live.sh
+          python3 tests/integration/phone_generator.py
           ./tests/integration/no-signal.sh
           ./tests/integration/settings.sh
           ./tests/integration/ptp.sh
