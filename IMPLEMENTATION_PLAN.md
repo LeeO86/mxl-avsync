@@ -724,3 +724,19 @@ tried, scaled to the search resolution. Existing geometry/parity/state gates
 are unchanged, and an initially valid strip identity must be preserved.
 A rendered phone-QR regression at 1920x1080 and 3840x2160 covers initial/cached/search reads and loss.
 The normal direct path and existing valid poses retain their fast path.
+
+## Reproducible native phone camera regression (2026-10-27)
+
+The independent Linux validation publisher/harness is now versioned as
+`tests/tools/phone_fixture.cpp` and `tests/integration/phone_generator.py`.
+CMake builds `avsync-phone-fixture` only with MXL. The fixture uses the shared
+PhoneGeneratorPlan and renderer, current TAI, a 720p60 source strip in a
+960x540 tile inside 1080p50, compact estimated-source audio, +35-ms planned AV
+and a three-second picture loss with continuous audio. The harness verifies
+1/2 Hz, correct protected source identity, explicit estimated latency and
+loss/reacquisition, including rejection of invalid/stale video observations.
+Random IDs, separate temporary domains, a free port and finally-based cleanup
+keep existing routes/services untouched. It preserves the validated camera-
+frame timing tolerance and gates; physical phone/camera accuracy is not inferred.
+The existing Linux/MXL live CI job invokes this regression after the normal
+live test; portable builds do not acquire an MXL fixture dependency.
