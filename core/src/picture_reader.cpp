@@ -42,6 +42,33 @@ LocatedMarker PictureReader::read(const uint16_t* pixels, int width, int height,
         if (next.found) {
             auto fresh = read_located_marker_at_pose(pixels,width,height,stride,next);
             if (valid(fresh)) { pose_=next; return fresh; }
+            // The bounded search quantizes fiducial edges. Correct a small
+            // border bias on original pixels before rejecting the pose; keep
+            // the same geometry, parity and marker validity requirements.
+            const int radius = std::min(8, std::max(1, int(std::ceil(2.0 / scale))));
+            for (int distance = 1; distance <= radius; ++distance) {
+                for (int direction : {1, -1}) {
+                    const double du = direction * distance / next.width;
+                    const double dv = direction * distance / next.height;
+                    auto refined = next;
+                    for (int corner = 0; corner < 4; ++corner) {
+                        const double u = (corner == 1 || corner == 2) ? 1 - du : du;
+                        const double v = corner >= 2 ? 1 - dv : dv;
+                        const double weights[4] = {(1-u)*(1-v), u*(1-v), u*v, (1-u)*v};
+                        refined.corner_x[corner] = refined.corner_y[corner] = 0;
+                        for (int source = 0; source < 4; ++source) {
+                            refined.corner_x[corner] += weights[source] * next.corner_x[source];
+                            refined.corner_y[corner] += weights[source] * next.corner_y[source];
+                        }
+                    }
+                    refined.origin_x = refined.corner_x[0]; refined.origin_y = refined.corner_y[0];
+                    refined.width = ((refined.corner_x[1]-refined.corner_x[0])+(refined.corner_x[2]-refined.corner_x[3]))/2;
+                    refined.height = ((refined.corner_y[3]-refined.corner_y[0])+(refined.corner_y[2]-refined.corner_y[1]))/2;
+                    auto candidate = read_located_marker_at_pose(pixels,width,height,stride,refined);
+                    if (fresh.reading.strip_ok && candidate.reading.seq_low24 != fresh.reading.seq_low24) continue;
+                    if (valid(candidate)) { pose_=refined; return candidate; }
+                }
+            }
         }
     }
     if (cached_valid) return out;

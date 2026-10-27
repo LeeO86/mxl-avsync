@@ -293,7 +293,7 @@ Output:
 ```
 [doctest] doctest version is "2.4.11"
 [doctest] run with "--help" for options
-===============================================================================
+========================================================================
 [doctest] test cases:  2 |  2 passed | 0 failed | 0 skipped
 [doctest] assertions: 31 | 31 passed | 0 failed |
 [doctest] Status: SUCCESS!
@@ -711,3 +711,16 @@ backgrounding stops output until explicitly restarted. It exposed a delayed
 dismissal-completion callback that left JS busy; cleanup now resolves before
 the animation ends, verified by a second start. Physical output/capture timing
 and a new physical-device installation remain unverified.
+
+## Linux optical fixture feedback (2026-10-27)
+
+A real native MXL fixture carries PhoneGeneratorPlan's 720p60 source as a
+960x540 tile in a 1920x1080/50 camera raster. Its QR, strip and marker were
+readable, but the 960-pixel search quantized outer edges and left a few
+pixels of margin; strict canonical geometry rejected it. PictureReader now
+tries bounded local quad insets/outsets on original pixels only after the
+initial pose fails. At most eight original-pixel steps per direction are
+tried, scaled to the search resolution. Existing geometry/parity/state gates
+are unchanged, and an initially valid strip identity must be preserved.
+A rendered phone-QR regression at 1920x1080 and 3840x2160 covers initial/cached/search reads and loss.
+The normal direct path and existing valid poses retain their fast path.
