@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
   s.frameworks = 'AVFoundation', 'UIKit', 'CoreMedia', 'CoreVideo', 'CoreGraphics', 'CoreText', 'Vision', 'PhotosUI'
-  s.resource_bundles = { 'AvsyncResources' => ['../../../../third_party/dejavu/DejaVuSans.ttf', '../../../../third_party/dejavu/LICENSE', '../../../../web/icon.png'] }
+  s.resource_bundles = { 'AvsyncResources' => ['Resources/*'] }
   s.source_files = '*.{h,mm,cpp,swift}'
   s.exclude_files = 'AvsyncCapture.swift'
   s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h', 'AVSyncQRCodeReader.h', 'AVSyncGenerator.h'

@@ -14,8 +14,8 @@ sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-pat
 with tempfile.TemporaryDirectory(prefix='avsync-phone-generator-') as directory:
     binary=Path(directory)/'generator'
     resources=Path(directory)/'AvsyncResources.bundle';resources.mkdir()
-    shutil.copy(ROOT/'third_party/dejavu/DejaVuSans.ttf',resources/'DejaVuSans.ttf')
-    shutil.copy(ROOT/'web/icon.png',resources/'icon.png')
+    shutil.copy(module/'Resources/DejaVuSans.ttf',resources/'DejaVuSans.ttf')
+    shutil.copy(module/'Resources/icon.png',resources/'icon.png')
     (resources/'Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'io.leeo86.avsync.resources','CFBundlePackageType':'BNDL'}))
     subprocess.run(['xcrun','--sdk','iphonesimulator','clang++','-std=c++20','-O2','-fobjc-arc','-target','arm64-apple-ios15.1-simulator','-isysroot',sdk,'-I'+str(module),'-I'+str(ROOT/'core/include'),'-I'+str(ROOT/'third_party/pocketfft'),'-I'+str(ROOT/'third_party/nayuki'),str(Path(__file__).with_name('generator-runner.mm')),str(module/'AVSyncGenerator.mm'),str(module/'Mobile_text.mm'),str(module/'Mobile_picture.cpp'),str(module/'AVSyncQRCodeReader.mm'),*[str(p) for p in sorted(module.glob('Core_*.cpp'))],*[a for f in ['Foundation','UIKit','AVFoundation','CoreMedia','CoreVideo','CoreGraphics','CoreText','Vision'] for a in ['-framework',f]],'-o',str(binary)],check=True)
     subprocess.run(['xcrun','simctl','spawn',device,str(binary)],check=True)
