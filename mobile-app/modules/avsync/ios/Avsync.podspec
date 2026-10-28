@@ -11,7 +11,8 @@ Pod::Spec.new do |s|
   s.swift_version = '5.0'
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'AVFoundation', 'UIKit', 'CoreMedia', 'CoreVideo', 'CoreGraphics', 'Vision'
+  s.frameworks = 'AVFoundation', 'UIKit', 'CoreMedia', 'CoreVideo', 'CoreGraphics', 'CoreText', 'Vision', 'PhotosUI'
+  s.resource_bundles = { 'AvsyncResources' => ['../../../../third_party/dejavu/DejaVuSans.ttf', '../../../../third_party/dejavu/LICENSE', '../../../../web/icon.png'] }
   s.source_files = '*.{h,mm,cpp,swift}'
   s.exclude_files = 'AvsyncCapture.swift'
   s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h', 'AVSyncQRCodeReader.h', 'AVSyncGenerator.h'
@@ -19,6 +20,6 @@ Pod::Spec.new do |s|
     'DEFINES_MODULE' => 'YES',
     'GCC_OPTIMIZATION_LEVEL' => '2',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',
-    'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_TARGET_SRCROOT)/../../../../core/include" "$(PODS_TARGET_SRCROOT)/../../../../third_party/pocketfft"'
+    'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_TARGET_SRCROOT)/../../../../core/include" "$(PODS_TARGET_SRCROOT)/../../../../third_party/pocketfft" "$(PODS_TARGET_SRCROOT)/../../../../third_party/nayuki"'
   }
 end

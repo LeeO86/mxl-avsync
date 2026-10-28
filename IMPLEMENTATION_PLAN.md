@@ -784,3 +784,25 @@ match, iPhoneOS 26.2 / Xcode 26.2, minimum iOS 15.1, embedded main.jsbundle,
 compiled native analyzer/generator and privacy manifests are present. No Metro
 connection is required for this Release artifact. Successful submission alone
 does not establish Apple's final TestFlight processing/installation state.
+
+
+## Mobile/server generator appearance parity (2026-10-28)
+
+User reports the first phone source rendered only a grayscale subset and asks
+for the server pattern with bars/visual sync plus editable name/subtitle/image.
+Rendering is now shared in generator/picture_render.cpp, separated from ZXing
+QR decoding in picture.cpp. Both targets use the same EG1 bars, fiducials,
+marker, strip, QR, source-ident block and sync-scale layout. iOS bundles the
+same DejaVu font and app mark, using CoreText A8 text coverage instead of
+linking desktop Blend2D/FFmpeg/ZXing into the phone. Sync math moves into a
+portable source; native CALayers animate the common square and timing strip
+without rewriting static imagery or using JS for timing. The server's default
+render is unchanged; only native static plates suppress the moving square.
+
+Generate has persisted name/subtitle and a system PHPicker image selection.
+Only the selected image is copied to private Application Support and bounded
+to 512 px; stable image UUIDs survive container-path changes. State replacement
+removes only the previous app-owned copy; the Photos original is untouched.
+Invalid IDs/remote paths cannot be passed to the renderer. Source labels/images
+do not alter codec/source/event identity or capture/output calibration. Existing
+2-argument native generate remains supported; new clients use generateStyled.

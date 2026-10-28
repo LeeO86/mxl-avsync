@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, Text, TextInput, View } from 'react-native';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { requireNativeViewManager } from 'expo-modules-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import native from './modules/avsync';
+import { generatorOptions } from './src/generator.mjs';
 import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
 import { checkClock, clockSummary } from './src/clock.mjs';
 import { offsetText, measureSentence, formatResultWhen } from './src/measure.mjs';
@@ -29,15 +30,24 @@ function LatencyPanel({ values, hint, clock, onCheck, checking, error }) {
   <Text style={{ color: error ? orange : muted, fontSize: 10, marginTop: 4 }}>{error || clock}</Text>
  </View>;
 }
-function GeneratorPanel({ rate, onRate, onStart, busy, clock, checking, clockError, onCheck, notice }) {
- return <ScrollView contentContainerStyle={{ padding: 20 }}>
+function GeneratorPanel({ rate, onRate, onStart, busy, clock, checking, clockError, onCheck, notice, session, onChange, image, picking, onPickImage }) {
+ return <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20 }}>
   <View style={{ padding: 20, backgroundColor: '#1c2128', borderRadius: 16 }}>
    <Ionicons name="phone-landscape-outline" size={52} color={orange} />
    <Text style={{ ...text, fontSize: 24, marginTop: 14 }}>Generate a test signal</Text>
    <Text style={{ color: muted, lineHeight: 22, marginTop: 10 }}>Show the full picture to an external camera and keep this phone's speaker audible. Route that camera's picture and sound to the analyzer.</Text>
    <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>{[1, 2].map(value => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: rate === value }} onPress={() => onRate(value)} style={{ flex: 1, padding: 13, borderRadius: 10, borderWidth: 1, borderColor: rate === value ? orange : '#394454', alignItems: 'center' }}><Text style={{ color: rate === value ? orange : ink }}>{value} chirp{value === 1 ? '' : 's'} / second</Text></Pressable>)}</View>
    <Text style={{ color: muted, marginTop: 12, fontSize: 12 }}>1200 baud · full audio timecode · white flash at chirp onset</Text>
-   <Button title={busy ? 'Signal is open…' : 'Start fullscreen signal'} disabled={busy || !native?.supportsGenerator} onPress={onStart} />
+   <Text style={{ color: muted, marginTop: 18, marginBottom: 6 }}>Name</Text>
+   <TextInput accessibilityLabel="Generator name" editable={!busy} maxLength={64} placeholder="iPhone" placeholderTextColor={muted} value={session.generatorName || ''} onChangeText={value => onChange('generatorName', value)} style={{ ...text, backgroundColor: '#121417', padding: 12, borderRadius: 8 }} />
+   <Text style={{ color: muted, marginTop: 12, marginBottom: 6 }}>Subtitle</Text>
+   <TextInput accessibilityLabel="Generator subtitle" editable={!busy} maxLength={128} placeholder="Camera, location or signal path" placeholderTextColor={muted} value={session.generatorSubtitle || ''} onChangeText={value => onChange('generatorSubtitle', value)} style={{ ...text, backgroundColor: '#121417', padding: 12, borderRadius: 8 }} />
+   {image && <Image accessibilityLabel="Generator image preview" source={{ uri: image.uri }} resizeMode="contain" style={{ width: 72, height: 72, marginTop: 12, borderRadius: 8, backgroundColor: '#121417' }} />}
+   <Button title={picking ? 'Importing image…' : image ? 'Change image' : 'Choose image'} disabled={busy || picking || !native?.pickGeneratorImage} onPress={onPickImage} />
+   {session.generatorImageId && <Button title="Remove image" disabled={busy || picking} onPress={() => onChange('generatorImageId', '')} />}
+   <Text style={{ color: muted, marginTop: 8, fontSize: 12 }}>Name, subtitle and image stay on this phone. Keep all four markers visible when filming.</Text>
+   {!native?.generateStyled && <Text style={{ color: orange, marginTop: 8 }}>Install the updated native build for color bars, sync scale and custom labels.</Text>}
+   <Button title={busy ? 'Signal is open…' : 'Start fullscreen signal'} disabled={busy || picking || !native?.supportsGenerator} onPress={onStart} />
    {!native?.supportsGenerator && <Text style={{ color: orange, marginTop: 10 }}>Install the updated native development build. Expo Go cannot generate this signal.</Text>}
   </View>
   <View style={{ marginTop: 20, padding: 16, borderRadius: 12, backgroundColor: '#1c2128' }}>
@@ -82,7 +92,8 @@ function CalibrationReview({ take, onSave, onRepeat, onCancel }) {
 export default function App() {
  const [session, setSession] = useState(initialState);
  const [live, setLive] = useState(null), [tab, setTab] = useState('measure');
- const [generating, setGenerating] = useState(false);
+ const [generating, setGenerating] = useState(false), [pickingImage, setPickingImage] = useState(false);
+ const generatorImage = useMemo(() => session.generatorImageId && native?.generatorImageInfo ? native.generatorImageInfo(session.generatorImageId) : null, [session.generatorImageId]);
  const [settings, setSettings] = useState(false), [flow, setFlow] = useState(null), [take, setTake] = useState(null);
  const [running, setRunning] = useState(true), [status, setStatus] = useState({ message: 'Looking for test signal…' }), [notice, setNotice] = useState(null);
  const [cameraPermission, requestCamera] = useCameraPermissions(), [micPermission, requestMic] = useMicrophonePermissions();
@@ -116,10 +127,17 @@ export default function App() {
  const startGenerator = async () => {
   setGenerating(true); setNotice(null);
   try {
-   const result = await native.generate(session.generatorRate === 1 ? 1 : 2, taiUtcSeconds);
+   const rate = session.generatorRate === 1 ? 1 : 2;
+   const result = native.generateStyled ? await native.generateStyled(rate, taiUtcSeconds, generatorOptions(session)) : await native.generate(rate, taiUtcSeconds);
    setNotice(`Signal stopped · ${result.skippedDisplayFrames} skipped display frames · output timing estimated`);
   } catch (error) { setNotice(error.message); }
   finally { setGenerating(false); }
+ };
+ const pickGeneratorImage = async () => {
+  setPickingImage(true); setNotice(null);
+  try { const image = await native.pickGeneratorImage(); if (image) setSession(s => ({ ...s, generatorImageId: image.id })); }
+  catch (error) { setNotice(error.message); }
+  finally { setPickingImage(false); }
  };
  const startCalibration = () => { setSettings(false); setRunning(true); setFlow('aim'); setNotice(null); };
  return <SafeAreaView style={{ flex: 1, backgroundColor: bg }}>
@@ -147,7 +165,7 @@ export default function App() {
       <LatencyPanel values={latency} hint={!running ? 'Analysis paused' : age > 1600 ? 'Waiting for capture updates' : latencyHint(status.latency?.state)} clock={clockSummary(clockCheck)} onCheck={runClockCheck} checking={clockBusy} error={clockError} />
       <View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1 }}><Button title={running ? 'Pause' : 'Live analysis'} onPress={() => setRunning(v => !v)} /></View><View style={{ flex: 1 }}><Button title="Save result" disabled={!live} onPress={save} /></View></View>
      </View>}
-   </View> : tab === 'generator' ? <GeneratorPanel rate={session.generatorRate === 1 ? 1 : 2} onRate={value => setSession(s => ({ ...s, generatorRate: value }))} onStart={startGenerator} busy={generating} clock={clockSummary(clockCheck)} checking={clockBusy} clockError={clockError} onCheck={runClockCheck} notice={notice} /> : <ScrollView contentContainerStyle={{ padding: 20 }}>{session.results.length ? session.results.map(item => <Pressable key={item.id} onPress={() => exportResult(item)} style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#2c3540' }}><Text style={{ color: item.calibrated ? ink : orange, fontSize: 22 }}>{offsetText(item.offset_ms)}</Text><Text style={{ color: muted }}>{formatResultWhen(item.at)} · {item.calibrated ? 'Calibrated' : '0 ms correction'} · tap to export</Text></Pressable>) : <Text style={{ color: muted }}>No saved results</Text>}</ScrollView>}
+   </View> : tab === 'generator' ? <GeneratorPanel session={session} onChange={(key, value) => setSession(s => ({ ...s, [key]: value }))} image={generatorImage} picking={pickingImage} onPickImage={pickGeneratorImage} rate={session.generatorRate === 1 ? 1 : 2} onRate={value => setSession(s => ({ ...s, generatorRate: value }))} onStart={startGenerator} busy={generating} clock={clockSummary(clockCheck)} checking={clockBusy} clockError={clockError} onCheck={runClockCheck} notice={notice} /> : <ScrollView contentContainerStyle={{ padding: 20 }}>{session.results.length ? session.results.map(item => <Pressable key={item.id} onPress={() => exportResult(item)} style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#2c3540' }}><Text style={{ color: item.calibrated ? ink : orange, fontSize: 22 }}>{offsetText(item.offset_ms)}</Text><Text style={{ color: muted }}>{formatResultWhen(item.at)} · {item.calibrated ? 'Calibrated' : '0 ms correction'} · tap to export</Text></Pressable>) : <Text style={{ color: muted }}>No saved results</Text>}</ScrollView>}
   {!flow && <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#2c3540' }}>{['measure', 'generator', 'results'].map(value => <Pressable key={value} onPress={() => { setTab(value); setNotice(null); }} style={{ flex: 1, paddingVertical: 14, alignItems: 'center' }}><Text style={{ color: tab === value ? ink : muted, fontWeight: tab === value ? '700' : '400' }}>{value === 'measure' ? 'Measure' : value === 'generator' ? 'Generate' : 'Results'}</Text></Pressable>)}</View>}
   {settings && <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: '#0007', justifyContent: 'flex-end' }}><View style={{ backgroundColor: '#1c2128', padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}><Text style={{ ...text, fontSize: 18 }}>Settings</Text><Text style={{ color: muted, fontSize: 12, marginTop: 12 }}>Latency uses the live QR's TAI timestamp and phone UTC. Capture and source clock accuracy are unknown. The HTTPS check detects gross clock errors and does not calibrate latency.</Text><View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}><Text style={{ color: ink, flex: 1 }}>Source TAI−UTC (seconds)</Text><TextInput accessibilityLabel="Source TAI minus UTC seconds" keyboardType="number-pad" value={taiDraft} onChangeText={value => { if (/^\d{0,3}$/.test(value)) setTaiDraft(value); }} style={{ color: ink, backgroundColor: '#121417', borderRadius: 6, padding: 8, minWidth: 48, textAlign: 'center' }} /><Pressable accessibilityRole="button" disabled={!taiDraft || Number(taiDraft) > 100} onPress={() => { setSession(previous => ({ ...previous, taiUtcSeconds: Number(taiDraft) })); setStatus(previous => ({ ...previous, latency: { state: 'waiting_for_live_qr' } })); }} style={{ padding: 8 }}><Text style={{ color: !taiDraft || Number(taiDraft) > 100 ? muted : orange }}>Apply</Text></Pressable></View><Text style={{ color: muted, fontSize: 11 }}>Time check: worldtime.timezone.io · only when requested</Text>{[['Repeat calibration', startCalibration], ['Clear saved calibration (use 0 ms)', () => { setSession(s => ({ ...s, calibration: null })); setLive(null); setSettings(false); }], ['Clear results', () => setSession(s => ({ ...s, results: [] }))], ['Close', () => setSettings(false)]].map(([label, onPress]) => <Pressable key={label} onPress={onPress} style={{ paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#2c3540' }}><Text style={text}>{label}</Text></Pressable>)}</View></View>}
  </SafeAreaView>;

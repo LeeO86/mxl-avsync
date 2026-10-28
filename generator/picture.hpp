@@ -22,7 +22,9 @@ struct PictureInfo {
     double av_offset_ms = 0;
     double media_ms = 0;
     double period_ms = 500;
+    bool show_sync_indicator = true; // Native display may animate this as a separate layer.
     const struct SourceStill* source_image = nullptr;
+    const struct SourceStill* app_icon = nullptr;
 };
 
 struct SourceStill {

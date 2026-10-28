@@ -225,6 +225,13 @@ struct SyncPlace {
     double position_ms = 0;
 };
 SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms);
+struct SyncIndicator {
+    int x=0, y=0, side=0;
+    SyncDot kind=SyncDot::Zero;
+    uint16_t y10=940, cb10=512, cr10=512;
+};
+SyncIndicator sync_indicator(int width, int height, int frame, int period_frames, double period_ms);
+
 
 struct MarkerReading {
     enum class State { Black, White, Invalid };

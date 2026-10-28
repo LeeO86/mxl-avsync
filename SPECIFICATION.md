@@ -945,3 +945,16 @@ one codec. Coded pairs use source plus full common timestamp, with an online
 Phone audio-only latency is explicitly estimated from device UTC, with unknown
 clock/capture accuracy; this user-authorized extension does not claim PTP lock.
 Detailed contract and hardware boundaries: [audio-timecode.md](docs/audio-timecode.md).
+
+
+### Mobile generator appearance (maintainer addition, 2026-10-28)
+
+The iOS source shares the server pattern renderer: EG1 color bars, fiducials,
+QR, timing marker/strip, source-ident area and early/zero/late sync scale. The
+native display layer advances the square on the common host-clock timeline.
+Name, subtitle and an optional selected image are local persisted settings.
+Photo selection exposes only the chosen image; a normalized private copy is
+stored independently of Photos. Presentation labels do not change audio/QR
+identity or imply source-output calibration. Text rasterization is CoreText
+on iOS with the same bundled DejaVu font, avoiding media/GUI dependencies in
+avsync-core and desktop rendering dependencies in the mobile binary.

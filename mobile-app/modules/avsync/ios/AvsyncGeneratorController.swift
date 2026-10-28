@@ -6,6 +6,10 @@ final class AvsyncGeneratorController: UIViewController {
   var onClose: (([String: Any]) -> Void)?
   private let rate: Int
   private let taiUtc: Double
+  private let sourceName: String
+  private let subtitle: String
+  private let sourceImage: UIImage?
+  private let syncDot = CALayer()
   private let canvas = UIView()
   private let marker = CALayer()
   private var cells: [CALayer] = []
@@ -31,8 +35,8 @@ final class AvsyncGeneratorController: UIViewController {
   private var lastStatus = 0.0
   private var utcMinusHost = 0.0
 
-  init(rate: Int, taiUtc: Double) {
-    self.rate = rate; self.taiUtc = taiUtc
+  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil) {
+    self.rate = rate; self.taiUtc = taiUtc; self.sourceName = name; self.subtitle = subtitle; self.sourceImage = image
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .fullScreen
   }
@@ -48,6 +52,7 @@ final class AvsyncGeneratorController: UIViewController {
     view.addSubview(canvas)
     marker.backgroundColor = UIColor.black.cgColor
     canvas.layer.addSublayer(marker)
+    canvas.layer.addSublayer(syncDot)
     for _ in 0..<32 { let cell = CALayer(); canvas.layer.addSublayer(cell); cells.append(cell) }
     status.textColor = .lightGray; status.font = .systemFont(ofSize: 12); status.numberOfLines = 3
     status.textAlignment = .center; status.accessibilityIdentifier = "generatorStatus"
@@ -122,6 +127,7 @@ final class AvsyncGeneratorController: UIViewController {
       let epochTai = Int64(((utc + taiUtc) + epochHost - (before + after)/2) * 1e9)
       plan = AVSyncGenerator(testID: sourceID, rate: rate, epochTaiNs: epochTai, epochHost: epochHost)
       guard let plan else { return }
+      plan.setSource(name: sourceName, subtitle: subtitle, image: sourceImage)
       let geometry = plan.geometry()
       func n(_ key: String) -> CGFloat { CGFloat((geometry[key] as? NSNumber)?.doubleValue ?? 0) }
       marker.frame = CGRect(x: n("markerX"), y: n("markerY"), width: n("markerSide"), height: n("markerSide"))
@@ -171,6 +177,10 @@ final class AvsyncGeneratorController: UIViewController {
       guard let image = images[sequence] else { CATransaction.commit(); stop("Picture scheduling deadline missed. Restart the signal."); return }
       shown = sequence; canvas.layer.contents = image.cgImage
     }
+    func n(_ key: String) -> CGFloat { CGFloat((frame[key] as? NSNumber)?.doubleValue ?? 0) }
+    syncDot.isHidden = false
+    syncDot.frame = CGRect(x: n("syncX"), y: n("syncY"), width: n("syncSize"), height: n("syncSize"))
+    syncDot.backgroundColor = UIColor(red: n("syncR")/255, green: n("syncG")/255, blue: n("syncB")/255, alpha: 1).cgColor
     marker.backgroundColor = (frame["white"] as? Bool == true ? UIColor.white : UIColor.black).cgColor
     let bits = (frame["strip"] as? NSNumber)?.uint32Value ?? 0
     for (i, cell) in cells.enumerated() { cell.backgroundColor = (bits & (1 << (31-i)) != 0 ? UIColor.white : UIColor.black).cgColor }
@@ -187,7 +197,7 @@ final class AvsyncGeneratorController: UIViewController {
     link?.invalidate(); link = nil
     player.stop(); engine.stop(); plan = nil; images.removeAll()
     CATransaction.begin(); CATransaction.setDisableActions(true)
-    canvas.layer.contents = nil; marker.backgroundColor = UIColor.black.cgColor
+    canvas.layer.contents = nil; syncDot.isHidden = true; marker.backgroundColor = UIColor.black.cgColor
     for cell in cells { cell.backgroundColor = UIColor.black.cgColor }
     CATransaction.commit()
     UIApplication.shared.isIdleTimerDisabled = oldIdle; UIScreen.main.brightness = oldBrightness

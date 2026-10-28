@@ -11,8 +11,8 @@ mobile-app/android/
 testfiles/
 tests/
 deploy/
-web/
-third_party/dejavu/
+web/*
+!web/icon.png
 # Local signing files and environment credentials never belong in source archives.
 **/.env
 **/.env.*

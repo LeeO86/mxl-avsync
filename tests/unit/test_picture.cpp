@@ -453,3 +453,31 @@ TEST_CASE("bounded optical search refines phone tile borders in 1080p and 4K cam
         CHECK_FALSE(reader.read(camera.data(),width,height,width,800).located);
     }
 }
+
+TEST_CASE("mobile static plate omits only the shared animated sync square") {
+    for(int rate:{1,2}) {
+        PictureInfo info;info.period_ms=1000.0/rate;
+        const int period=60/rate;
+        for(int pos:{0,1,period-1}) {
+            Yuv422p10 animated,plate;animated.resize(1280,720);plate.resize(1280,720);
+            render_picture(animated,info,9,pos,period,flash_white(pos,1000.0/60));
+            info.show_sync_indicator=false;
+            render_picture(plate,info,9,pos,period,flash_white(pos,1000.0/60));
+            info.show_sync_indicator=true;
+            const auto dot=sync_indicator(1280,720,pos,period,info.period_ms);
+            CHECK(animated.y[(dot.y+dot.side/2)*1280+dot.x+dot.side/2]==dot.y10);
+            if(pos==0)CHECK(dot.kind==SyncDot::Zero);
+            else if(pos==1)CHECK(dot.kind==SyncDot::Late);
+            else CHECK(dot.kind==SyncDot::Early);
+            bool changed=false,outside=false;
+            for(int y=0;y<720;++y)for(int x=0;x<1280;++x) {
+                const bool differs=animated.y[y*1280+x]!=plate.y[y*1280+x] || animated.cb[y*640+x/2]!=plate.cb[y*640+x/2] || animated.cr[y*640+x/2]!=plate.cr[y*640+x/2];
+                changed|=differs;
+                // 4:2:2 chroma shares each horizontal pair.
+                if(differs&&(x<dot.x-1||x>=dot.x+dot.side+1||y<dot.y||y>=dot.y+dot.side))outside=true;
+            }
+            CHECK(changed);CHECK_FALSE(outside);
+            CHECK(read_marker(plate.y.data(),1280,720,1280).strip_ok);
+        }
+    }
+}

@@ -6,9 +6,11 @@
 #include <cassert>
 #include <iostream>
 
+extern NSString *AVSyncTextFontName();
 using namespace avsync;
 int main() { @autoreleasepool {
     constexpr int width=1280,height=720;
+    assert([AVSyncTextFontName() isEqualToString:@"DejaVuSans"]);
     for(int rate:{1,2}) {
         AVSyncGenerator *source=[[AVSyncGenerator alloc] initWithTestID:@"phone-native-test" rate:rate epochTaiNs:1700000037000000000LL epochHost:100];
         std::vector<float> signal(48000*3);
@@ -31,6 +33,14 @@ int main() { @autoreleasepool {
                 for(int y=0;y<height;++y)for(int x=0;x<width;++x) luma[y*width+x]=uint16_t(64+876*int(p[y*CVPixelBufferGetBytesPerRow(pixel)+4*x+1])/255);
             };
             update_luma();
+            auto *rgbPixels=(uint8_t*)CVPixelBufferGetBaseAddress(pixel);
+            int chromatic=0;
+            for(int bar=0;bar<7;++bar) {
+                auto *sample=rgbPixels+100*CVPixelBufferGetBytesPerRow(pixel)+(bar*1280/7+90)*4;
+                if(std::abs(int(sample[2])-int(sample[1]))>40||std::abs(int(sample[1])-int(sample[0]))>40)++chromatic;
+            }
+            assert(chromatic>=5); // Old grayscale source fails this.
+
             auto base=read_marker(luma.data(),width,height,width);
             assert(base.strip_ok && base.seq_low24==event && base.geometry_ok);
             // Exercise the same packed bits used by the native timing layers,
@@ -41,6 +51,12 @@ int main() { @autoreleasepool {
                 NSDictionary *frame=[source frameAt:host+double(pos)/60];
                 assert([frame[@"sequence"] intValue]==event);
                 assert([frame[@"position"] intValue]==pos);
+                const auto point=sync_indicator(width,height,pos,60/rate,1000.0/rate);
+                assert([frame[@"syncX"] intValue]==point.x && [frame[@"syncY"] intValue]==point.y);
+                assert([frame[@"syncSize"] intValue]==point.side);
+                if(pos==0) assert([frame[@"syncR"] intValue]==255 && [frame[@"syncG"] intValue]==255);
+                if(pos==1) assert([frame[@"syncG"] intValue]>[frame[@"syncR"] intValue]);
+                if(pos==60/rate-1) assert([frame[@"syncR"] intValue]>[frame[@"syncG"] intValue]);
                 const uint32_t bits=[frame[@"strip"] unsignedIntValue];
                 for(int cell=0;cell<32;++cell) for(int y=n(@"stripY");y<n(@"stripY")+n(@"stripHeight");++y)for(int dx=0;dx<n(@"stripWidth");++dx)
                     luma[y*width+n(@"stripX")+cell*n(@"stripWidth")+dx]=bits&(1u<<(31-cell))?kYWhite:kYBlack;
@@ -60,6 +76,30 @@ int main() { @autoreleasepool {
             assert(found);
             CGContextRelease(context);CGColorSpaceRelease(space);CVPixelBufferRelease(pixel);
         }
+        UIImage *plain=[source imageForSequence:1];
+        UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat];format.scale=1;
+        UIImage *logo=[[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(64,32) format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [UIColor.magentaColor setFill];UIRectFill(CGRectMake(0,0,32,32));
+            [UIColor.cyanColor setFill];UIRectFill(CGRectMake(32,0,32,32));
+        }];
+        [source setSourceName:@"Studio Zürich" subtitle:@"Camera A · SRT path" image:logo];
+        UIImage *styled=[source imageForSequence:1];
+        auto imageBytes=[&](UIImage *image) {
+            std::vector<uint8_t> bytes(width*height*4);
+            CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
+            CGContextRef ctx=CGBitmapContextCreate(bytes.data(),width,height,8,width*4,space,kCGImageAlphaPremultipliedLast);
+            CGContextDrawImage(ctx,CGRectMake(0,0,width,height),image.CGImage);CGContextRelease(ctx);CGColorSpaceRelease(space);return bytes;
+        };
+        const auto before=imageBytes(plain),after=imageBytes(styled);
+        int changed=0;
+        const auto g=frame_geometry(width,height);
+        for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+            const size_t at=(size_t(y)*width+x)*4;
+            const bool differs=!std::equal(before.begin()+at,before.begin()+at+4,after.begin()+at);
+            if(differs) { ++changed;assert(y>g.marker_y+g.marker_side && y<g.strip_y); }
+        }
+        assert(changed>500); // Labels/logo actually visible, never cover timing/QR.
+        [source setSourceName:@"" subtitle:@"" image:nil];
         const auto packets=decode_timecodes(signal.data(),signal.size(),48000);
         assert(packets.size()==3);
         for(int i=0;i<3;++i) {
@@ -68,5 +108,5 @@ int main() { @autoreleasepool {
             assert(packets[i].video_send_ns==quantize_timecode_ns(1700000037000000000LL+i*1000000000LL/rate));
         }
     }
-    std::cout<<"PASS: actual iOS generator QR/geometry, every 60-Hz strip/flash phase, 1/2-Hz blind audio identity and estimated source flag.\n";
+    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR/strip/flash and 1/2-Hz independent audio.\n";
 } }

@@ -109,42 +109,4 @@ int text_px_height(int scale)
     return std::max(1, static_cast<int>(std::ceil(metrics.ascent + metrics.descent)));
 }
 
-SyncDot sync_dot_kind(double position_ms)
-{
-    if (position_ms < -1e-6) {
-        return SyncDot::Early;
-    }
-    if (position_ms > 1e-6) {
-        return SyncDot::Late;
-    }
-    return SyncDot::Zero;
-}
-
-SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms)
-{
-    SyncPlace place;
-    if (period_frames < 1) {
-        period_frames = 1;
-    }
-    if (period_ms <= 0) {
-        period_ms = 500;
-    }
-    int frame = frame_in_period % period_frames;
-    if (frame < 0) {
-        frame += period_frames;
-    }
-    const double frame_ms = period_ms / static_cast<double>(period_frames);
-    const int half = std::max(1, period_frames / 2);
-    place.scale_ms = half * frame_ms;
-    if (frame == 0) {
-        place.position_ms = 0;
-    } else if (frame <= half) {
-        place.position_ms = frame * frame_ms;
-    } else {
-        place.position_ms = (frame - period_frames) * frame_ms;
-    }
-    place.position_ms = std::clamp(place.position_ms, -place.scale_ms, place.scale_ms);
-    return place;
-}
-
 } // namespace avsync

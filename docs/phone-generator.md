@@ -1,7 +1,7 @@
 # iPhone test-signal source
 
-Use a native iOS development build, open **Generate**, choose **1 or 2 chirps/s**,
-then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
+Use the current native iOS/TestFlight build, open **Generate**, choose **1 or 2 chirps/s**,
+set **Name**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
 inside the fullscreen screen; Measure/Results keep their portrait layout.
 Film the entire test picture, including all four corner fiducials, with an
 external camera. Keep only that phone's speaker audible. Send the camera's
@@ -102,3 +102,21 @@ JSON evidence. Set `MXL_LIB_DIR`/`VCPKG_LIB_DIR` if required by the local loader
 Apple API references: [display targetTimestamp](https://developer.apple.com/documentation/quartzcore/cadisplaylink/targettimestamp),
 [audio buffer scheduling](https://developer.apple.com/documentation/avfaudio/avaudioplayernode/schedulebuffer(_:at:options:completionhandler:)),
 [node output presentation latency](https://developer.apple.com/documentation/avfaudio/avaudionode/outputpresentationlatency).
+
+
+## Shared pattern and source labels
+
+The mobile source uses the server renderer for EG1 color bars, machine markers,
+QR, source labels/logo and the early/zero/late sync scale. The square is red
+while early, white at the event and green while late; its zero crossing shares
+the planned chirp/flash onset. iOS animates it with native display-timestamped
+layers over a static plate, with the same coordinates/colors as the renderer.
+The bundled font is DejaVu Sans on both targets (CoreText on iOS, Blend2D on
+the server); source-event labels describe scheduled phone output.
+
+Name/subtitle and the selected image persist locally. Photos selection uses
+the system picker, which shares only the image you select. The app stores a
+normalized copy up to 512 px in private Application Support; Remove image
+removes that copy, preserving the original in Photos. Images are not uploaded
+with EAS builds or sent to a server. Labels/image are display identity and
+do not change protected timecode/source IDs or calibration.

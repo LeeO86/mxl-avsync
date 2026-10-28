@@ -51,6 +51,7 @@ add_library(avsync-core STATIC
     core/src/qr.cpp
     core/src/g711.cpp
     core/src/text.cpp
+    core/src/sync_scale.cpp
     core/src/locate.cpp
     core/src/phone.cpp
     core/src/phone_generator.cpp
@@ -110,6 +111,7 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     add_subdirectory(${zxing_src_SOURCE_DIR} ${CMAKE_BINARY_DIR}/zxing EXCLUDE_FROM_ALL)
     add_library(avsync-file STATIC
         generator/picture.cpp
+        generator/picture_render.cpp
         generator/source_image.cpp
         third_party/nayuki/qrcodegen.cpp
         app/report.cpp

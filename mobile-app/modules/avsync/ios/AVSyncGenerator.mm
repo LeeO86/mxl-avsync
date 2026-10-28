@@ -1,72 +1,87 @@
 #import "AVSyncGenerator.h"
 #include "avsync/phone_generator.hpp"
-#include "../../../../third_party/nayuki/qrcodegen.hpp"
+#include "../../../../generator/picture.hpp"
 #include <memory>
 #include <algorithm>
 
+namespace {
+void rgb(uint16_t y,uint16_t cb,uint16_t cr,uint8_t *out) {
+    const double l=(double(y)-64)/876,u=(double(cb)-512)/896,v=(double(cr)-512)/896;
+    out[0]=uint8_t(std::lround(std::clamp(l+1.5748*v,0.0,1.0)*255));
+    out[1]=uint8_t(std::lround(std::clamp(l-.187324*u-.468124*v,0.0,1.0)*255));
+    out[2]=uint8_t(std::lround(std::clamp(l+1.8556*u,0.0,1.0)*255));out[3]=255;
+}
+UIImage *image_from_frame(const avsync::Yuv422p10& frame) {
+    NSMutableData *rgba=[NSMutableData dataWithLength:size_t(frame.width)*frame.height*4];auto *dst=(uint8_t*)rgba.mutableBytes;
+    for(int y=0;y<frame.height;++y)for(int x=0;x<frame.width;++x) {
+        const size_t ci=size_t(y)*(frame.width/2)+x/2;
+        rgb(frame.y[size_t(y)*frame.width+x],frame.cb[ci],frame.cr[ci],dst+(size_t(y)*frame.width+x)*4);
+    }
+    CGDataProviderRef provider=CGDataProviderCreateWithCFData((__bridge CFDataRef)rgba);
+    CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGImageRef image=CGImageCreate(frame.width,frame.height,8,32,frame.width*4,space,kCGImageAlphaPremultipliedLast,provider,nullptr,false,kCGRenderingIntentDefault);
+    UIImage *result=[UIImage imageWithCGImage:image];CGImageRelease(image);CGColorSpaceRelease(space);CGDataProviderRelease(provider);return result;
+}
+void make_still(UIImage *image,avsync::SourceStill& still) {
+    if(!image.CGImage)return;
+    const double factor=std::min(1.0,512.0/std::max(image.size.width,image.size.height));
+    const int w=std::max(1,int(std::lround(image.size.width*factor))),h=std::max(1,int(std::lround(image.size.height*factor)));
+    UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat];format.scale=1;
+    UIImage *normalized=[[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(w,h) format:format] imageWithActions:^(UIGraphicsImageRendererContext *context){[image drawInRect:CGRectMake(0,0,w,h)];}];
+    still.width=w;still.height=h;still.rgba.resize(size_t(w)*h*4);
+    CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx=CGBitmapContextCreate(still.rgba.data(),w,h,8,w*4,space,kCGImageAlphaPremultipliedLast);
+    CGContextDrawImage(ctx,CGRectMake(0,0,w,h),normalized.CGImage);CGContextRelease(ctx);CGColorSpaceRelease(space);
+    // Shared blitter expects straight alpha; CoreGraphics supplies premultiplied.
+    for(size_t i=0;i<still.rgba.size();i+=4) { const int a=still.rgba[i+3];if(a>0&&a<255)for(int c=0;c<3;++c)still.rgba[i+c]=uint8_t(std::min(255,int(still.rgba[i+c])*255/a)); }
+}
+
+}
 @implementation AVSyncGenerator {
     std::unique_ptr<avsync::PhoneGeneratorPlan> _plan;
+    avsync::PictureInfo _info;
+    avsync::SourceStill _sourceImage;
+    avsync::SourceStill _appIcon;
 }
 - (instancetype)initWithTestID:(NSString *)testID rate:(NSInteger)rate epochTaiNs:(int64_t)epoch epochHost:(double)host {
-    if ((self = [super init])) _plan = std::make_unique<avsync::PhoneGeneratorPlan>(testID.UTF8String,int(rate),epoch,host);
+    if ((self = [super init])) {
+        _plan=std::make_unique<avsync::PhoneGeneratorPlan>(testID.UTF8String,int(rate),epoch,host);
+        _info.title="mxl-avsync";_info.source="iPhone";
+        _info.format_line="720p60 / 1200 baud / "+std::to_string(rate)+" Hz";
+        _info.notes="Estimated phone clock/output";_info.offset_line="Set AV offset 0 ms";
+        _info.period_ms=1000.0/rate;_info.show_sync_indicator=false;
+        NSURL *bundleURL=[[NSBundle mainBundle] URLForResource:@"AvsyncResources" withExtension:@"bundle"];
+        NSBundle *resources=bundleURL ? [NSBundle bundleWithURL:bundleURL] : nil;
+        NSURL *iconURL=[resources URLForResource:@"icon" withExtension:@"png"];
+        UIImage *icon=iconURL ? [UIImage imageWithContentsOfFile:iconURL.path] : nil;
+        if(icon) { make_still(icon,_appIcon);_info.app_icon=&_appIcon; }
+    }
     return self;
+}
+- (void)setSourceName:(NSString *)name subtitle:(NSString *)subtitle image:(UIImage * _Nullable)image {
+    _info.source=name.length?name.UTF8String:"iPhone";_info.subtitle=subtitle.UTF8String;
+    _sourceImage={};_info.source_image=nullptr;
+    if(!image.CGImage)return;
+    make_still(image,_sourceImage);
+    _info.source_image=&_sourceImage;
 }
 - (NSDictionary *)geometry {
     auto g=avsync::frame_geometry(1280,720);
-    return @{ @"width":@1280, @"height":@720, @"markerX":@(g.marker_x), @"markerY":@(g.marker_y), @"markerSide":@(g.marker_side),
-              @"stripX":@(g.strip_x), @"stripY":@(g.strip_y), @"stripWidth":@(g.strip_w), @"stripHeight":@(g.strip_h) };
+    return @{ @"width":@1280,@"height":@720,@"markerX":@(g.marker_x),@"markerY":@(g.marker_y),@"markerSide":@(g.marker_side),@"stripX":@(g.strip_x),@"stripY":@(g.strip_y),@"stripWidth":@(g.strip_w),@"stripHeight":@(g.strip_h) };
 }
 - (NSDictionary *)frameAt:(double)target {
-    const auto frame = _plan->frame_at(target);
-    const auto period = _plan->period_frames();
-    const uint64_t seq = 1 + frame / period;
-    const int pos = int(frame % period);
-    uint32_t gray=avsync::binary_to_gray(uint32_t(seq & 0xffffff));
-    const uint32_t data=(gray<<4)|(pos&15);
+    const auto frame=_plan->frame_at(target);const int period=_plan->period_frames();const uint64_t seq=1+frame/period;const int pos=int(frame%period);
+    const uint32_t data=(avsync::binary_to_gray(uint32_t(seq&0xffffff))<<4)|(pos&15);
     const uint32_t bits=(data<<4)|((__builtin_popcount(data)&1)<<3)|5;
-    return @{ @"sequence":@(seq), @"position":@(pos), @"white":@(avsync::flash_white(pos,1000.0/60)), @"strip":@(bits) };
+    const auto dot=avsync::sync_indicator(1280,720,pos,period,_info.period_ms);uint8_t color[4];rgb(dot.y10,dot.cb10,dot.cr10,color);
+    return @{ @"sequence":@(seq),@"position":@(pos),@"white":@(avsync::flash_white(pos,1000.0/60)),@"strip":@(bits),@"syncX":@(dot.x),@"syncY":@(dot.y),@"syncSize":@(dot.side),@"syncR":@(color[0]),@"syncG":@(color[1]),@"syncB":@(color[2]),@"syncPositionMs":@(avsync::sync_place(pos,period,_info.period_ms).position_ms) };
 }
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }
-- (NSData *)audioForSequence:(uint64_t)seq {
-    const auto samples=_plan->audio(seq);
-    return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)];
-}
+- (NSData *)audioForSequence:(uint64_t)seq { const auto samples=_plan->audio(seq);return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)]; }
 - (UIImage *)imageForSequence:(uint64_t)seq {
-    const auto qr=_plan->qr(seq);
-    std::vector<uint16_t> luma(1280*720);
-    avsync::LumaView view{luma.data(),1280,720,1280};
-    avsync::fill_luma(view,avsync::kYBackground); avsync::draw_static_layer(view);
-    // Initial dynamic pixels are overwritten by the native timing layers.
-    avsync::draw_timing(view,seq,0,_plan->period_frames(),false);
-    const auto code=qrcodegen::QrCode::encodeText(avsync::qr_payload_json(qr).c_str(),qrcodegen::QrCode::Ecc::MEDIUM);
-    const auto g=avsync::frame_geometry(1280,720);
-    const int span=code.getSize()+8, scale=std::max(1,g.qr_size/span);
-    for(int y=0;y<span*scale;++y) for(int x=0;x<span*scale;++x) {
-        const int mx=x/scale-4,my=y/scale-4;
-        luma[(g.qr_y+y)*1280+g.qr_x+x]=(mx>=0&&my>=0&&mx<code.getSize()&&my<code.getSize()&&code.getModule(mx,my))?avsync::kYBlack:avsync::kYWhite;
-    }
-    NSMutableData *gray=[NSMutableData dataWithLength:luma.size()];
-    auto *dst=(uint8_t *)gray.mutableBytes;
-    for(size_t i=0;i<luma.size();++i) dst[i]=uint8_t(std::clamp((int(luma[i])-64)*255/876,0,255));
-    CGDataProviderRef provider=CGDataProviderCreateWithCFData((__bridge CFDataRef)gray);
-    CGColorSpaceRef space=CGColorSpaceCreateDeviceGray();
-    CGImageRef image=CGImageCreate(1280,720,8,8,1280,space,kCGImageAlphaNone,provider,nullptr,false,kCGRenderingIntentDefault);
-    UIImage *base=[UIImage imageWithCGImage:image];
-    CGImageRelease(image); CGColorSpaceRelease(space); CGDataProviderRelease(provider);
-    UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat]; format.scale=1; format.opaque=YES;
-    UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(1280,720) format:format];
-    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-        [base drawAtPoint:CGPointZero];
-        void (^label)(NSString *,CGFloat,CGFloat,CGFloat)=^(NSString *text,CGFloat x,CGFloat y,CGFloat size) {
-            [text drawAtPoint:CGPointMake(x,y) withAttributes:@{NSFontAttributeName:[UIFont systemFontOfSize:size weight:UIFontWeightMedium],NSForegroundColorAttributeName:UIColor.whiteColor}];
-        };
-        label(@"TEST SIGNAL — mxl-avsync",365,20,30);
-        label(@"iPhone source · scheduled output",365,68,22);
-        label([NSString stringWithFormat:@"1200 baud · %d chirp%@/s",qr.rate,qr.rate==1?@"":@"s"],850,235,24);
-        label(@"White flash = chirp onset",850,275,21);
-        label([NSString stringWithFormat:@"Event %llu",(unsigned long long)seq],850,325,26);
-        label(@"AV offset includes phone output",365,590,22);
-        label(@"ESTIMATED LATENCY · clock / display / speaker uncalibrated",220,635,21);
-    }];
+    _info.qr_json=avsync::qr_payload_json(_plan->qr(seq));_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
+    avsync::Yuv422p10 frame;frame.resize(1280,720);
+    avsync::render_picture(frame,_info,seq,0,_plan->period_frames(),false);
+    return image_from_frame(frame);
 }
 @end

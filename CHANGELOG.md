@@ -2,6 +2,9 @@
 
 ## 1.0.2 (unreleased)
 
+- Share the server color-bar/sync-scale renderer with the iPhone generator.
+  Add saved source name/subtitle and a private system-picker image import.
+
 - Add a native iPhone fullscreen generator (1200 baud, 1/2 Hz) and automatic
   optical/tile search in the live analyzer. Preserve source-frame timing across
   camera frame rates and explicitly mark phone source latency as estimated.
