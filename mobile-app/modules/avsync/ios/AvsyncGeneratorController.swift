@@ -24,6 +24,8 @@ final class AvsyncGeneratorController: UIViewController {
   private var nextAudio: UInt64 = 1
   private var shown: UInt64 = 0
   private var images: [UInt64: UIImage] = [:]
+  private let imageWorker = DispatchQueue(label: "avsync.generator.images", qos: .userInitiated)
+  private var renderGeneration = 0
   private var notices: [NSObjectProtocol] = []
   private var oldBrightness: CGFloat = 0
   private var oldIdle = false
@@ -133,7 +135,9 @@ final class AvsyncGeneratorController: UIViewController {
       marker.frame = CGRect(x: n("markerX"), y: n("markerY"), width: n("markerSide"), height: n("markerSide"))
       for (i, cell) in cells.enumerated() { cell.frame = CGRect(x: n("stripX") + CGFloat(i)*n("stripWidth"), y: n("stripY"), width: n("stripWidth"), height: n("stripHeight")) }
       nextAudio = 1; shown = 0; lateFrames = 0; lastFrame = nil; lastStatus = 0; images.removeAll()
-      canvas.layer.contents = plan.image(sequence: 1).cgImage
+      renderGeneration += 1
+      let first = plan.image(sequence: 1); images[1] = first
+      canvas.layer.contents = first.cgImage
       try fillAhead(now: after)
   }
   private func fillAhead(now: Double) throws {
@@ -150,7 +154,16 @@ final class AvsyncGeneratorController: UIViewController {
       buffer.frameLength = count
       _ = data.withUnsafeBytes { bytes in memcpy(buffer.floatChannelData![0], bytes.baseAddress!, data.count) }
       player.scheduleBuffer(buffer, at: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: host)), options: [])
-      images[nextAudio] = plan.image(sequence: nextAudio)
+      if images[nextAudio] == nil {
+        let sequence = nextAudio, generation = renderGeneration
+        imageWorker.async { [weak self] in
+          let image = plan.image(sequence: sequence)
+          DispatchQueue.main.async { [weak self] in
+            guard let self, self.renderGeneration == generation, self.plan === plan else { return }
+            self.images[sequence] = image
+          }
+        }
+      }
       nextAudio += 1
     }
     images = images.filter { $0.key + 1 >= shown }
@@ -194,7 +207,7 @@ final class AvsyncGeneratorController: UIViewController {
     }
   }
   private func stop(_ message: String) {
-    link?.invalidate(); link = nil
+    link?.invalidate(); link = nil; renderGeneration += 1
     player.stop(); engine.stop(); plan = nil; images.removeAll()
     CATransaction.begin(); CATransaction.setDisableActions(true)
     canvas.layer.contents = nil; syncDot.isHidden = true; marker.backgroundColor = UIColor.black.cgColor
