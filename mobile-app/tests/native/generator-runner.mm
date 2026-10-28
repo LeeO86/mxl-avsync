@@ -8,7 +8,7 @@
 
 extern NSString *AVSyncTextFontName();
 using namespace avsync;
-int main() { @autoreleasepool {
+int main(int argc, char **argv) { @autoreleasepool {
     constexpr int width=1280,height=720;
     assert([AVSyncTextFontName() isEqualToString:@"DejaVuSans"]);
     for(int rate:{1,2}) {
@@ -90,6 +90,24 @@ int main() { @autoreleasepool {
             CGContextRef ctx=CGBitmapContextCreate(bytes.data(),width,height,8,width*4,space,kCGImageAlphaPremultipliedLast);
             CGContextDrawImage(ctx,CGRectMake(0,0,width,height),image.CGImage);CGContextRelease(ctx);CGColorSpaceRelease(space);return bytes;
         };
+        if(argc>1) {
+            for(int pos:{0,1,60/rate-1}) {
+                NSDictionary *state=[source frameAt:100+double(pos)/60];
+                auto number=[&](NSString *key){return [state[key] doubleValue];};
+                const auto geo=frame_geometry(width,height);
+                UIImage *snapshot=[[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(width,height) format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                    [styled drawAtPoint:CGPointZero];
+                    [([state[@"white"] boolValue]?UIColor.whiteColor:UIColor.blackColor) setFill];
+                    UIRectFill(CGRectMake(geo.marker_x,geo.marker_y,geo.marker_side,geo.marker_side));
+                    const uint32_t bits=[state[@"strip"] unsignedIntValue];
+                    for(int cell=0;cell<32;++cell) { [(bits&(1u<<(31-cell))?UIColor.whiteColor:UIColor.blackColor) setFill];UIRectFill(CGRectMake(geo.strip_x+cell*geo.strip_w,geo.strip_y,geo.strip_w,geo.strip_h)); }
+                    [[UIColor colorWithRed:number(@"syncR")/255 green:number(@"syncG")/255 blue:number(@"syncB")/255 alpha:1] setFill];
+                    UIRectFill(CGRectMake(number(@"syncX"),number(@"syncY"),number(@"syncSize"),number(@"syncSize")));
+                }];
+                NSString *file=[NSString stringWithFormat:@"%s/%dhz-%d.png",argv[1],rate,pos];
+                assert([UIImagePNGRepresentation(snapshot) writeToFile:file atomically:YES]);
+            }
+        }
         const auto before=imageBytes(plain),after=imageBytes(styled);
         int changed=0;
         const auto g=frame_geometry(width,height);

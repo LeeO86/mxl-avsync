@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs>
+    <g id="mark-background">
+      <rect width="256" height="256" rx="53" fill="#0D1C32"/>
+    </g>
+    <g id="mark-frame">
+      <rect x="1" y="1" width="254" height="254" rx="52"
+            fill="none" stroke="#233B55" stroke-width="2"/>
+    </g>
+    <!-- The old inner 206px panel now fills the canvas: artwork is 24.27% larger. -->
+    <g id="artwork" transform="translate(128 128) scale(1.2427184466) translate(-128 -128)">
+      <g fill="none" stroke="#39D8F2" stroke-width="9"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M68 91V68H91 M165 68H188V91"/>
+        <path d="M68 165V188H91 M165 188H188V165"/>
+      </g>
+      <rect id="meter-panel" x="84" y="88" width="88" height="80" rx="9"
+            fill="#142C45" stroke="#4ACFEA" stroke-width="3"/>
+      <path d="M91 128H102L108 113L118 145L128 102L139 148L149 117L155 128H165"
+            fill="none" stroke="#F6B94A" stroke-width="5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M128 74V181" stroke="#FFFFFF" stroke-width="2.5"
+            stroke-dasharray="4 7" opacity=".8"/>
+      <circle cx="128" cy="128" r="7" fill="#FFFFFF"
+              stroke="#F6B94A" stroke-width="4"/>
+      <path d="M94 199H162" stroke="#39D8F2" stroke-width="4"
+            stroke-linecap="round" opacity=".7"/>
+    </g>
+  </defs><g transform="translate(128 128) scale(0.686546526) translate(-128 -128)"><use href="#artwork"/></g></svg>

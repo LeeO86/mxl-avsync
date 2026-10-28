@@ -46,7 +46,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
 - (instancetype)initWithTestID:(NSString *)testID rate:(NSInteger)rate epochTaiNs:(int64_t)epoch epochHost:(double)host {
     if ((self = [super init])) {
         _plan=std::make_unique<avsync::PhoneGeneratorPlan>(testID.UTF8String,int(rate),epoch,host);
-        _info.title="mxl-avsync";_info.source="iPhone";
+        _info.title="AVsync";_info.source="iPhone";
         _info.format_line="720p60 / 1200 baud / "+std::to_string(rate)+" Hz";
         _info.notes="Estimated phone clock/output";_info.offset_line="Set AV offset 0 ms";
         _info.period_ms=1000.0/rate;_info.show_sync_indicator=false;

@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import shutil
 import plistlib
+import os
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 module = ROOT / 'mobile-app/modules/avsync/ios'
@@ -18,7 +19,9 @@ with tempfile.TemporaryDirectory(prefix='avsync-phone-generator-') as directory:
     shutil.copy(module/'Resources/icon.png',resources/'icon.png')
     (resources/'Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'io.leeo86.avsync.resources','CFBundlePackageType':'BNDL'}))
     subprocess.run(['xcrun','--sdk','iphonesimulator','clang++','-std=c++20','-O2','-fobjc-arc','-target','arm64-apple-ios15.1-simulator','-isysroot',sdk,'-I'+str(module),'-I'+str(ROOT/'core/include'),'-I'+str(ROOT/'third_party/pocketfft'),'-I'+str(ROOT/'third_party/nayuki'),str(Path(__file__).with_name('generator-runner.mm')),str(module/'AVSyncGenerator.mm'),str(module/'Mobile_text.mm'),str(module/'Mobile_picture.cpp'),str(module/'AVSyncQRCodeReader.mm'),*[str(p) for p in sorted(module.glob('Core_*.cpp'))],*[a for f in ['Foundation','UIKit','AVFoundation','CoreMedia','CoreVideo','CoreGraphics','CoreText','Vision'] for a in ['-framework',f]],'-o',str(binary)],check=True)
-    subprocess.run(['xcrun','simctl','spawn',device,str(binary)],check=True)
+    preview=os.environ.get('AVSYNC_GENERATOR_PREVIEW_DIR')
+    if preview: Path(preview).mkdir(parents=True,exist_ok=True)
+    subprocess.run(['xcrun','simctl','spawn',device,str(binary),*([preview] if preview else [])],check=True)
 
     store=Path(directory)/'image-store'
     subprocess.run(['xcrun','--sdk','iphonesimulator','swiftc','-target','arm64-apple-ios15.1-simulator','-sdk',sdk,'-module-cache-path',str(Path(directory)/'swift-cache'),str(module/'GeneratorImagePicker.swift'),str(Path(__file__).with_name('generator-image-store.swift')),'-o',str(store)],check=True)

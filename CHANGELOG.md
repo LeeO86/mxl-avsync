@@ -2,6 +2,11 @@
 
 ## 1.0.2 (unreleased)
 
+- Brand the mobile app AVsync, enlarge the header mark and generate separate
+  iOS launcher, framed content and Android adaptive/themed icons from one SVG.
+- Show the applied calibration and saved date in mobile settings; distinguish
+  inactive corrections from 0 ms and dismiss the sheet by tapping its backdrop.
+
 - Share the server color-bar/sync-scale renderer with the iPhone generator.
   Add saved source name/subtitle and a private system-picker image import.
 

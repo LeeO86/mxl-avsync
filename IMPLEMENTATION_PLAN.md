@@ -806,3 +806,21 @@ removes only the previous app-owned copy; the Photos original is untouched.
 Invalid IDs/remote paths cannot be passed to the renderer. Source labels/images
 do not alter codec/source/event identity or capture/output calibration. Existing
 2-argument native generate remains supported; new clients use generateStyled.
+
+
+## Platform-aware icon sizing (2026-10-28)
+
+Before the next TestFlight build, user requests an enlarged SVG-derived mark
+without the old outer tile/padding. assets/app-icon.svg now makes the former
+inner panel the full canvas, enlarging artwork by 24.27%. A pinned generation
+script derives all raster assets: opaque square/frame-free iOS launcher/touch
+icons; blue-framed content marks for web, test picture and 44-pt mobile header;
+transparent safe-zone Android foreground plus monochrome and legacy variants.
+Mask/corner/system highlight belongs to iOS or the Android launcher. The SVG
+and generated platform views remain separate from a private user's selected
+source-ident photo. The script checks iOS opacity and Android safe-circle
+bounds. Android capture remains unsupported; only icon packaging is prepared.
+
+### Mobile name and settings (2026-10-28)
+
+The user requested AVsync as the mobile display name (no MXL transport is used on the phone). Keep the existing bundle identifier, Expo slug and EAS project so installed copies update normally. The header and mobile test picture use AVsync. Settings show the correction actually applied, its saved date and whether a stored correction is inactive; invalid/missing calibration still uses 0 ms. A separate dismissible backdrop closes the scrollable settings sheet without swallowing its controls; Android Back dismisses the same modal.

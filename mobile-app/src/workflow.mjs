@@ -1,6 +1,18 @@
 export function validCalibration(record, os, now) {
-  if (!record || record.capturePath !== 'native-raw-v1' || !Number.isFinite(record.offset_ms) || record.os !== os || now < record.savedAt || now - record.savedAt > 90 * 86400000) return null;
+  if (!record || record.capturePath !== 'native-raw-v1' || !Number.isFinite(record.offset_ms) || !Number.isFinite(record.savedAt) || record.os !== os || now < record.savedAt || now - record.savedAt > 90 * 86400000) return null;
   return record;
+}
+
+// Describe the correction actually used, including an inactive saved calibration.
+export function calibrationSummary(record, os, now) {
+  const active = validCalibration(record, os, now);
+  const stored = Number.isFinite(record?.offset_ms) ? record.offset_ms : null;
+  return {
+    state: active ? 'active' : stored === null ? 'missing' : 'inactive',
+    appliedOffsetMs: active?.offset_ms ?? 0,
+    storedOffsetMs: stored,
+    savedAt: Number.isFinite(record?.savedAt) ? record.savedAt : null,
+  };
 }
 
 export function nearestFrame(frames, time) {
