@@ -776,3 +776,11 @@ CNG prebuild pass; Expo Doctor's sole remaining warning is the existing
 unmaintained expo-av calibration-replay dependency (17/18 pass), not a
 version/native compatibility failure. TestFlight delivery status is tracked
 separately from source configuration and from public App Store review.
+
+
+The first EAS production build 2.0.0 (1) and its submission both completed
+successfully. The downloaded store artifact was inspected: bundle ID/version
+match, iPhoneOS 26.2 / Xcode 26.2, minimum iOS 15.1, embedded main.jsbundle,
+compiled native analyzer/generator and privacy manifests are present. No Metro
+connection is required for this Release artifact. Successful submission alone
+does not establish Apple's final TestFlight processing/installation state.
