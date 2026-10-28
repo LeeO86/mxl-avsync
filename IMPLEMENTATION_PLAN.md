@@ -824,3 +824,18 @@ bounds. Android capture remains unsupported; only icon packaging is prepared.
 ### Mobile name and settings (2026-10-28)
 
 The user requested AVsync as the mobile display name (no MXL transport is used on the phone). Keep the existing bundle identifier, Expo slug and EAS project so installed copies update normally. The header and mobile test picture use AVsync. Settings show the correction actually applied, its saved date and whether a stored correction is inactive; invalid/missing calibration still uses 0 ms. A separate dismissible backdrop closes the scrollable settings sheet without swallowing its controls; Android Back dismisses the same modal.
+
+### Public project site and privacy policy (2026-10-28)
+
+User requests GitHub Pages to introduce the AVsync mobile app and MXL containers,
+plus a public privacy policy. Buildless site/ publishes independently on gh-pages;
+no app/server merge, tag or release is implied. Marketing distinguishes TestFlight
+from public App Store availability, Android plans from implemented iOS capture,
+and estimated phone latency from clock-referenced container latency. The policy
+records actual temporary calibration files (not deleted by clearing correction),
+local state/images/diagnostics, optional HTTPS clock requests, explicit sharing,
+Apple/TestFlight diagnostics and GitHub Pages security logs. User selected GitHub
+profile plus repository support as public contact.
+The mobile Settings sheet links to the public privacy policy and its support
+contacts. This JavaScript change takes effect in the next distributed build;
+previously delivered 2.0.0 (2) remains unchanged.
