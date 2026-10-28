@@ -15,7 +15,6 @@
         "NSCameraUsageDescription": "See the AV sync test picture.",
         "NSMicrophoneUsageDescription": "Hear the AV sync chirps."
       },
-      "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
       }

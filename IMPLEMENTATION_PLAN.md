@@ -766,3 +766,13 @@ test media, build outputs and local signing material. EAS manages remote
 signing credentials; no keys/passwords belong in the public repo. Only exempt
 OS-provided HTTPS encryption is used by the app, so the non-exempt-encryption
 flag is false. TestFlight upload is separate from a public App Store review.
+
+
+EAS project f55d25d9-cd44-4dc3-b4e4-50b6111a516c and App Store Connect record
+6827797077 are linked. Store signing/profile and an App Manager-role API key
+are managed remotely; only non-secret project/app identifiers are versioned.
+The first cloud build is 2.0.0 (1). Production Hermes bundle export and clean
+CNG prebuild pass; Expo Doctor's sole remaining warning is the existing
+unmaintained expo-av calibration-replay dependency (17/18 pass), not a
+version/native compatibility failure. TestFlight delivery status is tracked
+separately from source configuration and from public App Store review.

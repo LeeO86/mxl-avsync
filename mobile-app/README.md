@@ -99,3 +99,11 @@ EAS Submit uploads to App Store Connect/TestFlight; the public App Store
 listing and review are separate. Signing credentials stay in EAS/Apple, not
 in this repository. Inspect an upload without starting a build using
 `eas build:inspect --platform ios --profile production --stage archive --output /tmp/avsync-eas-archive`.
+
+App Store Connect record: `6827797077` (`io.leeo86.mxl.avsync`). The first
+cloud delivery is version 2.0.0 / build 1; subsequent build numbers increment
+in EAS. The internal TestFlight group is `Team (Expo)`. EAS Submit has a
+remotely stored App Manager API key; no Apple password/key is committed here.
+Expo Doctor passes 17/18 checks; the remaining check reports the existing
+`expo-av` dependency as unmaintained. Production bundle export and clean
+prebuild succeed; migration of calibration replay off expo-av is separate.
