@@ -14,6 +14,10 @@
       "infoPlist": {
         "NSCameraUsageDescription": "See the AV sync test picture.",
         "NSMicrophoneUsageDescription": "Hear the AV sync chirps."
+      },
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -34,6 +38,13 @@
       "./modules/avsync/app.plugin.js",
       "expo-asset",
       "expo-font"
-    ]
+    ],
+    "owner": "leeo86",
+    "extra": {
+      "eas": {
+        "projectId": "f55d25d9-cd44-4dc3-b4e4-50b6111a516c"
+      }
+    },
+    "newArchEnabled": false
   }
 }

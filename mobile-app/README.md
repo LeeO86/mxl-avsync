@@ -79,3 +79,23 @@ analyzer. AV sync includes the phone output; latency is explicitly estimated.
 This requires a rebuilt native development client. See [workflow, timing and
 validation limits](../docs/phone-generator.md). Run
 `python3 tests/native/generator.py` from this directory with a booted simulator.
+
+## EAS Cloud and TestFlight
+
+The linked EAS project is `@leeo86/mxl-avsync`. Run EAS commands from
+`mobile-app/`; the Git-root `.easignore` also includes the shared C++ core.
+
+```sh
+npx eas-cli@26.0.0 build --platform ios --profile production
+npx eas-cli@26.0.0 submit --platform ios --profile production --latest
+```
+
+Production is a signed store/Release build with embedded JavaScript and the
+native analyzer/generator. It launches without Metro, Expo Go or a running Mac.
+Build numbers are managed remotely and incremented per production build.
+The Xcode 26.2 cloud image meets Apple's iOS 26 SDK upload requirement.
+
+EAS Submit uploads to App Store Connect/TestFlight; the public App Store
+listing and review are separate. Signing credentials stay in EAS/Apple, not
+in this repository. Inspect an upload without starting a build using
+`eas build:inspect --platform ios --profile production --stage archive --output /tmp/avsync-eas-archive`.

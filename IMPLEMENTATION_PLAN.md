@@ -750,3 +750,19 @@ normal direct MXL integration passed. These are synthetic SDK/software
 results, not physical camera/phone timing calibration. The signed iPhone
 build also passes macOS codesign verification with access to trust services;
 installation awaits an available physical device.
+
+
+## EAS Cloud / TestFlight delivery (2026-10-28)
+
+The user authorizes a cloud-built, independently launchable iPhone app in
+TestFlight, with eventual App Store distribution. The native app keeps its
+existing bundle identifier and tested old React Native architecture explicitly.
+EAS production uses store distribution, Release, bundled JS (no development
+client or Metro dependency), remote incremented iOS build numbers, and a pinned
+Xcode 26.2 image to meet the current Apple SDK upload requirement. SDK 52 and
+existing native capture/generator code are retained. The Git-root EAS archive
+keeps shared C++ sources above mobile-app while excluding generated projects,
+test media, build outputs and local signing material. EAS manages remote
+signing credentials; no keys/passwords belong in the public repo. Only exempt
+OS-provided HTTPS encryption is used by the app, so the non-exempt-encryption
+flag is false. TestFlight upload is separate from a public App Store review.

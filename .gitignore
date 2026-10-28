@@ -17,3 +17,9 @@ mobile-app/android/
 !/testfiles/*.mov
 !/testfiles/*.mkv
 !/testfiles/*.manifest.json
+
+# EAS local signing material (remote credentials are managed by EAS)
+mobile-app/credentials.json
+mobile-app/*.p8
+mobile-app/*.p12
+mobile-app/*.mobileprovision

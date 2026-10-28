@@ -1,0 +1,22 @@
+# EAS archive for mobile-app; paths are relative to this Git root.
+.git/
+**/node_modules/
+**/.expo/
+**/build/
+.cache/
+*.o
+mobile-app/ios/
+mobile-app/android/
+# File fixtures and server-only assets are not needed by the iPhone module.
+testfiles/
+tests/
+deploy/
+web/
+third_party/dejavu/
+# Local signing files and environment credentials never belong in source archives.
+**/.env
+**/.env.*
+**/credentials.json
+**/*.p8
+**/*.p12
+**/*.mobileprovision

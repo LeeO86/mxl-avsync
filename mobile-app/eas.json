@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 26.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "developmentClient": false,
+      "autoIncrement": true,
+      "node": "20.19.4",
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2",
+        "buildConfiguration": "Release"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {}
+    }
+  }
+}
