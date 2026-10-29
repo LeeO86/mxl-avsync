@@ -5,11 +5,12 @@ import { Audio } from 'expo-av';
 import { requireNativeViewManager } from 'expo-modules-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import native from './modules/avsync';
+import { receiveReading, readingPresentation, savedReading } from './src/reading.mjs';
 import { generatorOptions } from './src/generator.mjs';
 import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
 import { checkClock, clockSummary } from './src/clock.mjs';
 import { offsetText, measureSentence, formatResultWhen } from './src/measure.mjs';
-import { validCalibration, calibrationSummary, prepareReading, makeCalibration, nearestFrame } from './src/workflow.mjs';
+import { validCalibration, calibrationSummary, makeCalibration, nearestFrame } from './src/workflow.mjs';
 
 const NativeCamera = native?.supportsLiveCapture ? requireNativeViewManager('Avsync') : null;
 const bg = '#121417', ink = '#e7ecf1', muted = '#9aa7b5', orange = '#ffc26b';
@@ -21,12 +22,13 @@ function SignalPill({ value, icon }) {
  const color = value.tone === 'green' ? '#76e2a3' : value.tone === 'orange' ? orange : muted;
  return <View accessible accessibilityLabel={value.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18, backgroundColor: '#121417e8', borderWidth: 1, borderColor: `${color}66` }}><Ionicons name={icon} size={15} color={color} /><Text style={{ color, fontSize: 12, fontWeight: '600' }}>{value.label}</Text></View>;
 }
-function LatencyPanel({ values, hint, clock, onCheck, checking, error }) {
+function LatencyPanel({ values, hint, clock, onCheck, checking, error, sampleNote }) {
  const format = value => value === null ? '—' : `${value < 0 ? '−' : ''}${Math.abs(value).toFixed(0)} ms`;
  return <View style={{ marginTop: 10, backgroundColor: '#1c2128', borderRadius: 10, padding: 10 }}>
   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: orange, fontSize: 12, fontWeight: '600' }}>ESTIMATED LATENCY</Text><Pressable accessibilityRole="button" accessibilityLabel="Check phone clock" disabled={checking} onPress={onCheck}><Text style={{ color: muted, fontSize: 12 }}>{checking ? 'Checking…' : 'Check clock'}</Text></Pressable></View>
   <View style={{ flexDirection: 'row', gap: 24, marginTop: 5 }}><Text style={{ color: ink, fontSize: 17 }}>Video {format(values.video)}</Text><Text style={{ color: ink, fontSize: 17 }}>Audio {format(values.audio)}</Text></View>
   <Text style={{ color: muted, fontSize: 10, marginTop: 4 }}>{values.video === null ? hint : 'Live QR → phone capture · includes phone capture delay'}</Text>
+  {sampleNote && <Text style={{ color: orange, fontSize: 10, marginTop: 4 }}>{sampleNote}</Text>}
   <Text style={{ color: error ? orange : muted, fontSize: 10, marginTop: 4 }}>{error || clock}</Text>
  </View>;
 }
@@ -91,7 +93,7 @@ function CalibrationReview({ take, onSave, onRepeat, onCancel }) {
 
 export default function App() {
  const [session, setSession] = useState(initialState);
- const [live, setLive] = useState(null), [tab, setTab] = useState('measure');
+ const [readingSnapshot, setReadingSnapshot] = useState(null), [tab, setTab] = useState('measure');
  const [generating, setGenerating] = useState(false), [pickingImage, setPickingImage] = useState(false);
  const generatorImage = useMemo(() => session.generatorImageId && native?.generatorImageInfo ? native.generatorImageInfo(session.generatorImageId) : null, [session.generatorImageId]);
  const [settings, setSettings] = useState(false), [flow, setFlow] = useState(null), [take, setTake] = useState(null);
@@ -102,11 +104,15 @@ export default function App() {
  const [clockCheck, setClockCheck] = useState(null), [clockBusy, setClockBusy] = useState(false), [clockError, setClockError] = useState(null);
  useEffect(() => { const timer = setInterval(() => setTick(performance.now()), 200); return () => clearInterval(timer); }, []);
  const age = Math.max(0, tick - lastReportAt.current);
- const feedback = signalFeedback(status, age, running && !flow), latency = latencyValues(status, age, running && !flow);
+ const live = readingSnapshot?.reading || null;
+ const readingView = readingPresentation(readingSnapshot, status, age, tick, running && !flow);
+ const feedback = signalFeedback(status, age, running && !flow);
+ const currentLatency = latencyValues(status, age, running && !flow);
+ const latencyHeld = Boolean(live) && currentLatency.video === null && currentLatency.audio === null;
+ const latency = latencyHeld ? latencyValues(live, 0, true) : currentLatency;
  const taiUtcSeconds = Number.isFinite(session.taiUtcSeconds) ? session.taiUtcSeconds : 37;
  const [taiDraft, setTaiDraft] = useState(String(taiUtcSeconds));
  useEffect(() => { if (settings) setTaiDraft(String(taiUtcSeconds)); }, [settings, taiUtcSeconds]);
- useEffect(() => { if (running && age > 1600) setLive(null); }, [running, age]);
  const runClockCheck = async () => { setClockBusy(true); setClockError(null); try { setClockCheck(await checkClock()); } catch (error) { setClockCheck(null); setClockError(`Clock check unavailable: ${error.message}`); } finally { setClockBusy(false); } };
  const os = native?.deviceVersion() || String(Platform.Version);
  const now = Date.now();
@@ -121,10 +127,13 @@ export default function App() {
   setStatus(value);
   if (value.kind === 'calibration') { setTake(value); setFlow('review'); }
   else if (value.kind === 'error') { setNotice(value.message); if (flow === 'listening') { setFlow('aim'); camera.current?.resumeAnalysis(); } }
-  else if (value.kind === 'status' && !flow) setLive(null);
-  else if (value.kind === 'reading' && !flow) { setLive(prepareReading(value, calibration, Date.now())); setNotice(null); }
+  else if (!flow) {
+   const mono = performance.now();
+   setReadingSnapshot(previous => receiveReading(previous, value, calibration, Date.now(), mono));
+   if (value.kind === 'reading') setNotice(null);
+  }
  };
- const save = () => { if (live) { setSession(s => ({ ...s, results: [{ ...live, id: String(Date.now()), at: Date.now() }, ...s.results].slice(0, 50) })); setNotice('Measurement saved'); } };
+ const save = () => { const atMono = performance.now(); const view = readingPresentation(readingSnapshot, status, Math.max(0, atMono - lastReportAt.current), atMono, running && !flow); const item = savedReading(readingSnapshot, view, Date.now()); if (item) { setSession(s => ({ ...s, results: [item, ...s.results].slice(0, 50) })); setNotice(readingView.state === 'live' ? 'Measurement saved' : 'Last valid measurement saved'); } };
  const exportResult = async item => { try { await Share.share({ message: JSON.stringify({ ...item, mode: 'LIVE', reference: { type: 'none' }, accuracy: 'unvalidated' }, null, 2) }); } catch (e) { setNotice(e.message); } };
  const startGenerator = async () => {
   setGenerating(true); setNotice(null);
@@ -148,7 +157,7 @@ export default function App() {
    <View style={{ flexDirection: 'row', alignItems: 'center' }}><Image source={require('./assets/header-icon.png')} resizeMode="contain" style={{ width: 44, height: 44, marginRight: 12 }} /><View><Text style={{ color: ink, fontSize: 19, fontWeight: '600' }}>AVsync</Text><Text style={{ color: muted, fontSize: 11, letterSpacing: 1, marginTop: 2 }}>{flow ? 'CALIBRATION' : tab.toUpperCase()}</Text></View></View>
    <Pressable accessibilityLabel="Settings" onPress={() => setSettings(true)} style={round}><Ionicons name="settings-outline" size={24} color={ink} /></Pressable>
   </View>
-  {flow === 'review' ? <CalibrationReview take={take} onCancel={() => { setFlow(null); setTake(null); }} onRepeat={() => { setTake(null); setFlow('aim'); }} onSave={index => { const value = makeCalibration(take, index, os, Date.now()); setSession(s => ({ ...s, calibration: value })); setLive(null); setTake(null); setFlow(null); }} />
+  {flow === 'review' ? <CalibrationReview take={take} onCancel={() => { setFlow(null); setTake(null); }} onRepeat={() => { setTake(null); setFlow('aim'); }} onSave={index => { const value = makeCalibration(take, index, os, Date.now()); setSession(s => ({ ...s, calibration: value })); setReadingSnapshot(null); setTake(null); setFlow(null); }} />
    : tab === 'measure' || flow ? <View style={{ flex: 1 }}>
     <View style={{ flex: 1, backgroundColor: '#000', margin: 12, borderRadius: 12, overflow: 'hidden', justifyContent: 'center' }}>
      {!NativeCamera ? <Text style={{ ...text, padding: 20 }}>Install the new native build to enable high-frame-rate live capture.</Text>
@@ -160,11 +169,12 @@ export default function App() {
     </View>
     {flow ? <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>{flow === 'aim' && <Button title="Start calibration" disabled={!NativeCamera || !cameraPermission?.granted || !micPermission?.granted} onPress={() => { setFlow('listening'); camera.current?.beginCalibration(); }} />}<Button title="Cancel" onPress={cancelCalibration} />{notice && <Text style={{ color: orange }}>{notice}</Text>}</View>
      : <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: live && !calibration ? orange : ink, fontSize: 56 }}>{offsetText(live?.offset_ms)}</Text><Pressable accessibilityLabel="Clear reading" onPress={() => { setLive(null); camera.current?.resumeAnalysis(); }} style={round}><Ionicons name="close-outline" size={28} color={ink} /></Pressable></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: live && !calibration ? orange : ink, fontSize: 56 }}>{offsetText(live?.offset_ms)}</Text><Pressable accessibilityLabel="Clear reading" onPress={() => { setReadingSnapshot(null); camera.current?.resumeAnalysis(); }} style={round}><Ionicons name="close-outline" size={28} color={ink} /></Pressable></View>
       <Text style={{ color: ink, fontSize: 20, marginTop: 4 }}>{measureSentence(live?.offset_ms)}</Text>
+      {live && <Text accessibilityRole="text" style={{ color: readingView.state === 'live' ? ink : orange, marginTop: 6, fontSize: 12 }}>{readingView.label} · {live.eventCount} pairs · spread {Number.isFinite(live.spread_ms) ? live.spread_ms.toFixed(1) + ' ms' : 'unknown'}</Text>}
       <Text style={{ color: muted, marginTop: 12 }}>Quality: {live?.quality || '—'} · Calibration: {calibration ? offsetText(calibration.offset_ms) : 'missing (0 ms)'} · Uncertainty: unknown</Text>
       <Text style={{ color: notice ? orange : muted, marginTop: 8, fontSize: 12 }}>{notice || (status.kind === 'reading' ? `${status.eventCount} matched events · live updates` : status.message || 'Looking for test signal…')}</Text>
-      <LatencyPanel values={latency} hint={!running ? 'Analysis paused' : age > 1600 ? 'Waiting for capture updates' : latencyHint(status.latency?.state)} clock={clockSummary(clockCheck)} onCheck={runClockCheck} checking={clockBusy} error={clockError} />
+      <LatencyPanel values={latency} sampleNote={latencyHeld ? `Last paired sample · ${readingView.label}` : null} hint={!running ? 'Analysis paused' : age > 1600 ? 'Waiting for capture updates' : latencyHint(status.latency?.state)} clock={clockSummary(clockCheck)} onCheck={runClockCheck} checking={clockBusy} error={clockError} />
       <View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1 }}><Button title={running ? 'Pause' : 'Live analysis'} onPress={() => setRunning(v => !v)} /></View><View style={{ flex: 1 }}><Button title="Save result" disabled={!live} onPress={save} /></View></View>
      </View>}
    </View> : tab === 'generator' ? <GeneratorPanel session={session} onChange={(key, value) => setSession(s => ({ ...s, [key]: value }))} image={generatorImage} picking={pickingImage} onPickImage={pickGeneratorImage} rate={session.generatorRate === 1 ? 1 : 2} onRate={value => setSession(s => ({ ...s, generatorRate: value }))} onStart={startGenerator} busy={generating} clock={clockSummary(clockCheck)} checking={clockBusy} clockError={clockError} onCheck={runClockCheck} notice={notice} /> : <ScrollView contentContainerStyle={{ padding: 20 }}>{session.results.length ? session.results.map(item => <Pressable key={item.id} onPress={() => exportResult(item)} style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#2c3540' }}><Text style={{ color: item.calibrated ? ink : orange, fontSize: 22 }}>{offsetText(item.offset_ms)}</Text><Text style={{ color: muted }}>{formatResultWhen(item.at)} · {item.calibrated ? 'Calibrated' : '0 ms correction'} · tap to export</Text></Pressable>) : <Text style={{ color: muted }}>No saved results</Text>}</ScrollView>}
@@ -181,7 +191,7 @@ export default function App() {
        <Text style={{ color: muted, marginTop: 6, lineHeight: 19 }}>{correction.state === 'active' ? 'Applied to live AV sync measurements.' : correction.state === 'inactive' ? `Saved correction ${offsetText(correction.storedOffsetMs)} is no longer valid. Repeat calibration to use it again.` : 'No calibration saved. Measurements use 0 ms correction.'}</Text>
        {correction.savedAt !== null && <Text style={{ color: muted, fontSize: 12, marginTop: 6 }}>Saved {formatResultWhen(correction.savedAt)}</Text>}
       </View>
-      <Text style={{ color: muted, fontSize: 12, marginTop: 12 }}>Latency uses the live QR's TAI timestamp and phone UTC. Capture and source clock accuracy are unknown. The HTTPS check detects gross clock errors and does not calibrate latency.</Text><View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}><Text style={{ color: ink, flex: 1 }}>Source TAI−UTC (seconds)</Text><TextInput accessibilityLabel="Source TAI minus UTC seconds" keyboardType="number-pad" value={taiDraft} onChangeText={value => { if (/^\d{0,3}$/.test(value)) setTaiDraft(value); }} style={{ color: ink, backgroundColor: '#121417', borderRadius: 6, padding: 8, minWidth: 48, textAlign: 'center' }} /><Pressable accessibilityRole="button" disabled={!taiDraft || Number(taiDraft) > 100} onPress={() => { setSession(previous => ({ ...previous, taiUtcSeconds: Number(taiDraft) })); setStatus(previous => ({ ...previous, latency: { state: 'waiting_for_live_qr' } })); }} style={{ padding: 8 }}><Text style={{ color: !taiDraft || Number(taiDraft) > 100 ? muted : orange }}>Apply</Text></Pressable></View><Text style={{ color: muted, fontSize: 11 }}>Time check: worldtime.timezone.io · only when requested</Text>{[['Repeat calibration', startCalibration], ['Clear saved calibration (use 0 ms)', () => { setSession(s => ({ ...s, calibration: null })); setLive(null); setSettings(false); }], ['Clear results', () => setSession(s => ({ ...s, results: [] }))], ['Privacy policy & support', () => { setSettings(false); Linking.openURL('https://leeo86.github.io/mxl-avsync/privacy-en.html').catch(() => setNotice('Open https://leeo86.github.io/mxl-avsync/privacy-en.html for privacy and support.')); }], ['Close', () => setSettings(false)]].map(([label, onPress]) => <Pressable key={label} onPress={onPress} style={{ paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#2c3540' }}><Text style={text}>{label}</Text></Pressable>)}
+      <Text style={{ color: muted, fontSize: 12, marginTop: 12 }}>Latency uses the live QR's TAI timestamp and phone UTC. Capture and source clock accuracy are unknown. The HTTPS check detects gross clock errors and does not calibrate latency.</Text><View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}><Text style={{ color: ink, flex: 1 }}>Source TAI−UTC (seconds)</Text><TextInput accessibilityLabel="Source TAI minus UTC seconds" keyboardType="number-pad" value={taiDraft} onChangeText={value => { if (/^\d{0,3}$/.test(value)) setTaiDraft(value); }} style={{ color: ink, backgroundColor: '#121417', borderRadius: 6, padding: 8, minWidth: 48, textAlign: 'center' }} /><Pressable accessibilityRole="button" disabled={!taiDraft || Number(taiDraft) > 100} onPress={() => { setSession(previous => ({ ...previous, taiUtcSeconds: Number(taiDraft) })); setStatus(previous => ({ ...previous, latency: { state: 'waiting_for_live_qr' } })); }} style={{ padding: 8 }}><Text style={{ color: !taiDraft || Number(taiDraft) > 100 ? muted : orange }}>Apply</Text></Pressable></View><Text style={{ color: muted, fontSize: 11 }}>Time check: worldtime.timezone.io · only when requested</Text>{[['Repeat calibration', startCalibration], ['Clear saved calibration (use 0 ms)', () => { setSession(s => ({ ...s, calibration: null })); setReadingSnapshot(null); setSettings(false); }], ['Clear results', () => setSession(s => ({ ...s, results: [] }))], ['Privacy policy & support', () => { setSettings(false); Linking.openURL('https://leeo86.github.io/mxl-avsync/privacy-en.html').catch(() => setNotice('Open https://leeo86.github.io/mxl-avsync/privacy-en.html for privacy and support.')); }], ['Close', () => setSettings(false)]].map(([label, onPress]) => <Pressable key={label} onPress={onPress} style={{ paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#2c3540' }}><Text style={text}>{label}</Text></Pressable>)}
      </ScrollView>
     </View>
    </View>

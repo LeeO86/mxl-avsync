@@ -2,6 +2,13 @@
 
 ## 1.0.2 (unreleased)
 
+- Keep the last valid mobile measurement saveable through temporary signal loss,
+  label its age and spread, and preserve acquisition time in saved/exported results.
+  Source changes and explicit clears still discard the retained snapshot.
+- Stabilize the camera outline with bounded hold/fade and corner smoothing;
+  reject one-off geometry jumps and expire lost targets within 600 ms. The
+  detector's timing, validity gates and AV samples remain unchanged.
+
 - Fix source-picture selection so Apply enables and uploads PNG/GIF files; retain
   failed or newly selected uploads and reset the file input on Apply/Discard.
 - Show only role-appropriate previews and replace unavailable images with a

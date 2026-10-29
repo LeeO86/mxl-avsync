@@ -18,8 +18,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private var lastQrScan = -10.0
   private var generation = 0
   private let pictureOutline = CAShapeLayer()
-  private var lastPicture: [String: Any] = [:]
-  private var lastPictureAt = -10.0
+  private var outlineTracker = PreviewOutlineTracker()
   private var outlineWatchdog: Timer?
   private var active = true
   private var background = false
@@ -42,24 +41,29 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     pictureOutline.lineJoin = .round
     pictureOutline.actions = ["path": NSNull(), "strokeColor": NSNull()]
     layer.addSublayer(pictureOutline)
-    outlineWatchdog = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-      guard let self, ProcessInfo.processInfo.systemUptime - self.lastPictureAt > 0.35 else { return }
-      self.lastPicture = [:]; self.drawPicture()
-    }
+    outlineWatchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.drawPicture() }
     notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = true; self?.updateRunning() })
     notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = false; self?.updateRunning() })
   }
   override func layoutSubviews() { super.layoutSubviews(); preview.frame = bounds; drawPicture() }
+  private func observePicture(_ value: [String: Any], at now: Double) {
+    let rows = value["points"] as? [[String: Double]] ?? []
+    let points = value["found"] as? Bool == true ? rows.compactMap { row -> CGPoint? in
+      guard let x=row["x"], let y=row["y"] else { return nil }; return CGPoint(x:x,y:y)
+    } : []
+    outlineTracker.observe(points, image:CGSize(width:(value["width"] as? Double) ?? 0,height:(value["height"] as? Double) ?? 0), decoded:value["codeDecoded"] as? Bool == true, at:now)
+    drawPicture()
+  }
+  private func clearOutline() { outlineTracker.reset(); pictureOutline.path=nil }
   private func drawPicture() {
     pictureOutline.frame = bounds
-    guard lastPicture["found"] as? Bool == true,
-          let points = lastPicture["points"] as? [[String: Double]], points.count == 4,
-          let width = lastPicture["width"] as? Double, let height = lastPicture["height"] as? Double else { pictureOutline.path = nil; return }
-    let mapped = previewPoints(points.map { CGPoint(x: $0["x"] ?? 0, y: $0["y"] ?? 0) }, image: CGSize(width: width, height: height), view: bounds.size)
-    guard mapped.count == 4 else { pictureOutline.path = nil; return }
-    let path = UIBezierPath(); path.move(to: mapped[0]); for point in mapped.dropFirst() { path.addLine(to: point) }; path.close()
-    pictureOutline.path = path.cgPath
-    pictureOutline.strokeColor = (lastPicture["codeDecoded"] as? Bool == true ? UIColor.systemGreen : UIColor.systemOrange).cgColor
+    guard let outline=outlineTracker.current(at:ProcessInfo.processInfo.systemUptime) else { pictureOutline.path=nil; return }
+    let mapped=previewPoints(outline.points,image:outline.image,view:bounds.size)
+    guard mapped.count == 4 else { pictureOutline.path=nil;return }
+    let path=UIBezierPath();path.move(to:mapped[0]);for point in mapped.dropFirst(){path.addLine(to:point)};path.close()
+    pictureOutline.path=path.cgPath
+    pictureOutline.strokeColor=(outline.decoded ? UIColor.systemGreen : UIColor.systemOrange).cgColor
+    pictureOutline.opacity=outline.held ? 0.45 : 1
   }
   func setTaiUtcOffset(_ seconds: Double) { samples.async { [weak self] in self?.taiUtcSeconds = seconds } }
   override func didMoveToWindow() { super.didMoveToWindow(); updateRunning() }
@@ -70,8 +74,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     control.async { if old.isRunning { old.stopRunning() } }
   }
   func setActive(_ value: Bool) { active = value; updateRunning() }
-  func beginCalibration() { samples.async { [weak self] in self?.generation += 1; self?.processor.beginCalibration() } }
-  func resumeAnalysis() { samples.async { [weak self] in self?.generation += 1; self?.processor.reset() } }
+  func beginCalibration() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.beginCalibration() } }
+  func resumeAnalysis() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.reset() } }
   private func emit(_ value: [String: Any]) {
     var report = value; report["configuredFps"] = targetFps
     if report["kind"] as? String != "calibration" {
@@ -101,7 +105,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       } else if self.session.isRunning {
         self.session.stopRunning()
         self.samples.async { self.generation += 1 }
-        DispatchQueue.main.async { self.lastPicture = [:]; self.drawPicture() }
+        DispatchQueue.main.async { self.clearOutline() }
       }
     }
   }
@@ -183,7 +187,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
         }
         processor.setTaiUtcOffset(taiUtcSeconds)
         let picture = processor.pictureObservation() as? [String: Any] ?? [:]
-        DispatchQueue.main.async { [weak self] in self?.lastPicture = picture; self?.lastPictureAt = ProcessInfo.processInfo.systemUptime; self?.drawPicture() }
+        DispatchQueue.main.async { [weak self] in self?.observePicture(picture, at:now) }
         if let report = processor.poll() as? [String: Any] { emit(report) }
       }
     }

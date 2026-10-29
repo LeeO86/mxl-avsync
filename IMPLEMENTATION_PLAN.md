@@ -852,3 +852,28 @@ broken image behind a placeholder while polling can recover it. Normal generator
 activity is a green header pill, muted/stopped neutral; red remains for failures.
 This explicitly updates the old red-banner requirement in specification §11.
 No codec, media scheduling, API or route changes.
+
+
+## Mobile result retention and outline stability (2026-10-29)
+
+User reports a vanishing Save target and flashing outline while filming WebRTC.
+Source inspection found unconditional JS clearing for status reports and a 1.6-s
+report timeout, plus immediate replacement of outline geometry by a single miss.
+The UI now retains the last native-accepted sample with explicit live/held/paused
+state, pair age/count/spread, and preserved acquisition timestamp on save/export.
+Duplicate reports of one pair do not refresh its age. Validated audio/QR identity
+changes and explicit clear/calibration changes invalidate retained readings.
+Latency can show the same paired snapshot when fresh estimates are unavailable,
+labelled historical. Signal pills still describe current capture.
+
+The native presentation tracker requires two nearby observations to acquire a
+quad, lightly smooths corner motion, rejects a one-off large jump and holds a
+missed quad for at most 600 ms (dim amber after 180 ms). It resets on capture stop
+or calibration/reset; green has a short independent confirmation lease. This
+changes neither PhoneSession, pairing thresholds, capture FPS nor event times.
+The supplied diagnostic has real intermittent pairing and widely varying event
+offsets; UI stability is not proof those timing variations have been corrected.
+PR #34 changes only web/docs/tests, so its CI rebuild has no intentional media
+algorithm change. The retained 815c55f staging binary additionally has the newer
+compact audio protocol, unlike released/main legacy media. No server rollout is
+part of this mobile fix.

@@ -582,7 +582,7 @@ At a real monitor and loudspeaker, the phone's camera sees the test picture and 
 - the grade colour with the same windows as §8.3 (from the QR's test id the app MAY fetch the analyzer's windows; else the defaults);
 - `Quality: good / degraded / invalid` and `Calibration: valid / missing / expired`;
 - a time series and the statistics after several events;
-- saved measurements (local), compare, export as the result JSON of §8 (`mode: "LIVE"`, `reference.type: "none"`).
+- saved measurements (local), compare, export as the result JSON of §8 (`mode: "LIVE"`, `reference.type: "none"`). The last valid measurement remains saveable through temporary recognition gaps, explicitly labelled with age/spread; a retained sample is never relabelled as a fresh measurement. Saving preserves its original acquisition time plus save time and age. Source changes and explicit clears discard the retained sample. Outline smoothing/brief hold affect presentation only and must not feed back into detection or timestamping.
 
 AV offset is measured. Optional estimated latency uses the phone clock with explicitly unknown physical timing accuracy (§3.3). The Generate tab also supplies a native test source for an external camera/analyzer; its source-output calibration is separate from capture calibration.
 
