@@ -247,3 +247,13 @@ TEST_CASE("phone source latency stays explicitly estimated even with receiver cl
         CHECK(e.latency_uncertainty_status=="unknown");CHECK(e.uncertainty_status=="unknown");
     }
 }
+
+TEST_CASE("AVS2 compact payload preserves full identities and source clock semantics") {
+    QrPayload p;p.timecode=p.qr_flash=true;p.source_id=0xFEDCBA98;p.test_id="presentation-name";
+    p.mode="LIVE";p.estimated_source=true;p.k=9007199254740993ULL;p.tk=1793300000000000001LL;p.offset_ms=-3217.0625;p.rate=2;p.format="720p60";
+    auto text=qr_payload_text(p);CHECK(text.size()==59);CHECK(text.starts_with("AVS2:"));
+    auto decoded=parse_qr_payload(text);REQUIRE(decoded);CHECK(decoded->qr_flash);CHECK(decoded->timecode);
+    CHECK(decoded->k==p.k);CHECK(decoded->tk==p.tk);CHECK(decoded->source_id==p.source_id);CHECK(decoded->offset_ms==p.offset_ms);
+    CHECK(decoded->estimated_source);CHECK(decoded->format=="720p60");CHECK(decoded->rate==2);
+    CHECK_FALSE(parse_qr_payload(text+"0"));text[5]='F';CHECK_FALSE(parse_qr_payload(text));
+}

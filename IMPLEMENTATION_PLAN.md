@@ -1025,3 +1025,22 @@ still recovers exact optical timestamps; contradictory jumps and missing-edge
 negative cases remain guarded. Raw replay recovered an additional genuine
 pulse without changing its optical timestamp. No change to pair-count/spread
 acceptance gates or calibration.
+
+## Shared QR + flash acquisition (2026-10-29)
+
+Maintainer-directed replacement of the custom corner/Gray-strip dependency for
+compact timecode sources: all event identity is in a large, compact AVS2 QR,
+with an adjacent equal-size flash panel. This supersedes the compact-source
+geometry/strip decisions in §§4/5/12; legacy input remains readable. File/MXL/
+iPhone generators and receivers share payload, geometry and optical tracker.
+The iOS fast path samples the original 8-bit camera plane without raster copy
+or perspective rectification. QR processing is asynchronous, carries its
+capture timestamp and corners, and can identify an already observed edge.
+
+No per-frame drop/duplicate statistics are inferred without the old strip.
+A/V identity uses full source and video-send time independently present in
+both channels. Source clock estimates and unknown capture uncertainty remain
+explicit. Existing saved readings/calibration must be backed up and verified
+before any physical-device installation; no TestFlight or release is required.
+
+Validation and deployment results are recorded in docs/qr-flash.md once run.

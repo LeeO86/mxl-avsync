@@ -3,8 +3,29 @@
 #include <algorithm>
 
 namespace avsync {
+std::optional<QrDetection> decode_qr_signal(const uint16_t* luma,int width,int height,int stride) {
+    if(!luma||width<16||height<16||stride<width)return std::nullopt;
+    // Bound search cost; retain enough module pixels for small camera targets.
+    const int step=std::max(1,std::max(width,height)/1920);
+    const int w=width/step,h=height/step;
+    std::vector<uint8_t> gray(size_t(w)*h);
+    for(int y=0;y<h;++y)for(int x=0;x<w;++x)gray[size_t(y)*w+x]=uint8_t(std::min(255,luma[size_t(y*step)*stride+x*step]>>2));
+    ZXing::ReaderOptions options;options.setFormats(ZXing::BarcodeFormat::QRCode);options.setTextMode(ZXing::TextMode::Plain);
+    for(const auto& code:ZXing::ReadBarcodes({gray.data(),w,h,ZXing::ImageFormat::Lum},options)) {
+        if(!code.isValid())continue;
+        auto payload=parse_qr_payload(code.text());if(!payload)continue;
+        QrDetection out;out.payload=*payload;
+        auto pos=code.position();auto tl=pos.topLeft(),tr=pos.topRight(),br=pos.bottomRight(),bl=pos.bottomLeft();
+        const decltype(tl) corners[]={tl,tr,br,bl};
+        for(int i=0;i<4;++i){out.x[i]=double(corners[i].x)*step/width;out.y[i]=double(corners[i].y)*step/height;}
+        return out;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int height, int stride)
 {
+    if(auto signal=decode_qr_signal(luma,width,height,stride);signal&&signal->payload.qr_flash)return qr_payload_text(signal->payload);
     const FrameGeometry g = frame_geometry(width, height);
     const int margin = std::max(8, g.qr_size / 8);
     const int x0 = std::max(0, g.qr_x - margin);

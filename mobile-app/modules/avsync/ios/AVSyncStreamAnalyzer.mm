@@ -61,6 +61,15 @@ NSData *wav(const std::vector<float>& samples,int rate) {
 #endif
  }
 }
+- (void)observeQRDetection:(NSDictionary *)detection timeMs:(double)timeMs {
+ NSString *text=detection[@"payload"];NSArray *points=detection[@"points"];
+ auto qr=avsync::parse_qr_payload(text.UTF8String);
+ if(!qr||points.count!=4)return;
+ [self observeQR:text timeMs:timeMs];
+ avsync::QrDetection q;q.payload=*qr;
+ for(int i=0;i<4;++i){q.x[i]=[points[i][@"x"] doubleValue];q.y[i]=[points[i][@"y"] doubleValue];}
+ state->session->observe_qr(q,timeMs);
+}
 - (NSDictionary *)pictureObservation {
  auto&s=*state;const auto&pose=s.session->current_picture();
  if(s.calibration||s.lastAudio-s.lastVideo>300||!pose.found||s.videoWidth<=0||s.videoHeight<=0)return @{@"found":@NO};
@@ -90,6 +99,18 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   s.pictures.push_back(std::move(f));
   double oldest=s.spike>=0?s.spike-750:time-750;
   while(!s.pictures.empty()&&(s.pictures.front().time<oldest||s.pictures.size()>800))s.pictures.pop_front();
+ }else if(s.session->qr_flash_active()){
+  // Sparse photometry directly in the camera plane; no conversion/rectification.
+  s.videoWidth=w;s.videoHeight=h;
+  s.session->push_video_u8(base,w,h,stride,time);
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+  if(s.diagnostic&&s.diagnostic->accepting()){
+   std::vector<uint16_t> luma(sw*sh);
+   for(int y=0;y<sh;y++)for(int x=0;x<sw;x++)luma[y*sw+x]=base[y*step*stride+x*step]*4;
+   NSMutableDictionary *trace=[@{@"locatedFrames":@(s.session->located_frames()),@"validFrames":@(s.session->valid_frames()),@"picture":[self pictureObservation]} mutableCopy];
+   s.diagnostic->video(std::move(luma),sw,sh,time,trace);
+  }
+#endif
  }else{
   std::vector<uint16_t> luma(sw*sh);
   for(int y=0;y<sh;y++)for(int x=0;x<sw;x++)luma[y*sw+x]=base[y*step*stride+x*step]*4;

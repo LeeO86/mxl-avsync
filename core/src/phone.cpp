@@ -47,14 +47,38 @@ void PhoneSession::observe_signal(const QrPayload& qr) {
     if ((qr.rate != 1 && qr.rate != 2 && qr.rate != 4) || !parse_video_format(qr.format)) return;
     const bool changed = signal_ && (signal_->test_id != qr.test_id || signal_->source_id != qr.source_id ||
         signal_->mode != qr.mode || signal_->timecode != qr.timecode || signal_->rate != qr.rate ||
-        signal_->format != qr.format || signal_->estimated_source != qr.estimated_source);
+        signal_->format != qr.format || signal_->qr_flash != qr.qr_flash || signal_->estimated_source != qr.estimated_source);
     if (changed || (!signal_ && qr.timecode)) {
+        qr_flash_.reset();
         // Do not retain a speculative legacy anchor when compact identity first arrives.
         videos_.clear(); locked_seq_.reset(); pending_frames_ = 0; have_transition_ = false;
         marker_phase_ = MarkerReading::State::Invalid; white_onset_ms_.reset();
         if(changed){timecode_stream_.reset(); timecodes_.clear(); audio_.clear(); audio_set_ = false;}
     }
     signal_ = qr; event_rate_ = qr.rate;
+}
+
+void PhoneSession::collect_qr_events() {
+    for(auto& event:qr_flash_.take_events()) { locked_seq_=uint32_t(event.seq);videos_.push_back(std::move(event)); }
+}
+void PhoneSession::observe_qr(const QrDetection& q,double time) {
+    observe_signal(q.payload);
+    qr_flash_.observe(q,time);collect_qr_events();
+}
+
+void PhoneSession::update_qr_picture(double frame_start_ms) {
+        current_picture_=qr_flash_.pose();picture_code_confirmed_=qr_flash_.valid_frame();
+        if(current_picture_.found)++located_frames_;
+        if(picture_code_confirmed_) {
+            ++valid_frames_;last_valid_frame_ms_=frame_start_ms;
+            if(auto seq=qr_flash_.sequence()){decoded_seq_=uint32_t(*seq);confirmed_picture_seq_=uint32_t(*seq);confirmed_picture_time_ms_=frame_start_ms;}
+        }
+}
+void PhoneSession::push_video_u8(const uint8_t* luma,int width,int height,int stride,double time_ms) {
+    if(!qr_flash_active())return;
+    VideoObservation frame;frame.time_ms=time_ms;
+    qr_flash_.push_u8(luma,width,height,stride,frame);
+    update_qr_picture(time_ms);collect_qr_events();
 }
 
 void PhoneSession::set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms)
@@ -65,6 +89,12 @@ void PhoneSession::set_calibration(const CalibrationRecord& record, std::string_
 
 void PhoneSession::push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms)
 {
+    if (signal_ && signal_->qr_flash) {
+        VideoObservation frame;frame.time_ms=frame_start_ms;
+        qr_flash_.push(luma,width,height,stride,frame);
+        update_qr_picture(frame_start_ms);
+        collect_qr_events();return;
+    }
     if (!cached_pose_.found || frame_start_ms - pose_time_ms_ > 150) {
         cached_pose_ = locate_picture(luma, width, height, stride);
         pose_time_ms_ = frame_start_ms;
@@ -280,7 +310,7 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
     Pairer pairer(detect.period_ms, windows_, reference, "LIVE", test_id);
     const bool coded = (signal_ && signal_->timecode) || !report.audio_timecodes.empty();
     for (auto video : videos_) {
-        if (signal_) identify_video(video, *signal_);
+        if (signal_ && !video.timecode) identify_video(video, *signal_);
         if (coded && !video.timecode) continue;
         pairer.observe_video(video, 0);
     }

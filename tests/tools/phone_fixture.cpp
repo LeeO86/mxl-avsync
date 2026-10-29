@@ -78,7 +78,7 @@ int main(int argc, char** argv)
             PictureInfo info;
             info.title = "TEST SIGNAL";
             info.source = "Synthetic phone camera";
-            info.qr_json = qr_payload_json(plan.qr(sequence));
+            info.qr_json = qr_payload_text(plan.qr(sequence));
             info.period_ms = 1000.0 / rate;
             render_picture(source, info, sequence, position, plan.period_frames(), flash_white(position, 1000.0 / 60));
             // Resample source pixels; its 60-Hz strip must survive 50-Hz capture.

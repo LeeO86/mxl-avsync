@@ -66,8 +66,8 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     _info.source_image=&_sourceImage;
 }
 - (NSDictionary *)geometry {
-    auto g=avsync::frame_geometry(1280,720);
-    return @{ @"width":@1280,@"height":@720,@"markerX":@(g.marker_x),@"markerY":@(g.marker_y),@"markerSide":@(g.marker_side),@"stripX":@(g.strip_x),@"stripY":@(g.strip_y),@"stripWidth":@(g.strip_w),@"stripHeight":@(g.strip_h) };
+    auto g=avsync::qr_flash_geometry(1280,720);
+    return @{ @"width":@1280,@"height":@720,@"markerX":@(g.marker_x),@"markerY":@(g.marker_y),@"markerSide":@(g.marker_side),@"stripX":@(g.strip_x),@"stripY":@(g.strip_y),@"stripWidth":@0,@"stripHeight":@0 };
 }
 - (NSDictionary *)frameAt:(double)target {
     const auto frame=_plan->frame_at(target);const int period=_plan->period_frames();const uint64_t seq=1+frame/period;const int pos=int(frame%period);
@@ -79,7 +79,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }
 - (NSData *)audioForSequence:(uint64_t)seq { const auto samples=_plan->audio(seq);return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)]; }
 - (UIImage *)imageForSequence:(uint64_t)seq {
-    _info.qr_json=avsync::qr_payload_json(_plan->qr(seq));_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
+    _info.qr_json=avsync::qr_payload_text(_plan->qr(seq));_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
     avsync::Yuv422p10 frame;frame.resize(1280,720);
     avsync::render_picture(frame,_info,seq,0,_plan->period_frames(),false);
     return image_from_frame(frame);

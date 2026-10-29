@@ -22,10 +22,17 @@
         if(![handler performRequests:@[request] error:&error]){
             lastError=error.localizedDescription?:@"Vision QR failed";continue;
         }
-        NSMutableArray *payloads=[NSMutableArray array];
-        for(VNBarcodeObservation *code in request.results)
-            if([code.payloadStringValue containsString:@"mxl-avsync/1"])[payloads addObject:code.payloadStringValue];
-        if(payloads.count)return @{@"payloads":payloads,@"revision":revision,@"error":@"none"};
+        NSMutableArray *payloads=[NSMutableArray array],*detections=[NSMutableArray array];
+        for(VNBarcodeObservation *code in request.results) {
+            NSString *text=code.payloadStringValue;
+            if(![text containsString:@"mxl-avsync/1"]&&![text hasPrefix:@"AVS2:"])continue;
+            [payloads addObject:text];
+            CGPoint p[]={code.topLeft,code.topRight,code.bottomRight,code.bottomLeft};
+            NSMutableArray *points=[NSMutableArray array];
+            for(int i=0;i<4;++i)[points addObject:@{@"x":@(p[i].x),@"y":@(1-p[i].y)}];
+            [detections addObject:@{@"payload":text,@"points":points}];
+        }
+        if(payloads.count)return @{@"payloads":payloads,@"detections":detections,@"revision":revision,@"error":@"none"};
     }
     return @{@"payloads":@[],@"error":lastError};
 }

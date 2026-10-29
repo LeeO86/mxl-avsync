@@ -328,6 +328,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
                     frame_in_period = static_cast<int>(static_cast<uint64_t>(index) - event.video_grain);
                     offset = event.expected_av_offset_ms;
                 } else {
+                    if(plan_config.timecode_baud && shown_seq != 0)break;
                     qr_seq = event.seq;
                     offset = event.expected_av_offset_ms;
                     tk = static_cast<int64_t>(std::llround(event.video_timeline_ms * (plan_config.timecode_baud ? 1e6 : 1)));
@@ -354,6 +355,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
             if (second != qr_second || plan_config.timecode_baud) {
                 QrPayload payload;
                 payload.timecode = plan_config.timecode_baud != 0;
+                payload.qr_flash = payload.timecode;
                 payload.source_id = plan_config.source_id;
                 payload.test_id = request.test_id;
                 payload.mode = "FILE";
@@ -363,7 +365,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
                 payload.offset_ms = offset;
                 payload.rate = request.event_rate;
                 payload.format = request.format;
-                qr_cached = qr_payload_json(payload);
+                qr_cached = qr_payload_text(payload);
                 qr_second = second;
             }
             info.qr_json = qr_cached;
@@ -634,6 +636,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
         bool audio_origin_set = false;
         int native_rate = adec->sample_rate > 0 ? adec->sample_rate : 48000;
         std::optional<QrPayload> qr;
+        QrFlashTracker qr_flash;double qr_scan_ms=-1e30;
         AVPacket* packet = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
         std::vector<VideoObservation> videos;
@@ -666,6 +669,20 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
                     for (int y = 0; y < height; ++y) {
                         std::memcpy(luma.data() + static_cast<size_t>(y) * width, yuv->data[0] + static_cast<size_t>(y) * yuv->linesize[0],
                             static_cast<size_t>(width) * sizeof(uint16_t));
+                    }
+                    if(ms-qr_scan_ms>=100) {
+                        qr_scan_ms=ms;
+                        if(auto detection=decode_qr_signal(luma.data(),width,height,width)) {
+                            qr=detection->payload;
+                            if(qr->qr_flash)qr_flash.observe(*detection,ms);
+                        }
+                    }
+                    if(qr&&qr->qr_flash) {
+                        VideoObservation capture;capture.time_ms=ms;
+                        capture.grain_index=int64_t(std::llround(ms*synthetic.frame.num/(1000.0*synthetic.frame.den)));
+                        qr_flash.push(luma.data(),width,height,width,capture);
+                        for(auto& event:qr_flash.take_events())videos.push_back(std::move(event));
+                        av_frame_unref(frame);continue;
                     }
                     if (!qr) {
                         if (auto text = decode_qr_text(luma.data(), width, height, width)) {

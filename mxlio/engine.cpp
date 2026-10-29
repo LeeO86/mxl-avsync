@@ -177,11 +177,12 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             info.time_line = timetext;
             const int grains = std::max(1, period.grains);
             const uint64_t event_index = (index / static_cast<uint64_t>(grains)) * static_cast<uint64_t>(grains);
-            const uint64_t named = index == event_index ? event_index : event_index + static_cast<uint64_t>(grains);
+            const uint64_t named = config.audio_timecode == "legacy" && index != event_index ? event_index + static_cast<uint64_t>(grains) : event_index;
             const uint64_t named_seq = named / static_cast<uint64_t>(grains);
             if (named_seq != qr_seq) {
                 QrPayload payload;
                 payload.timecode = config.audio_timecode != "legacy";
+                payload.qr_flash = payload.timecode;
                 payload.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
                 payload.test_id = config.test_id.empty() ? config.seed() : config.test_id;
                 payload.mode = "LIVE";
@@ -190,7 +191,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 payload.offset_ms = config.offset_ms;
                 payload.rate = config.event_rate;
                 payload.format = format->token;
-                qr_cached = qr_payload_json(payload);
+                qr_cached = qr_payload_text(payload);
                 qr_seq = named_seq;
             }
             info.qr_json = qr_cached;
@@ -438,6 +439,8 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     std::set<std::pair<uint32_t,int64_t>> heard_timecodes;
     std::optional<MarkerTracker> tracker;
     PictureReader picture_reader;
+    QrFlashTracker qr_flash;
+    double qr_flash_scan_ms=-1e30;
     int tracker_width = 0, tracker_height = 0;
     bool tracker_optical = false;
     AudioTimecodeStream timecode_stream;
@@ -702,7 +705,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         tracked.interlaced = video.interlaced;
         tracked.frame = video.interlaced ? Rate{std::max<int64_t>(1, pace.num), pace.den * 2} : pace;
         if (tracker_flow != video.flow_id || !tracker || !pairer) {
-            picture_reader.reset();
+            picture_reader.reset();qr_flash.reset();qr_flash_scan_ms=-1e30;
             tracker_width = tracker_height = 0;
             tracker.emplace(tracked, config.event_rate);
             const ReferenceInfo reference = current_reference(video.domain_id);
@@ -716,6 +719,34 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             timecode_stream.reset(); signal_qr.reset(); qr_read_ms = -1e30;
         }
         const int64_t tai_ns = static_cast<int64_t>(time_of_index(pace, want));
+        std::optional<QrDetection> qr_detection;
+        if(tai_ns/1e6-qr_flash_scan_ms >= (signal_qr&&!signal_qr->qr_flash?500:100)) {
+            qr_flash_scan_ms=tai_ns/1e6;
+            qr_detection=decode_qr_signal(luma.data(),video.width,grain_rows,video.width);
+            if(qr_detection&&qr_detection->payload.qr_flash) {
+                const auto& next=qr_detection->payload;
+                const bool changed=!signal_qr||!signal_qr->qr_flash||next.source_id!=signal_qr->source_id||
+                    next.mode!=signal_qr->mode||next.rate!=signal_qr->rate||next.format!=signal_qr->format||
+                    next.estimated_source!=signal_qr->estimated_source;
+                if(changed) {
+                    qr_flash.reset();timecode_stream.reset();audio_window.clear();heard.clear();heard_timecodes.clear();
+                    const auto source=parse_video_format(next.format);
+                    pairer.emplace(plan_period(*source,next.rate).period_ms,
+                        GradeWindows{config.pass_min_ms,config.pass_max_ms,config.warn_min_ms,config.warn_max_ms},
+                        current_reference(video.domain_id),"LIVE",config.test_id.empty()?config.seed():config.test_id);
+                }
+                signal_qr=next;qr_flash.observe(*qr_detection,tai_ns/1e6);
+            } else if(qr_detection&&signal_qr&&signal_qr->qr_flash) {
+                signal_qr.reset();qr_flash.reset();tracker.reset();continue;
+            }
+        }
+        if(signal_qr&&signal_qr->qr_flash) {
+            VideoObservation frame;frame.grain_index=int64_t(want);frame.time_ms=tai_ns/1e6;frame.tai_ns=tai_ns;
+            frame.have_arrival=true;frame.arrival_ms=video_arrived_ns/1e6;
+            frame.have_grain_time=true;frame.grain_tai_ns=int64_t(time_of_index(pace,grain_index));
+            qr_flash.push(luma.data(),video.width,grain_rows,video.width,frame);
+            for(auto& event:qr_flash.take_events())pairer->observe_video(event,signal_qr->offset_ms);
+        } else {
         const auto picture = picture_reader.read(luma.data(), video.width, grain_rows, video.width, tai_ns / 1e6);
         const bool optical = !picture.canonical.empty();
         if (picture.located) {
@@ -785,6 +816,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             pairer->observe_video(observation, config.offset_ms);
         }
 
+        } // Legacy strip/fiducial path.
         const uint64_t audio_head = audio_domain.audio_head();
         // Stay inside the flow history (200 ms is 9600 samples). Older samples are already gone.
         const uint64_t keep_back = 8000;

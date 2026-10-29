@@ -960,3 +960,43 @@ stored independently of Photos. Presentation labels do not change audio/QR
 identity or imply source-output calibration. Text rasterization is CoreText
 on iOS with the same bundled DejaVu font, avoiding media/GUI dependencies in
 avsync-core and desktop rendering dependencies in the mobile binary.
+
+### QR + flash signal (AVS2, 2026-10-29)
+
+The compact audio-timecode generator now uses the shared AVS2 video layout in
+file, MXL and iPhone sources. A large version-4 QR (33 modules, correction Q,
+four quiet modules per side) sits beside an equal 41-module flash panel with a
+four-module gap. All measurement identity is carried in the QR; the Gray strip
+and outside fiducials are absent. Colour bars, source labels/image and the
+visual sync scale remain. Legacy audio mode retains its original video layout.
+
+AVS2 is `AVS2:` followed by 54 uppercase hexadecimal characters, encoded as QR
+alphanumeric data. The 27 big-endian bytes are: flags u8 (bit 0 LIVE, bit 1
+estimated phone source; other bits forbidden), source id u32, full event
+sequence u64, video send time i64 non-negative nanoseconds (TAI for LIVE,
+media timeline for FILE), signed source AV offset i32 in 1/16 ms, format u8
+and event rate u8 (1 or 2). Format indices 0–8 are respectively 1080p50,
+1080p25, 1080p59.94, 1080i25, 2160p50, 720p60, 720p50,
+960x540p25 and its 540p25 alias. Presentation labels are outside the payload.
+The independent CRC/FEC audio packet and its onset reference are unchanged.
+
+The QR changes on the source flash's first frame and remains for the complete
+event period. No next-event prediction or nearest-chirp association is used.
+A decoder passes identified QR corners in normalized capture coordinates to
+the dependency-free QrFlashTracker. It projects only sparse photometry samples
+in the adjacent panel and static finder patterns; it never rectifies a raster.
+Two black observations then two white observations confirm the rising edge,
+retaining the first white frame and its original index/arrival metadata.
+Mixed transition frames may bridge a bounded 60-ms black-to-white interval.
+A QR captured 25 ms to 85% of a source period after that edge identifies it;
+a late decoding callback does not change the edge timestamp. Missing identity
+or edges, stale geometry, source changes and duplicates cannot create events.
+Geometry expires after 750 ms. The normal QR retry target is 100 ms; scans are
+bounded to one in flight on iOS. Motion/finder failure withholds measurements.
+
+A crop is supported only while the QR including quiet zone and the sampled
+flash area remain visible. Frozen pictures cannot produce repeating events.
+AVS2 does not claim the old strip's per-frame drop/duplicate diagnostics.
+Optical paths retain unknown capture uncertainty; phone-clock latency remains
+explicitly estimated. Digital-path grain timing is still the received frame
+index; arrival time remains the first-edge arrival, not QR processing time.

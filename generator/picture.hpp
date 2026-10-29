@@ -56,6 +56,8 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
 // Decodes the QR in the top-left of a 10-bit luma plane. Empty if none.
 std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int height, int stride);
 
+std::optional<QrDetection> decode_qr_signal(const uint16_t* luma, int width, int height, int stride);
+
 struct ResultPicture {
     std::string number;
     std::string sentence;

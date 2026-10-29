@@ -479,6 +479,29 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
 {
     draw_smpte_eg1(frame);
     LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
+    if(info.qr_json.starts_with("AVS2:")) {
+        const auto g=qr_flash_geometry(frame.width,frame.height);
+        const int unit=g.qr_size/41;
+        const auto code=qrcodegen::QrCode::encodeSegments(
+            qrcodegen::QrSegment::makeSegments(info.qr_json.c_str()),qrcodegen::QrCode::Ecc::QUARTILE,4,4,-1,false);
+        fill_yuv(frame,g.qr_x,g.qr_y,g.qr_size,g.qr_size,{kYWhite,kYNeutralChroma,kYNeutralChroma});
+        for(int y=0;y<33;++y)for(int x=0;x<33;++x)if(code.getModule(x,y))
+            fill_yuv(frame,g.qr_x+(x+4)*unit,g.qr_y+(y+4)*unit,unit,unit,{kYBlack,kYNeutralChroma,kYNeutralChroma});
+        fill_yuv(frame,g.marker_x,g.marker_y,g.marker_side,g.marker_side,
+            {uint16_t(marker_white?kYWhite:kYBlack),kYNeutralChroma,kYNeutralChroma});
+        const int scale=std::max(1,frame.height/270),gap=std::max(8,frame.width/160);
+        const int icon_px=std::max(32,frame.height/12);
+        const int title_x=frame.width/2-text_px_width("TEST SIGNAL",scale)/2;
+        draw_text_box(frame,title_x,frame.height/25,"TEST SIGNAL",scale);
+        if(const SourceStill* icon=info.app_icon?info.app_icon:cached_app_icon())
+            blit_rgba(frame,title_x+text_px_width("TEST SIGNAL",scale)+gap,frame.height/25,icon_px,*icon);
+        draw_text_box(frame,g.qr_x,g.qr_y-text_px_height(scale)-gap,"QR + FLASH / "+info.format_line,scale);
+        draw_text_box(frame,g.qr_x,g.qr_y+g.qr_size+gap,"Event "+std::to_string(seq)+" / "+info.offset_line,scale);
+        draw_sync_scale(frame,frame_in_period,period_frames,info.period_ms,info.show_sync_indicator);
+        draw_source_ident(frame,info,frame.width/25,frame.width-frame.width/25,
+            std::max(int(frame.height*.79),g.qr_y+g.qr_size+text_px_height(scale)+gap*2),frame.height-frame.height/30);
+        return;
+    }
     draw_static_layer(view);
     draw_timing(view, seq, frame_in_period, period_frames, marker_white);
     const FrameGeometry geo = frame_geometry(frame.width, frame.height);

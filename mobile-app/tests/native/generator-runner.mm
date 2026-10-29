@@ -14,6 +14,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     for(int rate:{1,2}) {
         AVSyncGenerator *source=[[AVSyncGenerator alloc] initWithTestID:@"phone-native-test" rate:rate epochTaiNs:1700000037000000000LL epochHost:100];
         std::vector<float> signal(48000*3);
+        QrFlashTracker tracker;std::vector<VideoObservation> detected;
         for(int event=1;event<=3;++event) {
             const double host=[source hostTimeForSequence:event];
             assert(std::abs(host-(100+double(event-1)/rate))<1e-9);
@@ -41,8 +42,14 @@ int main(int argc, char **argv) { @autoreleasepool {
             }
             assert(chromatic>=5); // Old grayscale source fails this.
 
-            auto base=read_marker(luma.data(),width,height,width);
-            assert(base.strip_ok && base.seq_low24==event && base.geometry_ok);
+            CVPixelBufferUnlockBaseAddress(pixel,0);
+            NSDictionary *nativeQR=[AVSyncQRCodeReader readPixelBuffer:pixel];
+            assert([nativeQR[@"detections"] count]==1);
+            NSDictionary *detection=nativeQR[@"detections"][0];
+            auto payload=parse_qr_payload([detection[@"payload"] UTF8String]);assert(payload&&payload->qr_flash);
+            QrDetection anchor;anchor.payload=*payload;NSArray *points=detection[@"points"];
+            for(int i=0;i<4;++i){anchor.x[i]=[points[i][@"x"] doubleValue];anchor.y[i]=[points[i][@"y"] doubleValue];}
+            CVPixelBufferLockBaseAddress(pixel,0);
             // Exercise the same packed bits used by the native timing layers,
             // including all source-frame positions and pulse falling edges.
             const auto geometry=[source geometry];
@@ -62,9 +69,12 @@ int main(int argc, char **argv) { @autoreleasepool {
                     luma[y*width+n(@"stripX")+cell*n(@"stripWidth")+dx]=bits&(1u<<(31-cell))?kYWhite:kYBlack;
                 const bool white=[frame[@"white"] boolValue];
                 for(int y=n(@"markerY");y<n(@"markerY")+n(@"markerSide");++y)for(int x=n(@"markerX");x<n(@"markerX")+n(@"markerSide");++x)luma[y*width+x]=white?kYWhite:kYBlack;
-                auto reading=read_marker(luma.data(),width,height,width);
-                assert(reading.strip_ok && reading.seq_low24==event && reading.frame_pos_mod16==(pos&15));
-                assert((reading.state==MarkerReading::State::White)==(pos<6));
+                const double time=1000.0*(event-1)/rate+1000.0*pos/60;
+                if(pos==12)tracker.observe(anchor,time); // Deliver QR after the optical edge.
+                VideoObservation capture;capture.time_ms=time;
+                tracker.push(luma.data(),width,height,width,capture);
+                auto events=tracker.take_events();detected.insert(detected.end(),events.begin(),events.end());
+                if(event>1)assert(tracker.valid_frame());
             }
             CVPixelBufferUnlockBaseAddress(pixel,0);
             NSDictionary *qr=[AVSyncQRCodeReader readPixelBuffer:pixel];
@@ -76,6 +86,8 @@ int main(int argc, char **argv) { @autoreleasepool {
             assert(found);
             CGContextRelease(context);CGColorSpaceRelease(space);CVPixelBufferRelease(pixel);
         }
+        assert(detected.size()==2);
+        for(int i=0;i<2;++i){assert(detected[i].seq==uint64_t(i+2));assert(std::abs(detected[i].time_ms-(i+1)*1000.0/rate)<1e-6);}
         UIImage *plain=[source imageForSequence:1];
         UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat];format.scale=1;
         UIImage *logo=[[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(64,32) format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
@@ -94,7 +106,7 @@ int main(int argc, char **argv) { @autoreleasepool {
             for(int pos:{0,1,60/rate-1}) {
                 NSDictionary *state=[source frameAt:100+double(pos)/60];
                 auto number=[&](NSString *key){return [state[key] doubleValue];};
-                const auto geo=frame_geometry(width,height);
+                const auto geo=qr_flash_geometry(width,height);
                 UIImage *snapshot=[[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(width,height) format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
                     [styled drawAtPoint:CGPointZero];
                     [([state[@"white"] boolValue]?UIColor.whiteColor:UIColor.blackColor) setFill];
@@ -110,11 +122,11 @@ int main(int argc, char **argv) { @autoreleasepool {
         }
         const auto before=imageBytes(plain),after=imageBytes(styled);
         int changed=0;
-        const auto g=frame_geometry(width,height);
+        const auto g=qr_flash_geometry(width,height);
         for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
             const size_t at=(size_t(y)*width+x)*4;
             const bool differs=!std::equal(before.begin()+at,before.begin()+at+4,after.begin()+at);
-            if(differs) { ++changed;assert(y>g.marker_y+g.marker_side && y<g.strip_y); }
+            if(differs) { ++changed;assert(y>g.marker_y+g.marker_side && y<height); }
         }
         assert(changed>500); // Labels/logo actually visible, never cover timing/QR.
         [source setSourceName:@"" subtitle:@"" image:nil];
@@ -126,5 +138,5 @@ int main(int argc, char **argv) { @autoreleasepool {
             assert(packets[i].video_send_ns==quantize_timecode_ns(1700000037000000000LL+i*1000000000LL/rate));
         }
     }
-    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR/strip/flash and 1/2-Hz independent audio.\n";
+    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR geometry/flash onset and 1/2-Hz independent audio.\n";
 } }

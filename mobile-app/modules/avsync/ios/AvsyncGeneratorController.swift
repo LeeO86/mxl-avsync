@@ -55,7 +55,7 @@ final class AvsyncGeneratorController: UIViewController {
     marker.backgroundColor = UIColor.black.cgColor
     canvas.layer.addSublayer(marker)
     canvas.layer.addSublayer(syncDot)
-    for _ in 0..<32 { let cell = CALayer(); canvas.layer.addSublayer(cell); cells.append(cell) }
+    // AVS2 carries identity in the QR; no per-frame strip layers.
     status.textColor = .lightGray; status.font = .systemFont(ofSize: 12); status.numberOfLines = 3
     status.textAlignment = .center; status.accessibilityIdentifier = "generatorStatus"
     view.addSubview(status)

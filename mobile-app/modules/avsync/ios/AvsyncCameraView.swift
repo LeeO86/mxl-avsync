@@ -162,16 +162,16 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       if output is AVCaptureVideoDataOutput {
         processor.pushVideo(sampleBuffer)
         let scanTime = ProcessInfo.processInfo.systemUptime
-        if !qrBusy && scanTime - lastQrScan >= 1, let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
+        if !qrBusy && scanTime - lastQrScan >= 0.1, let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
           qrBusy = true; lastQrScan = scanTime
           let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000
           let captureGeneration = generation
           qrWorker.async { [weak self] in
-            let texts = AVSyncQRCodeReader.read(pixel)["payloads"] as? [String] ?? []
+            let detections = AVSyncQRCodeReader.read(pixel)["detections"] as? [[String: Any]] ?? []
             self?.samples.async { [weak self] in
               guard let self else { return }; self.qrBusy = false
               guard self.generation == captureGeneration else { return }
-              for value in texts where value.contains("mxl-avsync/1") { self.processor.observeQR(value, timeMs: timestamp) }
+              for detection in detections { self.processor.observeQRDetection(detection, timeMs: timestamp) }
             }
           }
         }

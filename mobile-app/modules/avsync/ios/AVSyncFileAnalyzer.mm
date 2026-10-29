@@ -87,11 +87,14 @@ static NSDictionary *failure(NSString *message) { return @{ @"error": message };
     if(pixel) {
       ++decoded;
       if(!calibration) {
-        if(ms-lastQR>=500){
+        if(ms-lastQR>=100){
           lastQR=ms;
           NSDictionary *reading=[AVSyncQRCodeReader readPixelBuffer:pixel];qrError=reading[@"error"];
-          for(NSString *text in reading[@"payloads"]){
-            auto qr=avsync::parse_qr_payload(text.UTF8String);if(qr){session.observe_signal(*qr);++decodedQR;}
+          for(NSDictionary *detection in reading[@"detections"]){
+            NSString *text=detection[@"payload"];auto qr=avsync::parse_qr_payload(text.UTF8String);
+            if(qr){avsync::QrDetection q;q.payload=*qr;NSArray *points=detection[@"points"];
+              for(int i=0;i<4;++i){q.x[i]=[points[i][@"x"] doubleValue];q.y[i]=[points[i][@"y"] doubleValue];}
+              session.observe_qr(q,ms);++decodedQR;}
           }
         }
         CVPixelBufferLockBaseAddress(pixel,kCVPixelBufferLock_ReadOnly);

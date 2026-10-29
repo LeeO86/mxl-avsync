@@ -16,7 +16,7 @@ QrPayload PhoneGeneratorPlan::qr(uint64_t seq) const {
     QrPayload p;
     p.test_id = id_; p.mode = "LIVE"; p.rate = rate_; p.format = "720p60";
     p.k = seq; p.tk = epoch_ + int64_t(seq - 1) * (1000000000LL / rate_);
-    p.source_id = source_; p.timecode = true; p.estimated_source = true;
+    p.source_id = source_; p.timecode = true; p.qr_flash = true; p.estimated_source = true;
     return p;
 }
 double PhoneGeneratorPlan::host_seconds(uint64_t seq) const {

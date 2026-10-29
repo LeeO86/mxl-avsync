@@ -481,3 +481,45 @@ TEST_CASE("mobile static plate omits only the shared animated sync square") {
         }
     }
 }
+
+TEST_CASE("AVS2 QR alone anchors a cropped picture and timestamps flashes before decoding") {
+    for(int rate:{1,2}) {
+        QrFlashTracker tracker;
+        const int width=960,height=540;
+        const auto g=qr_flash_geometry(1280,720);
+        // Crop away all outside corners, bars and the entire old bottom strip.
+        const int left=g.qr_x-12,top=g.qr_y-12,cw=g.marker_x+g.marker_side-left+12,ch=g.qr_size+24;
+        std::vector<uint16_t> crop(size_t(cw)*ch);
+        std::vector<VideoObservation> events;
+        for(int frame=0;frame<160;++frame) {
+            double time=frame*20.0;uint64_t seq=1+frame/(50/rate);int pos=frame%(50/rate);
+            QrPayload p;p.timecode=p.qr_flash=true;p.source_id=0xABCDEF12;p.test_id="roundtrip";
+            p.mode="LIVE";p.k=seq;p.tk=1793300000000000000LL+int64_t(seq-1)*(1000000000/rate);p.rate=rate;p.format="1080p50";
+            PictureInfo info;info.qr_json=qr_payload_text(p);info.period_ms=1000.0/rate;
+            Yuv422p10 image;image.resize(1280,720);render_picture(image,info,seq,pos,50/rate,flash_white(pos,20));
+            for(int y=0;y<ch;++y)std::copy_n(image.y.data()+size_t(y+top)*1280+left,cw,crop.data()+size_t(y)*cw);
+            if(frame%5==0) {
+                auto q=decode_qr_signal(crop.data(),cw,ch,cw);REQUIRE(q);REQUIRE(q->payload.qr_flash);
+                CHECK(q->payload.k==seq);CHECK(q->payload.tk==p.tk);tracker.observe(*q,time);
+            }
+            VideoObservation f;f.time_ms=time;f.have_arrival=true;f.arrival_ms=time+7;f.grain_index=frame;
+            tracker.push(crop.data(),cw,ch,cw,f);
+            auto out=tracker.take_events();events.insert(events.end(),out.begin(),out.end());
+            CHECK(tracker.valid_frame());
+        }
+        REQUIRE(events.size()==size_t(3*rate));
+        for(size_t i=0;i<events.size();++i) {
+            CHECK(events[i].seq==i+2);CHECK(events[i].time_ms==doctest::Approx((i+1)*1000.0/rate));
+            CHECK(events[i].arrival_ms==events[i].time_ms+7);CHECK(events[i].timecode);
+            CHECK(events[i].set_tai_ns==1793300000000000000LL+int64_t(i+1)*(1000000000/rate));
+        }
+    }
+}
+
+TEST_CASE("AVS2 rejects static pictures and expired geometry") {
+    QrFlashTracker tracker;QrPayload p;p.timecode=p.qr_flash=true;p.source_id=5;p.k=7;p.tk=1000000000;p.test_id="still";
+    PictureInfo info;info.qr_json=qr_payload_text(p);Yuv422p10 image;image.resize(1280,720);render_picture(image,info,7,0,30,true);
+    auto q=decode_qr_signal(image.y.data(),1280,720,1280);REQUIRE(q);tracker.observe(*q,0);
+    for(int frame=0;frame<40;++frame){VideoObservation f;f.time_ms=frame*20;tracker.push(image.y.data(),1280,720,1280,f);CHECK(tracker.take_events().empty());}
+    CHECK_FALSE(tracker.valid_frame()); // 780-ms-old QR geometry cannot keep measuring.
+}

@@ -5,6 +5,8 @@
 
 #include "avsync/timecode.hpp"
 #include <cmath>
+#include <array>
+#include <deque>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -198,6 +200,8 @@ struct FrameGeometry {
 };
 
 FrameGeometry frame_geometry(int width, int height);
+// AVS2: version-4 QR (33 modules + 4 quiet modules per side), then a 4-module gap and equal flash panel.
+FrameGeometry qr_flash_geometry(int width, int height);
 
 struct LumaView {
     uint16_t* data = nullptr;
@@ -363,6 +367,7 @@ struct QrPayload {
     std::string format = "1080p50";
     bool estimated_source = false; // QR clk=phone-utc
     bool timecode = false;
+    bool qr_flash = false; // AVS2: QR names the current flash event, held for its full period.
     uint32_t source_id = 0;
 };
 
@@ -370,6 +375,43 @@ bool identify_video(VideoObservation& video, const QrPayload& payload);
 bool flash_white(int frame_in_period, double grain_ms);
 std::string qr_payload_json(const QrPayload& payload);
 std::optional<QrPayload> parse_qr_payload(std::string_view json);
+std::string qr_payload_text(const QrPayload& payload);
+
+// QR corners are normalized to the original captured image, TL/TR/BR/BL.
+struct QrDetection {
+    QrPayload payload;
+    std::array<double, 4> x{}, y{};
+};
+// Slow identified geometry/QR, fast sparse photometry. No raster rectification.
+class QrFlashTracker {
+public:
+    void reset();
+    void observe(const QrDetection& qr, double capture_ms);
+    void push(const uint16_t* luma, int width, int height, int stride, VideoObservation frame);
+    void push_u8(const uint8_t* luma, int width, int height, int stride, VideoObservation frame);
+    std::vector<VideoObservation> take_events();
+    const PicturePose& pose() const { return pose_; }
+    bool valid_frame() const { return valid_; }
+    bool active() const { return anchor_.has_value(); }
+    std::optional<uint64_t> sequence() const { return anchor_ ? std::optional<uint64_t>(anchor_->payload.k) : std::nullopt; }
+private:
+    struct Code { QrPayload payload; double time; };
+    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; };
+    std::optional<QrDetection> anchor_;
+    double anchor_ms_ = -1e30, last_frame_ms_ = -1e30;
+    std::array<double, 9> transform_{};
+    std::deque<Code> codes_;
+    std::deque<Edge> edges_;
+    std::vector<VideoObservation> ready_;
+    std::optional<uint64_t> emitted_seq_;
+    PicturePose pose_;
+    MarkerReading::State phase_ = MarkerReading::State::Invalid;
+    int blacks_ = 0;
+    bool valid_ = false;
+    void match();
+    void push_pixels(const void* luma, bool eight_bit, int width, int height, int stride, VideoObservation frame);
+    double last_black_ms_ = -1e30;
+};
 
 // ---- pairing, grading, statistics, uncertainty (§4, §8) ------------------
 
@@ -499,9 +541,12 @@ class PhoneSession {
 public:
     PhoneSession(int event_rate, GradeWindows windows);
     void observe_signal(const QrPayload& payload);
+    void observe_qr(const QrDetection& detection, double capture_ms);
     void set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms);
     void push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms);
     void push_audio(const float* samples, size_t count, double start_ms, int sample_rate);
+    bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
+    void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms);
     PhoneReport finish(const std::string& test_id = "PHONE");
     void trim_before(double time_ms);
     int located_frames() const { return located_frames_; }
@@ -515,6 +560,9 @@ public:
     }
 
 private:
+    QrFlashTracker qr_flash_;
+    void collect_qr_events();
+    void update_qr_picture(double frame_ms);
     std::optional<QrPayload> signal_;
     AudioTimecodeStream timecode_stream_;
     std::vector<AudioTimecode> timecodes_;

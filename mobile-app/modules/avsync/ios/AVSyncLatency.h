@@ -36,6 +36,12 @@ inline SourceTime source_time(const avsync::QrPayload& qr,double observed_ms,dou
  if(qr.tk<=0||!std::isfinite(tai_utc_seconds)||tai_utc_seconds<0||tai_utc_seconds>100)return out;
  if(!std::isfinite(now_ms)||!std::isfinite(observed_ms)||now_ms-observed_ms>3000||now_ms<observed_ms-100){out.state="qr_expired";return out;}
  if(!video||now_ms-video->time_ms>1500||video->time_ms>now_ms+100){out.state="waiting_for_video_event";return out;}
+ if(qr.qr_flash) {
+  if(!video->timecode||video->source_id!=qr.source_id||!video->have_set_time){out.state="qr_event_mismatch";return out;}
+  out.video_utc_ms=double(video->set_tai_ns)/1e6-tai_utc_seconds*1000;
+  if(video->seq==qr.k&&!qr.sweep)out.audio_utc_ms=*out.video_utc_ms+qr.offset_ms;
+  out.state="source_time_available";return out;
+ }
  auto format=avsync::parse_video_format(qr.format);
  if(!format||(qr.rate!=1&&qr.rate!=2&&qr.rate!=4)){out.state="unsupported_signal";return out;}
  int32_t delta=static_cast<int32_t>((video->seq-(qr.k&0xFFFFFFu))&0xFFFFFFu);
