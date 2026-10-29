@@ -53,6 +53,9 @@
   th { color:var(--muted); text-align:left; font-weight:500; padding:.35rem .5rem; border-bottom:1px solid var(--border); white-space:nowrap; }
   td { padding:.35rem .5rem; border-bottom:1px solid var(--panel2); font-variant-numeric:tabular-nums; }
   .scroll { overflow-x:auto; }
+  .previews { display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:1rem; }
+  .previews figure { margin:0; min-width:0; }
+  .previews img { display:block; max-height:180px; max-width:100%; background:#111; }
 </style>
 </head>
 <body>
@@ -62,6 +65,7 @@
     <h1>mxl-avsync</h1>
     <span class="node">{{ info.label || '' }} · {{ info.role || '…' }}</span>
     <span class="spacer"></span>
+    <span v-if="role === 'generator' && generatorBaseline" class="pill" :class="generatorSignal.kind" data-testid="generator-status" role="status">{{ generatorSignal.label }}</span>
     <span class="pill" :class="inputKind">{{ (status.input_state || '…').replace('_', ' ') }}</span>
     <span class="pill" :class="nmosPill==='registered' ? 'ok' : ''">{{ nmosPill }}</span>
     <span class="pill" :class="health==='live' ? 'ok' : 'bad'">{{ health }}</span>
@@ -71,7 +75,6 @@
     <button class="tab" :class="{on:tab==t}" v-for="t in tabs" :key="t" @click="selectTab(t)">{{ t }}</button>
   </nav>
   <main>
-    <div v-if="role=='generator' && audioOn && !stopped" class="banner">TEST SIGNAL ACTIVE</div>
     <template v-if="tab=='Measurement'">
       <section>
         <div class="offset" :style="{color:gradeColor}">{{ sentence }}</div>
@@ -120,8 +123,14 @@
     </template>
     <section v-if="tab=='Signal' || tab=='Measurement'">
       <h3>Preview</h3>
-      <img :src="'/api/v1/preview/input.jpg?t=' + previewTick" alt="input" style="max-height:180px;background:#111;margin-right:8px"/>
-      <img :src="'/api/v1/preview/generated.jpg?t=' + previewTick" alt="generated" style="max-height:180px;background:#111"/>
+      <div class="previews">
+        <figure v-for="preview in previewSlots" :key="preview.slot" :data-testid="'preview-' + preview.slot">
+          <figcaption class="note">{{ preview.label }}</figcaption>
+          <img :src="'/api/v1/preview/' + preview.slot + '.jpg?t=' + previewTick" :alt="preview.label"
+            v-show="!previewErrors[preview.slot]" @load="previewErrors[preview.slot] = false" @error="previewErrors[preview.slot] = true"/>
+          <p v-if="previewErrors[preview.slot]" class="note" role="status">{{ preview.label }} is not available yet.</p>
+        </figure>
+      </div>
       <div v-if="role=='generator' && generatorBaseline" data-testid="signal-form"
         v-memo="[generatorBaseline, signalDirty, signalSaving, signalError, imageFile, imageSet, imageFrames, imageUrl, audioOn, stopped]">
         <p v-if="signalError" class="banner" role="alert">{{ signalError }}</p>
@@ -132,7 +141,8 @@
         <label>Source name <input v-model="source" maxlength="80"/></label>
         <label>Subtitle <input v-model="subtitle" maxlength="80" placeholder="phone, email"/></label>
         <label>Source picture (PNG with transparency, or an animated GIF)
-          <input type="file" accept="image/png,image/gif,.png,.gif" @change="onImage"/>
+          <input ref="sourceImageInput" type="file" accept="image/png,image/gif,.png,.gif" @change="onImage"/>
+          <span v-if="imageFile" class="note">{{ imageFile.name }} selected. Apply to upload.</span>
         </label>
         <p v-if="imageSet">Source picture stored{{ imageFrames > 1 ? ' (' + imageFrames + ' frames)' : '' }}.</p>
         <img v-if="imageSet" :src="imageUrl" alt="" style="height:72px;background:#222;margin-top:8px"/>
@@ -247,9 +257,17 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
   computed: {
     role() { return this.info.role || ''; },
+    previewSlots() {
+      return this.role === 'generator' ? [{slot:'generated', label:'Generated signal'}]
+        : [{slot:'input', label:'Input'}, {slot:'generated', label:'Result'}];
+    },
+    generatorSignal() {
+      if (this.stopped) return {label:'Test signal stopped', kind:''};
+      return this.audioOn ? {label:'Test signal active', kind:'ok'} : {label:'Test signal muted', kind:''};
+    },
     signalDirty() { return !!this.generatorBaseline && (this.imageFile !== null || !this.sameDraft(this.generatorDraft(), this.generatorBaseline)); },
     settingsDirty() { return Object.keys(this.draft).some(key => !this.envSet.includes(key) && this.draft[key] !== this.config[key]); },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
@@ -400,6 +418,15 @@ createApp({
       }
       await this.loadNmos();
     },
+    onImage(event) {
+      this.imageFile = event.target.files?.[0] || null;
+      this.signalError = '';
+    },
+    clearImageSelection(file = this.imageFile) {
+      if (this.imageFile !== file) return;
+      this.imageFile = null;
+      if (this.$refs?.sourceImageInput) this.$refs.sourceImageInput.value = '';
+    },
     generatorDraft() {
       return {offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle};
     },
@@ -417,7 +444,7 @@ createApp({
         const response = await fetch('/api/v1/generator');
         if (!response.ok) throw new Error('Could not reload signal settings');
         this.adoptGenerator(await response.json());
-        this.imageFile = null;
+        this.clearImageSelection();
         this.signalError = '';
       } catch (err) { this.signalError = err.message || String(err); }
     },
@@ -435,7 +462,7 @@ createApp({
           const saved = await fetch('/api/v1/generator/source-image', {method:'POST', headers:{'Content-Type': type}, body: bytes});
           if (!saved.ok) throw new Error((await saved.json()).error || 'Could not save source picture');
           this.imageUrl = '/api/v1/generator/source-image?t=' + Date.now();
-          if (this.imageFile === image) this.imageFile = null;
+          this.clearImageSelection(image);
         }
         const current = await fetch('/api/v1/generator');
         if (!current.ok) throw new Error('Saved, but could not reload signal settings');

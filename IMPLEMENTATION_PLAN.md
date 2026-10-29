@@ -484,3 +484,16 @@ The release candidate reports app/core/CMake 1.0.1; the existing tag workflow ve
 The unchanged Stage-2 tile check failed on a generated 720p50 ProRes signal scaled to 640×360 and padded into 960×540. The unchanged 1.0.0 release image failed on the same retained file, establishing a pre-existing locator bug. High-scoring QR/text candidates displaced real corners, and unrestricted size-biased refinement expanded hits incorrectly. The focused fix keeps spatial extrema across bounded size ranges, retains tolerant coarse scoring, refines locally with complete rings, and ranks poses using geometry/reference cells/parity. `read_located_marker` rectifies to stable 640×360 to avoid integer strip-width drift. Public API signatures are unchanged.
 
 A full-renderer QR/text unit regression checks the intended (80,40), 640×360 pose, all four corners, three sequences and both marker states: 54 assertions pass; the original locator fails 51 of those assertions. Existing fiducial and phone cases remain green, and the unchanged full Stage-2 integration passes. No unpublished mobile implementation or private footage was imported into this release.
+
+
+## Container web UI corrections (2026-10-29)
+
+User reports an always-broken generator preview, disabled Apply after choosing
+an image, and misleading red normal activity. The template called missing
+onImage; restore selection state, pending filename and Apply/Discard input reset,
+without discarding a newer selection during an in-flight upload. Generator has
+only generated preview; analyzer keeps input/result. Missing JPEGs hide the
+broken image behind a placeholder while polling can recover it. Normal generator
+activity is a green header pill, muted/stopped neutral; red remains for failures.
+This explicitly updates the old red-banner requirement in specification §11.
+No codec, media scheduling, API or route changes.

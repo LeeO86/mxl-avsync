@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2 (unreleased)
+
+- Fix source-picture selection so Apply enables and uploads PNG/GIF files; retain
+  failed or newly selected uploads and reset the file input on Apply/Discard.
+- Show only role-appropriate previews and replace unavailable images with a
+  recoverable placeholder. Generator pages no longer request analyzer input.
+- Move generator activity from the red banner to a green header status pill,
+  with neutral muted/stopped states. Error banners remain for actual failures.
+
 ## 1.0.1 (2026-10-26)
 
 - Fixed a pre-existing `--locate` failure on scaled, padded full-renderer signals: QR/text squares could displace real corners. Spatial candidate retention, local ring refinement, strip/geometry checks and stable 640×360 rectification now recover the full picture. Regression coverage checks actual corner coordinates and multiple marker sequences/states.
