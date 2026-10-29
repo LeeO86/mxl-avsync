@@ -322,3 +322,99 @@ TEST_CASE("kernel unreported PTP errors are unknown accuracy, not a 16 second es
     CHECK(classify_kernel_clock(clock, 100).sync_state == "locked");
     CHECK(classify_kernel_clock(clock, 100).accuracy_ns == 100000);
 }
+
+TEST_CASE("timing field tolerates a sparse cursor without accepting mixed flashes")
+{
+    constexpr int w=640,h=360;
+    const auto g=frame_geometry(w,h);
+    for(bool white:{false,true}){
+        std::vector<uint16_t> pixels;
+        render_picture(pixels,w,h,9,0,25,white);
+        const auto expected=white?MarkerReading::State::White:MarkerReading::State::Black;
+        REQUIRE(read_marker(pixels.data(),w,h,w).state==expected);
+        // Well below 5% of the measured field; full-range rejection used to
+        // invalidate every frame even though over 99% agreed on its phase.
+        for(int y=h/2-3;y<h/2+3;++y)for(int x=w/2-3;x<w/2+3;++x)
+            pixels[y*w+x]=white?kYBlack:kYWhite;
+        auto reading=read_marker(pixels.data(),w,h,w);
+        CHECK(reading.strip_ok);
+        CHECK(reading.state==expected);
+        CHECK(reading.quality!="invalid");
+        CHECK(reading.seq_low24==9);
+        // A real mixed/rolling transition remains invalid. No timing may be
+        // taken from this half-white/half-black field.
+        const int inset=g.marker_side/4;
+        for(int y=g.marker_y+inset;y<g.marker_y+g.marker_side-inset;++y)
+            for(int x=g.marker_x+inset;x<w/2;++x)pixels[y*w+x]=white?kYBlack:kYWhite;
+        CHECK(read_marker(pixels.data(),w,h,w).state==MarkerReading::State::Invalid);
+    }
+}
+
+TEST_CASE("compact phone timing retains the optical onset while barcode parity recovers")
+{
+    constexpr int w=320,h=180;
+    QrPayload qr;qr.mode="LIVE";qr.timecode=true;qr.source_id=77;qr.k=1;
+    qr.tk=1700000037100000000LL;qr.rate=2;qr.format="1080p50";
+    PhoneSession clean(2,{}),delayed(2,{}),no_edge(2,{}),skipped(2,{}),bad_jump(2,{});
+    clean.observe_signal(qr);delayed.observe_signal(qr);no_edge.observe_signal(qr);skipped.observe_signal(qr);bad_jump.observe_signal(qr);
+    std::vector<double> clean_times,delayed_times;
+    std::vector<uint64_t> skipped_seqs;uint64_t last_skipped=0;
+    uint64_t last_clean=0,last_delayed=0;
+    for(int frame=0;frame<400;++frame){
+        const int event_frame=frame-20;
+        const int position=event_frame<0?99:event_frame%100;
+        const uint64_t seq=event_frame<0?0:1+event_frame/100;
+        const bool white=event_frame>=0&&position<20;
+        std::vector<uint16_t> pixels;render_picture(pixels,w,h,seq,position/4,25,white);
+        clean.push_video(pixels.data(),w,h,w,frame*5.0,0);
+        if(!(seq==3&&white))skipped.push_video(pixels.data(),w,h,w,frame*5.0,0);
+        if(auto event=skipped.latest_video_event();event&&event->seq!=last_skipped){skipped_seqs.push_back(event->seq);last_skipped=event->seq;CHECK(event->time_ms==100+(event->seq-1)*500);}
+        std::vector<uint16_t> wrong;render_picture(wrong,w,h,seq==2?3:seq,position/4,25,white);
+        bad_jump.push_video(wrong.data(),w,h,w,frame*5.0,0);
+        if(auto event=bad_jump.latest_video_event())CHECK(event->seq!=3); // +2 after only one period must fail.
+        // Lose only barcode parity for 60ms after the optical edge. Phase and
+        // geometry stay visible; validation still requires three valid frames.
+        if(white&&position<12){
+            auto g=frame_geometry(w,h);
+            for(int y=g.strip_y;y<g.strip_y+g.strip_h;++y)
+                for(int x=g.strip_x+28*g.strip_w;x<g.strip_x+29*g.strip_w;++x)
+                    pixels[y*w+x]=pixels[y*w+x]>500?kYBlack:kYWhite;
+        }
+        delayed.push_video(pixels.data(),w,h,w,frame*5.0,0);
+        if(white)no_edge.push_video(pixels.data(),w,h,w,frame*5.0,0);
+        if(auto event=clean.latest_video_event();event&&event->seq!=last_clean){clean_times.push_back(event->time_ms);last_clean=event->seq;}
+        if(auto event=delayed.latest_video_event();event&&event->seq!=last_delayed){delayed_times.push_back(event->time_ms);last_delayed=event->seq;}
+    }
+    REQUIRE(clean_times.size()==3);REQUIRE(delayed_times.size()==3);
+    for(size_t i=0;i<3;++i){CHECK(clean_times[i]==600+i*500);CHECK(delayed_times[i]==clean_times[i]);}
+    CHECK_FALSE(no_edge.latest_video_event()); // No black/white edge may be invented.
+    REQUIRE(skipped_seqs.size()==2);CHECK(skipped_seqs[0]==2);CHECK(skipped_seqs[1]==4);
+    CHECK(bad_jump.finish().timing_resets>=1);
+}
+
+TEST_CASE("first compact QR discards speculative legacy sequence lock")
+{
+    PhoneSession session(2,{});
+    std::vector<uint16_t> pixels;render_picture(pixels,320,180,9,0,25,true);
+    for(int n=0;n<3;++n)session.push_video(pixels.data(),320,180,320,n*5.0,0);
+    REQUIRE(session.finish().locked_seq);
+    QrPayload qr;qr.timecode=true;qr.source_id=77;
+    session.observe_signal(qr);
+    CHECK_FALSE(session.finish().locked_seq);
+}
+
+TEST_CASE("compact picture lock cannot be acquired from a parity-valid code outside QR identity")
+{
+    PhoneSession session(2,{});
+    QrPayload qr;qr.mode="LIVE";qr.timecode=true;qr.source_id=77;
+    qr.k=100;qr.tk=1700000037000000000LL;qr.rate=2;
+    session.observe_signal(qr);
+    std::vector<uint16_t> pixels;render_picture(pixels,320,180,9000000,0,25,true);
+    for(int n=0;n<12;++n)session.push_video(pixels.data(),320,180,320,n*5.0,0);
+    const auto rejected=session.finish();
+    CHECK_FALSE(rejected.locked_seq);CHECK(rejected.video_events==0);
+    CHECK(rejected.sequence_rejected_frames>=3);
+    render_picture(pixels,320,180,100,0,25,true);
+    for(int n=12;n<15;++n)session.push_video(pixels.data(),320,180,320,n*5.0,0);
+    REQUIRE(session.finish().locked_seq);CHECK(*session.finish().locked_seq==100);
+}

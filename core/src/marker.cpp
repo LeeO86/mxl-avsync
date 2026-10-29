@@ -73,6 +73,21 @@ double mean_rect(const uint16_t* luma, int stride, int x, int y, int w, int h, i
     return mean;
 }
 
+// Ignore sparse camera/overlay defects only in the timing field. A cursor or
+// hot pixel must not invalidate an otherwise uniform flash. Strip references
+// retain their full range/noise checks. Mixed transition frames still span the
+// black and white populations and are rejected by the existing 400-level gate.
+double marker_mean(const uint16_t* luma,int stride,int x,int y,int side,double& spread) {
+    int histogram[1024]={};double sum=0;const int count=side*side;
+    for(int row=y;row<y+side;++row)for(int col=x;col<x+side;++col){
+        const int value=std::clamp<int>(luma[size_t(row)*stride+col],0,1023);
+        ++histogram[value];sum+=value;
+    }
+    auto percentile=[&](int rank){int seen=0;for(int value=0;value<1024;++value){seen+=histogram[value];if(seen>rank)return value;}return 1023;};
+    spread=percentile(count-1-count/20)-percentile(count/20);
+    return count?sum/count:0;
+}
+
 } // namespace
 
 FrameGeometry frame_geometry(int width, int height)
@@ -220,8 +235,7 @@ MarkerReading read_marker(const uint16_t* luma, int width, int height, int strid
     reading.strip_ok = ((parity ^ parity_bit) == 0) && reading.contrast > 80;
     const int inset = g.marker_side / 4;
     double marker_spread = 0;
-    const double marker = mean_rect(luma, stride, g.marker_x + inset, g.marker_y + inset, g.marker_side - 2 * inset,
-        g.marker_side - 2 * inset, width, height, &marker_spread);
+    const double marker = marker_mean(luma,stride,g.marker_x+inset,g.marker_y+inset,g.marker_side-2*inset,marker_spread);
     if (marker_spread > 400 || reading.contrast < 80) {
         reading.state = MarkerReading::State::Invalid;
     } else if (marker >= threshold) {

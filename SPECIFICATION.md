@@ -243,7 +243,7 @@ Events are paired by identity, not by nearest neighbour:
 The detector reads only the marker block and the strip:
 
 1. Thresholds from the three reference blocks of the strip (mean luma of black and white; midpoint).
-2. Marker state: mean luma of the central 50 % of the marker block against the threshold; `invalid` when the block's luma spread is above a limit (a mixed frame, a transition from a frame-rate converter, a cut).
+2. Marker state: mean luma of the central 50 % of the marker block against the threshold; `invalid` when the block's 5th-to-95th percentile luma span exceeds the limit (a mixed frame, a transition from a frame-rate converter, a cut). Sparse cursor/hot-pixel defects are excluded from that timing-field span; strip-reference noise keeps its full range check.
 3. Strip: each block's mean against the threshold, Gray decode, parity check. A failed parity marks the grain `strip_invalid`.
 4. Video event: the first grain whose marker state differs from the previous grain's; its time is the grain's index time.
 5. Quality per grain: contrast (white − black), noise (spread inside the blocks), geometry check against the fiducials. Exported as `video_quality` (`good`, `degraded`, `invalid`).
@@ -583,6 +583,8 @@ At a real monitor and loudspeaker, the phone's camera sees the test picture and 
 - `Quality: good / degraded / invalid` and `Calibration: valid / missing / expired`;
 - a time series and the statistics after several events;
 - saved measurements (local), compare, export as the result JSON of §8 (`mode: "LIVE"`, `reference.type: "none"`). The last valid measurement remains saveable through temporary recognition gaps, explicitly labelled with age/spread; a retained sample is never relabelled as a fresh measurement. Saving preserves its original acquisition time plus save time and age. Source changes and explicit clears discard the retained sample. Outline smoothing/brief hold affect presentation only and must not feed back into detection or timestamping.
+
+Compact phone event timing retains the first clear black-to-white optical onset while the Gray code is confirmed. A code outside the known QR identity window cannot acquire lock. A missed event may be skipped only when a bounded sequence gap agrees with the optical time interval; no observation is synthesized for the missing event.
 
 AV offset is measured. Optional estimated latency uses the phone clock with explicitly unknown physical timing accuracy (§3.3). The Generate tab also supplies a native test source for an external camera/analyzer; its source-output calibration is separate from capture calibration.
 

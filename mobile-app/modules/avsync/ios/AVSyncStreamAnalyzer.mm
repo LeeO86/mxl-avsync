@@ -7,6 +7,9 @@
 #include <cmath>
 #include <deque>
 #include <memory>
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+#include "DiagnosticCapture.inc"
+#endif
 
 namespace {
 struct Frame { double time; int w,h; std::vector<uint8_t> luma; };
@@ -18,6 +21,9 @@ struct Stream {
  std::optional<avsync::QrPayload> qr;
  double qrObservedMs=-1e30,wallOffsetMs=0,taiUtcSeconds=37;
  bool haveWallClock=false;
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+ std::shared_ptr<avsync_phone::DiagnosticCapture> diagnostic=avsync_phone::diagnostic_capture();
+#endif
  std::deque<Frame> pictures;
  std::vector<float> audio;
  double audioOrigin=-1;
@@ -43,10 +49,17 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  double offset=unixTimeMs-captureTimeMs;
  if(state->haveWallClock&&std::abs(offset-state->wallOffsetMs)>100)state->qr.reset();
  state->wallOffsetMs=offset;state->haveWallClock=true;
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+ if(state->diagnostic)state->diagnostic->note(@{@"kind":@"clock",@"captureMs":@(captureTimeMs),@"unixMs":@(unixTimeMs),@"taiUtcSeconds":@(state->taiUtcSeconds)});
+#endif
 }
 - (void)observeQR:(NSString *)text timeMs:(double)timeMs {
  auto qr=avsync::parse_qr_payload(text.UTF8String);
- if(qr&&std::isfinite(timeMs)){state->session->observe_signal(*qr);state->qr=qr;state->qrObservedMs=timeMs;}
+ if(qr&&std::isfinite(timeMs)){state->session->observe_signal(*qr);state->qr=qr;state->qrObservedMs=timeMs;
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+  if(state->diagnostic)state->diagnostic->note(@{@"kind":@"qr",@"timeMs":@(timeMs),@"payload":text});
+#endif
+ }
 }
 - (NSDictionary *)pictureObservation {
  auto&s=*state;const auto&pose=s.session->current_picture();
@@ -81,6 +94,13 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   std::vector<uint16_t> luma(sw*sh);
   for(int y=0;y<sh;y++)for(int x=0;x<sw;x++)luma[y*sw+x]=base[y*step*stride+x*step]*4;
   s.session->push_video(luma.data(),sw,sh,sw,time,0);
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+  if(s.diagnostic&&s.diagnostic->accepting()){
+   NSMutableDictionary *trace=[@{@"locatedFrames":@(s.session->located_frames()),@"validFrames":@(s.session->valid_frames()),@"picture":[self pictureObservation]} mutableCopy];
+   auto event=s.session->latest_video_event();if(event){trace[@"eventSeq"]=@(event->seq);trace[@"eventTimeMs"]=@(event->time_ms);}
+   s.diagnostic->video(std::move(luma),sw,sh,time,trace);
+  }
+#endif
  }
  CVPixelBufferUnlockBaseAddress(pixel,kCVPixelBufferLock_ReadOnly);
 }
@@ -119,7 +139,12 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   if(s.spike<0 && time-s.origin>750 && peak>std::max(0.08,s.floor*8) && peak>rms*1.8)
    s.spike=time+peakIndex*1000.0/s.rate;
   if(s.spike<0)s.floor=0.97*s.floor+0.03*rms;
- }else s.session->push_audio(samples.data(),samples.size(),time,s.rate);
+ }else{
+  s.session->push_audio(samples.data(),samples.size(),time,s.rate);
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+  if(s.diagnostic)s.diagnostic->audio(std::move(samples),s.rate,time);
+#endif
+ }
 }
 - (NSDictionary *)poll {
  auto&s=*state;
@@ -207,6 +232,9 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   }
  }
  result[@"latency"]=latency;
+#if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
+ if(s.diagnostic)result[@"diagnosticCapture"]=s.diagnostic->status();
+#endif
  result[@"diagnosticVersion"]=@3;result[@"recentLocatedFrames"]=@(recentLocated);result[@"recentValidFrames"]=@(recentValid);
  result[@"videoEvents"]=@(report.video_events);result[@"audioSamples"]=@(report.audio_samples);result[@"audioPeakDbfs"]=@(report.audio_peak_dbfs);
  result[@"audioHits"]=@(report.audio_hits.size());result[@"chirps"]=chirps;result[@"bestCorrelation"]=@(bestCorrelation);

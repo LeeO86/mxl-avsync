@@ -136,3 +136,45 @@ checkout's node_modules. Native surfaces are mocks; no browser/camera/network is
 used. The test covers status/timeout/pause, Save evidence/age, source change and
 explicit Clear. The Swift geometry test also covers bounded hold, jump rejection
 and reacquisition. Physical optical/acoustic timing remains device-test work.
+
+### Developer raw diagnostics (opt-in, iOS)
+
+Ordinary Release/TestFlight builds exclude the raw recorder. A local Debug build
+(or a test compiled with `AVSYNC_DIAGNOSTIC_CAPTURE=1`) records only when launched
+with environment `AVSYNC_DEBUG_CAPTURE=1`. Each process makes one private capture
+under `Library/Caches/avsync-debug-capture/<UUID>`: a five-second window (including its final audio block) and at most
+512 MiB of the exact downsampled 8-bit luma sent to PhoneSession, mono float PCM,
+original capture timestamps, observed QR payloads, clock anchors and accepted
+event/geometry trace. Calibration is excluded. A bounded background writer may
+drop debug buffers; its counters are explicit and never remove analysis input.
+`diagnosticCapture.complete` indicates the files have closed. This diagnostic
+code neither uploads data nor writes it into the repository. Copy privately
+with the Xcode device tools; remove recordings from device/Mac after analysis.
+Raw recordings can contain personal camera views and microphone audio.
+
+`tests/native/diagnostic-replay.cpp` replays these exact inputs into PhoneSession
+and writes a per-frame marker trace alongside the capture. It reports accepted
+event/time differences, including those caused by debug buffer drops. Verify
+capture/replay with `python3 tests/native/diagnostic-capture.py DIR`, where DIR is
+the synthetic `timecode-2` fixture directory produced by `tests/native/run.py`.
+This is reproducibility tooling, not independent physical timing validation.
+
+
+Phone timing-field uniformity uses a 5th-to-95th percentile span so a sparse
+cursor/hot pixel does not invalidate an otherwise uniform flash. Mixed
+transition fields still fail the same span limit; strip parity/contrast/noise
+checks remain. Compact-code event timing retains a continuous optical
+black-to-white onset while its barcode is being confirmed, rather than dating
+the event from late successful decoding. Missing onset evidence cannot produce
+a backdated event. Physical timing accuracy remains unvalidated.
+
+Small compact-code sequence gaps (two to four steps) recover only with an
+established optical anchor and matching delta×period spacing inside the
+existing quarter-period tolerance. Missing events are never synthesized.
+The QR identity window is checked before a code can acquire tracking lock.
+
+The replay tool optionally accepts a same-source `REFERENCE_QR_JSON` after the
+capture directory. This controlled replay is explicitly marked
+`externalReference`; it is distinct from replaying the QR observations that
+actually arrived during the take. Trace differences are reported when a
+changed detector accepts events rejected by the recorded version.

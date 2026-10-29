@@ -908,3 +908,93 @@ QR expiry. Audio-only input still never invents video latency. Unit cases
 reject wrong source/send/reception/offset identities, invalid and stale/future
 pairs and FILE mode, and show that AV calibration does not affect latency.
 These are deterministic software tests; no physical phone capture was made.
+
+## Opt-in iPhone raw diagnostics (2026-10-29)
+
+For the user-authorized connected-device investigation, a Debug-only recorder
+can be explicitly enabled at process launch. Production Release/TestFlight
+builds exclude it. It records at most five seconds/512 MiB of the same luma and
+PCM buffers analyzed by PhoneSession, preserving capture timestamps, QR arrival
+ordering, clock anchors and accepted video-event trace. A bounded asynchronous
+writer limits memory; debug drops are counted separately from analysis input.
+Raw files remain private local cache data and must not be committed/uploaded.
+The standalone replay helper exercises PhoneSession with the stored inputs and
+checks accepted sequences/times, with a separate per-frame marker trace. No
+optical algorithm, capture format or acceptance gate changes in this addition.
+
+## Sparse timing-field disturbance (2026-10-29)
+
+The connected iPhone supplied a five-second private raw take with 595 frames,
+zero debug drops and no QR observation during that initial take. Exact replay
+reproduced zero video events. Of 594 located frames, 448 had a valid Gray strip
+but all had Invalid marker phase. The central field was over 98% consistently
+black or white in most frames; a small opposite-luminance disturbance made the
+full min/max span exceed 400. The original span rule therefore invalidated an
+otherwise readable test picture. Setup obstructions (paused playback, player
+controls and a desktop notification) were separately observed in earlier takes;
+those are not evidence that the original long-run jitter is entirely a setup
+problem.
+
+Only the timing-field uniformity span now uses the 5th-to-95th percentile, with
+the same mean, threshold and 400-level rejection gate. Gray-strip parity,
+reference contrast/noise and three-frame/sequence/pairing rules are unchanged.
+This tolerates sparse bright/dark cursor-like defects while rejecting a mixed
+transition covering a material part of the timing field. A real device timing
+accuracy claim still requires independent validation. Raw footage stays local.
+
+
+## Compact phone optical onset retention (2026-10-29)
+
+The same private take exposes a second timing bug after marker recovery: the
+first clear optical white frame precedes the accepted barcode timestamp by
+0–71 ms. Dating the pulse from the first parity-valid code therefore makes
+otherwise regular audio/video pairs jump. Compact PhoneSession now observes
+black/white phase independently of strip parity, retains the first clear white
+frame after black and uses it only after the new sequence passes the existing
+three-frame checks. Geometry must remain continuous, the phase observation gap
+must be at most 50 ms and code confirmation within 120 ms of the onset. Missing
+phase continuity reanchors without inventing a late onset. Legacy timing and pairing checks are preserved; compact sequence-gap
+validation is described below. First compact QR
+acquisition clears speculative legacy sequence lock while retaining already
+received audio; actual source changes still clear audio as before.
+
+A deterministic test corrupts parity for the first 60 ms of each flash: accepted
+compact events retain their original optical timestamps. A white-only sequence
+with no observed black/white edge cannot manufacture events. Source-acquisition
+and sparse cursor regressions pass. Offline replay of the 595-frame take with
+an explicitly supplied matching source reference produces ten video events and
+nine pairs; the nine-pair range shrinks from about 76 ms with marker recovery
+alone to about 14 ms after onset retention. The reference was projected from a
+real same-source QR and checked against the decoded common audio timestamp;
+no QR arrived during that initial raw window. This controlled replay is not an
+independent absolute-offset/latency validation. Raw files are not in the repo.
+
+A subsequent live trace showed a parity-valid wrong code cluster acquiring
+sequence lock outside the QR's permitted ±60-event identity window. Such
+observations were already excluded from timecoded pairing, but could poison
+tracking first. The same existing identify_video window is now checked before
+pending/confirmed/locked state is updated. This does not widen the window;
+a stale initial QR still requires reacquisition for compact picture identity.
+A regression verifies that an out-of-window code cannot acquire lock and that
+the next matching code can. Compact sequence gaps require the separate temporal validation below.
+
+Validation: core/picture CTest, 32 JS tests, actual App retention/Save callbacks,
+raw diagnostic opt-in/bounds/exact replay and full native AVFoundation suite
+pass. Signed local iPhone builds were installed without deleting app data. In
+a 45-report physical follow-up before the final lock guard, 31 reports were
+accepted readings and 35 exposed video latency, including four using the new
+paired-audio reference while QR was expired. Recognition loss and wrong-code
+lock were still observed in that sample; the final guard addresses the latter,
+not a claim of uninterrupted capture or calibrated absolute timing. No new
+TestFlight/cloud build is part of this diagnostic task.
+
+
+The final live follow-up exposed repeated losses after whole missed pulses:
+requiring delta==1 forced repeated reacquisition even when the new code and
+optical interval agreed. Compact tracking now permits gaps of two to four
+sequence steps only after an established optical anchor and only when onset
+spacing agrees with delta*period within the original quarter-period tolerance.
+Sequence state advances by the actual delta; no observation is synthesized for
+missing pulses. Larger/unjustified jumps and legacy behavior remain guarded.
+Tests verify immediate recovery after a genuinely missed pulse, exact retained
+timestamps and rejection of a +2 jump arriving after only one period.

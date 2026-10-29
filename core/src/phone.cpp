@@ -45,11 +45,14 @@ PhoneSession::PhoneSession(int event_rate, GradeWindows windows)
 
 void PhoneSession::observe_signal(const QrPayload& qr) {
     if ((qr.rate != 1 && qr.rate != 2 && qr.rate != 4) || !parse_video_format(qr.format)) return;
-    if (signal_ && (signal_->test_id != qr.test_id || signal_->source_id != qr.source_id ||
+    const bool changed = signal_ && (signal_->test_id != qr.test_id || signal_->source_id != qr.source_id ||
         signal_->mode != qr.mode || signal_->timecode != qr.timecode || signal_->rate != qr.rate ||
-        signal_->format != qr.format || signal_->estimated_source != qr.estimated_source)) {
+        signal_->format != qr.format || signal_->estimated_source != qr.estimated_source);
+    if (changed || (!signal_ && qr.timecode)) {
+        // Do not retain a speculative legacy anchor when compact identity first arrives.
         videos_.clear(); locked_seq_.reset(); pending_frames_ = 0; have_transition_ = false;
-        timecode_stream_.reset(); timecodes_.clear(); audio_.clear(); audio_set_ = false;
+        marker_phase_ = MarkerReading::State::Invalid; white_onset_ms_.reset();
+        if(changed){timecode_stream_.reset(); timecodes_.clear(); audio_.clear(); audio_set_ = false;}
     }
     signal_ = qr; event_rate_ = qr.rate;
 }
@@ -75,9 +78,26 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     current_picture_ = located.pose;
     current_picture_.found = located.located;
     picture_code_confirmed_ = false;
-    if (!located.located) { pending_frames_ = 0; return; }
+    if (!located.located) {
+        pending_frames_ = 0; marker_phase_ = MarkerReading::State::Invalid; white_onset_ms_.reset(); return;
+    }
     ++located_frames_;
     const auto& reading = located.reading;
+    const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, height / 2, height);
+    bool continuous = marker_phase_pose_.found && time_ms >= marker_phase_ms_ && time_ms-marker_phase_ms_ <= 50;
+    for(int i=0;i<4&&continuous;++i) {
+        if(std::hypot(current_picture_.corner_x[i]-marker_phase_pose_.corner_x[i],
+                      current_picture_.corner_y[i]-marker_phase_pose_.corner_y[i]) >
+           std::max(4.0,current_picture_.fiducial_size)) continuous=false;
+    }
+    if(!continuous){marker_phase_=MarkerReading::State::Invalid;white_onset_ms_.reset();}
+    // Optical phase remains usable while strip parity is briefly unreadable.
+    // Retain the first clear white frame only after a continuous black phase.
+    if(reading.state!=MarkerReading::State::Invalid) {
+        if(reading.state==MarkerReading::State::Black) white_onset_ms_.reset();
+        else if(marker_phase_==MarkerReading::State::Black) white_onset_ms_=time_ms;
+        marker_phase_=reading.state;marker_phase_ms_=time_ms;marker_phase_pose_=current_picture_;
+    }
     if (!reading.strip_ok || reading.quality == "invalid" || reading.state == MarkerReading::State::Invalid) {
         pending_frames_ = 0; return;
     }
@@ -87,8 +107,14 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     // A decoded event number and the marker phase must agree. Monitor refresh,
     // rolling shutter and moire can toggle the block without a new event.
     const bool white = reading.state == MarkerReading::State::White;
+    if (signal_ && signal_->timecode) {
+        VideoObservation identity;
+        identity.seq = reading.seq_low24;
+        if (!identify_video(identity, *signal_)) {
+            ++sequence_rejected_frames_; pending_frames_ = 0; return;
+        }
+    }
     if (!(signal_ && signal_->timecode) && white != bool(reading.seq_low24 & 1u)) { ++phase_rejected_frames_; pending_frames_ = 0; return; }
-    const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, height / 2, height);
     if (signal_ && signal_->timecode && (!locked_seq_ || reading.seq_low24 != *locked_seq_) && !white) {
         pending_frames_ = 0; return;
     }
@@ -102,26 +128,37 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     confirmed_picture_time_ms_ = frame_start_ms;
     auto anchor = [&] {
         locked_seq_ = pending_seq_; unwrapped_seq_ = pending_seq_;
-        last_seen_ms_ = time_ms; have_transition_ = false;
+        last_seen_ms_ = time_ms;
+        have_transition_ = signal_ && signal_->timecode && white_onset_ms_ &&
+            time_ms >= *white_onset_ms_ && time_ms-*white_onset_ms_ <= 120;
+        if(have_transition_)last_transition_ms_=*white_onset_ms_;
     };
     if (!locked_seq_) { anchor(); return; }
     int32_t delta = static_cast<int32_t>((pending_seq_ - *locked_seq_) & 0xFFFFFFu);
     if (delta >= 0x800000) delta -= 0x1000000;
     if (delta == 0) { last_seen_ms_ = time_ms; return; }
-    if (delta != 1) {
+    const bool coded_gap = signal_ && signal_->timecode && have_transition_ && delta > 1 && delta <= 4;
+    if (delta != 1 && !coded_gap) {
         ++sequence_rejected_frames_;
         if (time_ms - last_seen_ms_ > 1500) anchor();
         return;
     }
     double period = 1000.0 / std::max(1, event_rate_);
     if (signal_) if (auto f = parse_video_format(signal_->format)) period = plan_period(*f, event_rate_).period_ms;
-    if (have_transition_ && std::abs(pending_time_ms_ - last_transition_ms_ - period) > period * 0.25) {
+    double event_time_ms=pending_time_ms_;
+    if(signal_ && signal_->timecode) {
+        if(!white_onset_ms_ || time_ms-*white_onset_ms_>120 || time_ms<*white_onset_ms_) {
+            anchor(); return; // Reacquire; a late barcode alone cannot date a flash.
+        }
+        event_time_ms=*white_onset_ms_;
+    }
+    if (have_transition_ && std::abs(event_time_ms - last_transition_ms_ - delta * period) > period * 0.25) {
         ++timing_resets_; anchor(); return;
     }
-    ++unwrapped_seq_; locked_seq_ = pending_seq_; last_seen_ms_ = time_ms;
-    last_transition_ms_ = pending_time_ms_; have_transition_ = true;
+    unwrapped_seq_ += delta; locked_seq_ = pending_seq_; last_seen_ms_ = time_ms;
+    last_transition_ms_ = event_time_ms; have_transition_ = true;
     VideoObservation obs;
-    obs.event = true; obs.seq = unwrapped_seq_; obs.time_ms = pending_time_ms_;
+    obs.event = true; obs.seq = unwrapped_seq_; obs.time_ms = event_time_ms;
     obs.marker_white = white; obs.strip_ok = true; obs.quality = reading.quality;
     obs.contrast = reading.contrast;
     if (signal_) identify_video(obs, *signal_);

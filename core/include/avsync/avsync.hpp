@@ -540,6 +540,12 @@ private:
     uint32_t pending_seq_ = 0;
     int pending_frames_ = 0;
     double pending_time_ms_ = 0;
+    // Compact-code timing is the optical pulse edge, not a later barcode read.
+    MarkerReading::State marker_phase_ = MarkerReading::State::Invalid;
+    double marker_phase_ms_ = -1e30;
+    std::optional<double> white_onset_ms_;
+    PicturePose marker_phase_pose_;
+
     double last_seen_ms_ = -1e30;
     double last_transition_ms_ = 0;
     bool have_transition_ = false;
