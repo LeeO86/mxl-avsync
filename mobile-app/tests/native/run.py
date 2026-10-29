@@ -115,6 +115,14 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
         assert abs(good[-1]['latency']['video_ms']-120)<1,good[-1]
         assert abs(good[-1]['latency']['audio_ms']-155)<1,good[-1]
         assert 'audio-timecode' in good[-1]['latency']['audioSource'],good[-1]
+        # Decode QR only at t=0: its 3-s latency lease expires, but an exact
+        # CRC timecode/video pair still supplies the current video send time.
+        stale=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(movie)],text=True,env={key:value for key,value in environment.items() if key!='SIMCTL_CHILD_AVSYNC_TEST_ADVANCE_QR'}))
+        fallback=[row for row in stale if row.get('latency',{}).get('videoSource')=='paired-audio-timecode-tai/device-utc']
+        assert fallback and fallback[-1]['latency']['qrAgeMs']>3000,stale
+        assert abs(fallback[-1]['latency']['video_ms']-120)<1,fallback[-1]
+        assert abs(fallback[-1]['latency']['audio_ms']-155)<1,fallback[-1]
+        assert fallback[-1]['latency']['videoState']=='estimated',fallback[-1]
         # No QR or test picture at the receiver: audio timecode still supplies latency.
         black=folder/'audio-only.mov'
         run(['ffmpeg','-v','error','-y','-i',movie,'-vf','drawbox=color=black:t=fill','-c:v','libx264','-c:a','copy',black])
@@ -123,6 +131,7 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
         assert decoded and abs(decoded[-1]['latency']['audio_ms']-155)<1,audio_only
         assert all('video_ms' not in row['latency'] for row in decoded),decoded
         assert decoded[-1]['videoEvents']==0 and not decoded[-1]['picture']['found'],decoded[-1]
+        assert decoded[-1]['latency']['videoState']=='waiting_for_live_qr',decoded[-1]
     # Multi-second AV delay must survive publication, not only core pairing.
     folder=tmp/'timecode-long-delay';folder.mkdir()
     run([tmp/'timecode-fixture',folder,2,3217])

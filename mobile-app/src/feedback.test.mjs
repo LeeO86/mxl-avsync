@@ -37,6 +37,8 @@ test('latency distinguishes a file signal, expired QR and absent capture clock',
  assert.match(latencyHint('file_signal'), /File test/);
  assert.match(latencyHint('qr_expired'), /expired/);
  assert.match(latencyHint('waiting_for_device_clock'), /clock mapping unavailable/);
+ assert.match(latencyHint({state:'estimated',videoState:'qr_expired',audioState:'estimated'}), /expired/);
+ assert.match(latencyHint({state:'estimated',videoState:'qr_event_mismatch'}), /do not match/);
 });
 
 test('compact timecode needs no sequence field and remains green through its declared packet lease', () => {

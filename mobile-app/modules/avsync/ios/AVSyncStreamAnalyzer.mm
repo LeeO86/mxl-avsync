@@ -168,28 +168,42 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  for(const auto&hit:report.audio_hits){bestCorrelation=std::max(bestCorrelation,hit.correlation);[chirps addObject:@{@"id":@(hit.chirp_id),@"timeMs":@(hit.time_ms),@"correlation":@(hit.correlation),@"quality":[NSString stringWithUTF8String:hit.quality.c_str()]}];}
  result[@"timeMs"]=@(now);result[@"picture"]=[self pictureObservation];
  if(s.qr)result[@"signalIdentity"]=[NSString stringWithUTF8String:(s.qr->test_id+":"+std::to_string(s.qr->source_id)).c_str()];
- NSMutableDictionary *latency=[@{@"state":@"waiting_for_live_qr",@"estimated":@YES,@"taiUtcSeconds":@(s.taiUtcSeconds),@"clockAccuracy":@"unknown"}mutableCopy];
+ NSMutableDictionary *latency=[@{@"state":@"waiting_for_live_qr",@"estimated":@YES,@"taiUtcSeconds":@(s.taiUtcSeconds),@"clockAccuracy":@"unknown",@"videoState":@"waiting_for_live_qr",@"audioState":@"waiting_for_audio_timecode"}mutableCopy];
  if(s.qr){
   const auto video=s.session->latest_video_event();
   auto source=avsync_phone::source_time(*s.qr,s.qrObservedMs,now,video,s.taiUtcSeconds);
-  latency[@"state"]=[NSString stringWithUTF8String:source.state];
+  latency[@"state"]=latency[@"videoState"]=[NSString stringWithUTF8String:source.state];
+  latency[@"qrAgeMs"]=@(now-s.qrObservedMs);latency[@"qrSeq"]=@(s.qr->k);
+  if(video)latency[@"videoSeq"]=@(video->seq);
   if(source.video_utc_ms&&video&&s.haveWallClock){
-   latency[@"state"]=@"estimated";latency[@"video_ms"]=@(video->time_ms+s.wallOffsetMs-*source.video_utc_ms);
-   for(auto it=report.events.rbegin();it!=report.events.rend();++it)if(!s.qr->timecode&&it->seq==video->seq&&it->av_offset_ms&&it->grade!="invalid"&&source.audio_utc_ms){latency[@"audio_ms"]=@(it->audio_time_ms+s.wallOffsetMs-*source.audio_utc_ms);break;}
+   latency[@"state"]=latency[@"videoState"]=@"estimated";latency[@"videoSource"]=@"live-qr-tai/device-utc";latency[@"video_ms"]=@(video->time_ms+s.wallOffsetMs-*source.video_utc_ms);
+   for(auto it=report.events.rbegin();it!=report.events.rend();++it)if(!s.qr->timecode&&it->seq==video->seq&&it->av_offset_ms&&it->grade!="invalid"&&source.audio_utc_ms){latency[@"audio_ms"]=@(it->audio_time_ms+s.wallOffsetMs-*source.audio_utc_ms);latency[@"audioState"]=@"estimated";break;}
    latency[@"source"]=@"live-qr-tai/device-utc";latency[@"eventSeq"]=@(video->seq);latency[@"referenceAgeMs"]=@(now-s.qrObservedMs);
-  }else if(source.video_utc_ms)latency[@"state"]=@"waiting_for_device_clock";
+  }else if(source.video_utc_ms)latency[@"state"]=latency[@"videoState"]=@"waiting_for_device_clock";
  }
  if(!report.audio_timecodes.empty()){
   const auto&packet=report.audio_timecodes.back();
   const double lease=1000+avsync::timecode_duration_ms(packet.bytes.size(),packet.baud)+200;
-  if(now-packet.time_ms<=lease){
-   result[@"audioTimecode"]=@{@"valid":@YES,@"crcOk":@YES,@"receivedTimeMs":@(packet.time_ms),@"validUntilMs":@(packet.time_ms+lease),@"sourceId":@(packet.source_id),@"baud":@(packet.baud),@"live":@(packet.live),@"sendTaiNs":[NSString stringWithFormat:@"%lld",(long long)packet.audio_send_ns]};
+  if(now-packet.time_ms<=lease&&packet.time_ms<=now+100){
+   result[@"audioTimecode"]=@{@"valid":@YES,@"crcOk":@YES,@"receivedTimeMs":@(packet.time_ms),@"validUntilMs":@(packet.time_ms+lease),@"sourceId":@(packet.source_id),@"baud":@(packet.baud),@"live":@(packet.live),@"sendTaiNs":[NSString stringWithFormat:@"%lld",(long long)packet.audio_send_ns],@"videoSendTaiNs":[NSString stringWithFormat:@"%lld",(long long)packet.video_send_ns]};
    if(packet.live&&s.haveWallClock){
-    latency[@"state"]=@"estimated";
+    latency[@"state"]=latency[@"audioState"]=@"estimated";
     latency[@"audio_ms"]=@(packet.time_ms+s.wallOffsetMs+s.taiUtcSeconds*1000-double(packet.audio_send_ns)/1e6);
     latency[@"audioSource"]=@"audio-timecode-tai/device-utc";
-    latency[@"source"]=latency[@"video_ms"]?@"live-qr-and-audio-timecode-tai/device-utc":@"audio-timecode-tai/device-utc";
-   }else if(!packet.live&&!latency[@"video_ms"])latency[@"state"]=@"file_signal";
+    if(!latency[@"video_ms"]){
+     for(auto it=report.events.rbegin();it!=report.events.rend();++it){
+      auto paired=avsync_phone::paired_video_latency(packet,*it,now,s.wallOffsetMs,s.taiUtcSeconds);
+      if(!paired)continue;
+      latency[@"video_ms"]=@(*paired);latency[@"videoState"]=@"estimated";
+      latency[@"videoSource"]=@"paired-audio-timecode-tai/device-utc";
+      latency[@"eventSeq"]=@(it->seq);latency[@"referenceAgeMs"]=@(now-packet.time_ms);break;
+     }
+    }
+    latency[@"source"]=[latency[@"videoSource"] isEqual:@"paired-audio-timecode-tai/device-utc"]?@"paired-audio-timecode-tai/device-utc":latency[@"video_ms"]?@"live-qr-and-audio-timecode-tai/device-utc":@"audio-timecode-tai/device-utc";
+   }else{
+    latency[@"audioState"]=packet.live?@"waiting_for_device_clock":@"file_signal";
+    if(!latency[@"video_ms"])latency[@"state"]=latency[@"audioState"];
+   }
   }
  }
  result[@"latency"]=latency;

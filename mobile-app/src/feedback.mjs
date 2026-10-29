@@ -22,6 +22,7 @@ export function latencyValues(report, ageMs = Infinity, active = true) {
  return { video: Number.isFinite(value.video_ms) ? value.video_ms : null, audio: Number.isFinite(value.audio_ms) ? value.audio_ms : null };
 }
 
-export function latencyHint(state) {
+export function latencyHint(value) {
+ const state = typeof value === 'string' ? value : value?.videoState || value?.state;
  return ({ file_signal: 'File test: no absolute source time', qr_expired: 'Live QR expired — keep its code visible', qr_event_mismatch: 'QR and picture event do not match', waiting_for_video_event: 'Live QR decoded — waiting for a video event', waiting_for_device_clock: 'Capture clock mapping unavailable', unsupported_signal: 'Source format/rate unsupported for latency', estimated: 'Waiting for a fresh event' })[state] || 'Waiting for a matching live QR timestamp';
 }

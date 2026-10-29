@@ -877,3 +877,34 @@ PR #34 changes only web/docs/tests, so its CI rebuild has no intentional media
 algorithm change. The retained 815c55f staging binary additionally has the newer
 compact audio protocol, unlike released/main legacy media. No server rollout is
 part of this mobile fix.
+
+
+## Paired phone video latency and channel diagnostics (2026-10-29)
+
+A new user sample contained accepted video/audio pairs and a fresh CRC audio
+packet, but only audio latency. Source inspection found the video estimate
+unnecessarily gated on a QR read within three seconds; publishing audio then
+replaced the global reason with estimated, hiding a missing video reference.
+This is a reproducible omission path, not proof that QR expiry alone caused
+all reported physical recognition/timing failures.
+
+The phone may now recover video latency from a fresh accepted timecoded pair
+and that exact CRC packet's common video-send TAI timestamp. Source ID, audio
+send time, audio reception time and per-event source offset must match; stale,
+future, FILE and invalid pairs are rejected. This never subtracts a calibrated
+median from an unrelated audio estimate. The existing fresh QR path remains.
+Per-channel state and video-source fields plus QR age/sequence diagnostics make
+missing video references visible even when independent audio latency succeeds.
+This extends the user-authorized estimated phone latency, with unknown clock
+and capture accuracy, without changing server reference rules or phone pairing,
+optical detection, camera FPS, calibration or acceptance thresholds. QR is still
+needed to establish picture identity and its limited sequence projection.
+A connected physical capture is required to investigate the remaining jitter.
+
+Validation: all 32 JS unit tests, the actual React App Save/retention regression,
+and the full native AVFoundation suite pass. New native 1/2-Hz tests with a
+QR observed only at t=0 retain +120-ms video/+155-ms audio estimates after
+QR expiry. Audio-only input still never invents video latency. Unit cases
+reject wrong source/send/reception/offset identities, invalid and stale/future
+pairs and FILE mode, and show that AV calibration does not affect latency.
+These are deterministic software tests; no physical phone capture was made.
