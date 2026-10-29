@@ -563,7 +563,7 @@ No MediaMTX and no preview stream: the generator's picture is seen through any M
 
 - The picture always shows TEST SIGNAL (top and bottom); the generator's NMOS labels start with `AVSync Test`, its flows carry the test-signal tag and description (§7.1).
 - The function **never** issues IS-05 requests to other devices and never changes a route. It is routed like any other function, by the production or an operator.
-- The web UI and the widget show a red **TEST SIGNAL ACTIVE** banner on the generator while it writes audible chirps, and a **mute** button (`AVSYNC_AUDIO_ENABLE`). Mute is live and takes effect at the next audio block (≤ 10 ms).
+- The web UI shows a green **Test signal active** status pill beside the other header pills while the generator writes audible chirps; muted/stopped states are neutral. The widget retains its TEST SIGNAL ACTIVE indicator. Both provide a **mute** button (`AVSYNC_AUDIO_ENABLE`). Mute is live and takes effect at the next audio block (≤ 10 ms).
 - `POST /api/v1/generator/stop` writes black and silence with the TEST SIGNAL text kept (the flows stay, so nothing downstream breaks); `/start` resumes.
 - Test files carry the test label in their metadata and picture (§9.1).
 - The platform SHOULD place generators only in test productions (`TODO_` the platform decides; noted in §16).
@@ -712,7 +712,7 @@ mxl-avsync/
 
 Family look: header with label, role, state and registration pills, version; tabs with their own address.
 
-- Generator: **Signal** (format, rate, offset, chirp level, mute, stop/start, free texts, the TEST SIGNAL ACTIVE banner), **NMOS**, **Status**, **Settings**.
+- Generator: **Signal** (format, rate, offset, chirp level, mute, stop/start, free texts; the header shows the test-signal status pill), **NMOS**, **Status**, **Settings**.
 - Analyzer: **Measurement** (the offset in large digits with sign and sentence, grade colour, latencies, trend, statistics, the last events with flags), **Input** (state, routed senders, formats, counters, drops, duplicates), **Events** (the event log, download as JSON), **NMOS**, **Status**, **Settings** (windows, thresholds; env-set keys read-only; export and import).
 
 ### 16.2 REST

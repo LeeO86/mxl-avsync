@@ -6,7 +6,7 @@ The shipped Vue methods are exercised without external dependencies:
 node --test tests/web/drafts.test.cjs
 ```
 
-The real-browser regression starts its own service with a temporary state directory and port, runs through at least three one-second refreshes while typing, and checks Apply persistence, in-flight edits and Discard. It uses a separately installed Playwright package and Chromium, plus an existing built service. It does not connect to a production or lab instance:
+The real-browser regression starts its own service with a temporary state directory and port, runs through at least three one-second refreshes while typing, and checks Apply persistence, in-flight edits and Discard. It also selects and uploads a real source-image fixture without editing any text, checks filename reset, generator-only preview requests, unavailable-preview recovery, and green active/neutral muted/stopped header pills. It uses a separately installed Playwright package and Chromium, plus an existing built service. It does not connect to a production or lab instance:
 
 ```sh
 BIN="$PWD/build/mxl-avsync" \
@@ -16,3 +16,11 @@ node tests/web/settings.cjs
 ```
 
 Alternatively use the `playwright` package with its installed Chromium and omit the two browser overrides. Keep browser packages outside the repository when using the override path. The C++ API integration script `tests/integration/settings.sh` separately checks validation, persistence, environment precedence, restart-required keys and import/export.
+
+The 2026-10-29 UI fix was also checked interactively against the published 1.0.1
+Linux container with only `web/` bind-mounted read-only, using temporary state,
+MXL domains and loopback-only ports. A PNG-only selection enabled Apply and the
+stored bytes matched the fixture. Active/muted/stopped pills, a failed JPEG and
+its recovery without reload, zero generator input-preview requests, and the
+analyzer's separate input/result states were checked in the real browser.
+This validates the UI/API boundary; no media timing or production routes change.

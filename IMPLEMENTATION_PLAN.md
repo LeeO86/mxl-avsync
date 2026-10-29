@@ -839,3 +839,16 @@ profile plus repository support as public contact.
 The mobile Settings sheet links to the public privacy policy and its support
 contacts. This JavaScript change takes effect in the next distributed build;
 previously delivered 2.0.0 (2) remains unchanged.
+
+
+## Container web UI corrections (2026-10-29)
+
+User reports an always-broken generator preview, disabled Apply after choosing
+an image, and misleading red normal activity. The template called missing
+onImage; restore selection state, pending filename and Apply/Discard input reset,
+without discarding a newer selection during an in-flight upload. Generator has
+only generated preview; analyzer keeps input/result. Missing JPEGs hide the
+broken image behind a placeholder while polling can recover it. Normal generator
+activity is a green header pill, muted/stopped neutral; red remains for failures.
+This explicitly updates the old red-banner requirement in specification §11.
+No codec, media scheduling, API or route changes.

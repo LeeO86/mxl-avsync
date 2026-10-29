@@ -2,6 +2,14 @@
 
 ## 1.0.2 (unreleased)
 
+- Fix source-picture selection so Apply enables and uploads PNG/GIF files; retain
+  failed or newly selected uploads and reset the file input on Apply/Discard.
+- Show only role-appropriate previews and replace unavailable images with a
+  recoverable placeholder. Generator pages no longer request analyzer input.
+- Move generator activity from the red banner to a green header status pill,
+  with neutral muted/stopped states. Error banners remain for actual failures.
+
+
 - Brand the mobile app AVsync, enlarge the header mark and generate separate
   iOS launcher, framed content and Android adaptive/themed icons from one SVG.
 - Show the applied calibration and saved date in mobile settings; distinguish

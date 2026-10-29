@@ -36,6 +36,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const page = await browser.newPage();
     const errors=[];
     page.on('pageerror',error=>errors.push(error.message));
+    let inputPreviewRequests=0;
+    page.on('request',request=>{ if(request.url().includes('/api/v1/preview/input.jpg')) inputPreviewRequests++; });
     let polls=0;
     page.on('response',response=>{ if(response.url()===base+'/api/v1/status') polls++; });
     await page.goto(base+'/#Signal');
@@ -53,6 +55,51 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal((await (await fetch(base+'/api/v1/generator')).json()).title,'Typing survives live refresh');
     await page.reload();
     assert.equal(await title.inputValue(),'Typing survives live refresh');
+
+    // Generator has no input preview; activity belongs with normal header status.
+    assert.equal(inputPreviewRequests,0);
+    assert.equal(await page.getByTestId('preview-input').count(),0);
+    const activity=page.getByTestId('generator-status');
+    assert.equal(await activity.textContent(),'Test signal active');
+    assert.match(await activity.getAttribute('class'), /\bok\b/);
+    await signal.getByRole('button',{name:'Mute',exact:true}).click();
+    await activity.filter({hasText:'Test signal muted'}).waitFor();
+    assert.doesNotMatch(await activity.getAttribute('class'), /\b(ok|bad)\b/);
+    await signal.getByRole('button',{name:'Unmute',exact:true}).click();
+    await activity.filter({hasText:'Test signal active'}).waitFor();
+    await signal.getByRole('button',{name:'Stop',exact:true}).click();
+    await activity.filter({hasText:'Test signal stopped'}).waitFor();
+    await signal.getByRole('button',{name:'Start',exact:true}).click();
+    await activity.filter({hasText:'Test signal active'}).waitFor();
+
+    // Selecting only a picture enables Apply and survives several refreshes.
+    const picker=signal.locator('input[type=file]');
+    await picker.setInputFiles(path.join(root,'tests/fixtures/transparent.png'));
+    assert.equal(await signal.getByRole('button',{name:'Apply',exact:true}).isEnabled(),true);
+    const imageBefore=polls; await delay(3300); assert.ok(polls-imageBefore>=3);
+    await signal.getByRole('button',{name:'Apply',exact:true}).click();
+    await signal.getByText('Unsaved changes',{exact:true}).waitFor({state:'hidden'});
+    assert.equal((await (await fetch(base+'/api/v1/generator')).json()).source_image,true);
+    const stored=Buffer.from(await (await fetch(base+'/api/v1/generator/source-image')).arrayBuffer());
+    assert.deepEqual(stored,fs.readFileSync(path.join(root,'tests/fixtures/transparent.png')));
+    assert.equal(await picker.inputValue(),'');
+    await picker.setInputFiles(path.join(root,'tests/fixtures/blink.gif'));
+    await signal.getByRole('button',{name:'Discard',exact:true}).click();
+    await signal.getByText('Unsaved changes',{exact:true}).waitFor({state:'hidden'});
+    assert.equal(await picker.inputValue(),'');
+
+    // Missing previews display text, and a later good frame recovers without reload.
+    let previewAvailable=false;
+    await page.route('**/api/v1/preview/generated.jpg?*',route=>route.fulfill(previewAvailable
+      ? {status:200,contentType:'image/png',body:fs.readFileSync(path.join(root,'tests/fixtures/transparent.png'))}
+      : {status:503,contentType:'application/json',body:'{"error":"no preview yet"}'}));
+    const preview=page.getByTestId('preview-generated');
+    await preview.getByRole('status').waitFor();
+    assert.equal(await preview.locator('img').isVisible(),false);
+    previewAvailable=true;
+    await preview.locator('img').waitFor({state:'visible'});
+    await preview.getByRole('status').waitFor({state:'hidden'});
+    await page.unroute('**/api/v1/preview/generated.jpg?*');
 
     // A successful own write must not erase a newer edit made while it was in flight.
     await page.route('**/api/v1/generator',async route=>{
@@ -83,7 +130,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     await settings.getByRole('button',{name:'Discard',exact:true}).click();
     await page.waitForFunction(()=>Array.from(document.querySelectorAll('label')).find(el=>el.textContent.trim()==='AVSYNC_NOTES').querySelector('input').value==='Settings draft survives refresh');
     assert.deepEqual(errors,[]);
-    console.log('web settings: three refreshes while typing, Apply persistence, in-flight edit preservation and Discard passed');
+    console.log('web UI: drafts, image upload/Discard, role previews/recovery and generator status passed');
   } catch(error) {
     console.error(fs.readFileSync(path.join(work,'service.log'),'utf8').slice(-3000));
     throw error;
