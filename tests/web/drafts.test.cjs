@@ -73,3 +73,54 @@ test('edits typed during Apply survive its response and remain unsaved', async (
   assert.equal(a.title,'Typed later'); assert.equal(a.draft.AVSYNC_TITLE,'Typed later');
   assert.equal(a.signalDirty,true); assert.equal(a.settingsDirty,true);
 });
+
+test('image-only selection makes the form dirty and uploads bytes on Apply', async () => {
+  const backend=server(), a=app(backend.fetch); a.info={role:'generator'};
+  await a.refresh();
+  const file={name:'picture.PNG',type:'image/png',arrayBuffer:async()=>new Uint8Array([137,80,78,71]).buffer};
+  a.$refs={sourceImageInput:{value:'picture.PNG'}};
+  a.onImage({target:{files:[file]}});
+  assert.equal(a.imageFile,file); assert.equal(a.signalDirty,true);
+  for(let i=0;i<4;i++) await a.refresh();
+  assert.equal(a.imageFile,file);
+  await a.saveGenerator();
+  const upload=backend.calls.find(c=>c.url==='/api/v1/generator/source-image' && c.method==='POST');
+  assert.ok(upload); assert.equal(upload.headers['Content-Type'],'image/png');
+  assert.deepEqual([...new Uint8Array(upload.body)],[137,80,78,71]);
+  assert.equal(a.imageFile,null); assert.equal(a.$refs.sourceImageInput.value,'');
+  assert.equal(a.signalDirty,false);
+  a.onImage({target:{files:[file]}}); await a.discardGenerator();
+  assert.equal(a.imageFile,null); assert.equal(a.$refs.sourceImageInput.value,'');
+  a.onImage({target:{files:[]}}); assert.equal(a.imageFile,null);
+});
+
+test('failed image uploads retain the selection and a later image survives an in-flight upload', async () => {
+  const backend=server(); let rejectUpload=true,release;
+  const gate=new Promise(resolve=>release=resolve);
+  const first={name:'first.gif',type:'',arrayBuffer:async()=>new ArrayBuffer(1)};
+  const second={name:'next.png',type:'image/png',arrayBuffer:async()=>new ArrayBuffer(1)};
+  const a=app(async(url,init={})=>{
+    if(url==='/api/v1/generator/source-image' && init.method==='POST') {
+      if(rejectUpload) return {ok:false,json:async()=>({error:'Invalid image'})};
+      await gate;
+    }
+    return backend.fetch(url,init);
+  });
+  a.info={role:'generator'}; await a.refresh();
+  a.onImage({target:{files:[first]}}); await a.saveGenerator();
+  assert.equal(a.signalError,'Invalid image'); assert.equal(a.imageFile,first); assert.equal(a.signalDirty,true);
+  rejectUpload=false;
+  const saving=a.saveGenerator(); a.onImage({target:{files:[second]}}); release(); await saving;
+  assert.equal(a.signalError,''); assert.equal(a.imageFile,second); assert.equal(a.signalDirty,true);
+  const uploads=backend.calls.filter(c=>c.url==='/api/v1/generator/source-image' && c.method==='POST');
+  assert.equal(uploads[0].headers['Content-Type'],'image/gif');
+});
+
+test('preview slots match the role and normal generator activity is green', () => {
+  const a=app(server().fetch); a.info={role:'generator'};
+  assert.deepEqual(JSON.parse(JSON.stringify(a.previewSlots)),[{slot:'generated',label:'Generated signal'}]);
+  assert.equal(a.generatorSignal.kind,'ok'); assert.equal(a.generatorSignal.label,'Test signal active');
+  a.audioOn=false; assert.equal(a.generatorSignal.kind,''); assert.equal(a.generatorSignal.label,'Test signal muted');
+  a.stopped=true; assert.equal(a.generatorSignal.kind,''); assert.equal(a.generatorSignal.label,'Test signal stopped');
+  a.info={role:'analyzer'}; assert.deepEqual(Array.from(a.previewSlots,p=>p.slot),['input','generated']);
+});
