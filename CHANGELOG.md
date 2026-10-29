@@ -1,6 +1,19 @@
 # Changelog
 
-## 1.0.2 (unreleased)
+## 2.0.0 (2026-10-29)
+
+- Introduce the shared AVS2 QR + flash picture in file, MXL and iPhone sources
+  and receivers. Decode full event identity independently of flash timing;
+  retain legacy input compatibility. Upgrade compact-signal receivers together.
+- Replace per-frame full-picture rectification on iOS with sparse camera-plane
+  photometry. Support crops retaining QR quiet zone and flash field, validate
+  pulse-time QR evidence, and preserve onset through delayed QR pixel settling.
+- Center the app icon above AVsync, use Title for the existing saved source
+  label, remove the obsolete extra Title control and render a smaller subtitle.
+- Draw a black centerline on the moving sync box and keep white scale ticks
+  above it, using the same foreground in native iPhone and server rendering.
+- Refresh public project-site screenshots and release installation guidance.
+
 
 - Keep the last valid mobile measurement saveable through temporary signal loss,
   label its age and spread, and preserve acquisition time in saved/exported results.

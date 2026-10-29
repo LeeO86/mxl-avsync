@@ -10,6 +10,8 @@ final class AvsyncGeneratorController: UIViewController {
   private let subtitle: String
   private let sourceImage: UIImage?
   private let syncDot = CALayer()
+  private let syncCenter = CALayer()
+  private let syncForeground = CALayer()
   private let canvas = UIView()
   private let marker = CALayer()
   private var cells: [CALayer] = []
@@ -55,6 +57,10 @@ final class AvsyncGeneratorController: UIViewController {
     marker.backgroundColor = UIColor.black.cgColor
     canvas.layer.addSublayer(marker)
     canvas.layer.addSublayer(syncDot)
+    syncCenter.backgroundColor = UIColor.black.cgColor
+    syncDot.addSublayer(syncCenter)
+    syncForeground.frame = canvas.bounds
+    canvas.layer.addSublayer(syncForeground)
     // AVS2 carries identity in the QR; no per-frame strip layers.
     status.textColor = .lightGray; status.font = .systemFont(ofSize: 12); status.numberOfLines = 3
     status.textAlignment = .center; status.accessibilityIdentifier = "generatorStatus"
@@ -130,6 +136,7 @@ final class AvsyncGeneratorController: UIViewController {
       plan = AVSyncGenerator(testID: sourceID, rate: rate, epochTaiNs: epochTai, epochHost: epochHost)
       guard let plan else { return }
       plan.setSource(name: sourceName, subtitle: subtitle, image: sourceImage)
+      syncForeground.contents = plan.syncForeground().cgImage
       let geometry = plan.geometry()
       func n(_ key: String) -> CGFloat { CGFloat((geometry[key] as? NSNumber)?.doubleValue ?? 0) }
       marker.frame = CGRect(x: n("markerX"), y: n("markerY"), width: n("markerSide"), height: n("markerSide"))
@@ -193,6 +200,7 @@ final class AvsyncGeneratorController: UIViewController {
     func n(_ key: String) -> CGFloat { CGFloat((frame[key] as? NSNumber)?.doubleValue ?? 0) }
     syncDot.isHidden = false
     syncDot.frame = CGRect(x: n("syncX"), y: n("syncY"), width: n("syncSize"), height: n("syncSize"))
+    syncCenter.frame = CGRect(x: (n("syncSize")-n("syncLineWidth"))/2, y: 0, width: n("syncLineWidth"), height: n("syncSize"))
     syncDot.backgroundColor = UIColor(red: n("syncR")/255, green: n("syncG")/255, blue: n("syncB")/255, alpha: 1).cgColor
     marker.backgroundColor = (frame["white"] as? Bool == true ? UIColor.white : UIColor.black).cgColor
     let bits = (frame["strip"] as? NSNumber)?.uint32Value ?? 0

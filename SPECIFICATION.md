@@ -1010,3 +1010,15 @@ window. A QR already observed before the pulse cannot identify a new pulse.
 This prevents frozen QR or skipped-event callbacks from relabelling an edge.
 Nayuki is vendored into the portable core for this check, with no new external
 media/GUI dependency. Sampling occurs only within the first 100 ms of the pulse and stops after identification. This allows QR pixels to settle after the flash has already started.
+
+
+### AVS2 presentation (2.0.0)
+
+The app icon is centered with AVsync immediately below it. The configured
+source caption is labelled Title in the web and mobile generator controls;
+Subtitle is rendered at two-thirds the title scale (minimum one raster scale).
+Existing source-name persistence is retained. The obsolete separate header
+Title control is removed; legacy API keys remain accepted. The moving sync
+box has a vertical black centerline. White scale ticks are foreground and the
+box travels underneath them in both native and server renderers. None of
+these decorative regions changes QR/flash geometry or audio timing.

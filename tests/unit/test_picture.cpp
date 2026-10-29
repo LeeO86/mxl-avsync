@@ -352,8 +352,8 @@ TEST_CASE("large qr stays decodable and the sync square moves")
         return frame.y[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)];
     };
     CHECK(sample(zero, at_zero) == kYWhite);
-    CHECK(sample(late, at_late) == static_cast<uint16_t>(145 * 4));
-    CHECK(sample(early, at_early) == static_cast<uint16_t>(81 * 4));
+    CHECK(late.y[size_t(geometry.sweep_y-25)*late.width+at_late-10] == static_cast<uint16_t>(145 * 4));
+    CHECK(early.y[size_t(geometry.sweep_y-25)*early.width+at_early-10] == static_cast<uint16_t>(81 * 4));
     CHECK(zero.cb[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(zero.width / 2) + static_cast<size_t>(at_zero / 2)] == kYNeutralChroma);
     CHECK(zero.y[static_cast<size_t>(geometry.sweep_y - 18) * static_cast<size_t>(zero.width) + static_cast<size_t>(at_zero)] == kYWhite);
 
@@ -465,7 +465,9 @@ TEST_CASE("mobile static plate omits only the shared animated sync square") {
             render_picture(plate,info,9,pos,period,flash_white(pos,1000.0/60));
             info.show_sync_indicator=true;
             const auto dot=sync_indicator(1280,720,pos,period,info.period_ms);
-            CHECK(animated.y[(dot.y+dot.side/2)*1280+dot.x+dot.side/2]==dot.y10);
+            CHECK(animated.y[(dot.y+dot.side/2)*1280+dot.x+dot.side/2]==kYWhite); // foreground tick wins
+            CHECK(animated.y[dot.y*1280+dot.x+dot.side/2]==kYBlack); // centerline extends beyond tick
+            CHECK(animated.y[dot.y*1280+dot.x+dot.side/4]==dot.y10);
             if(pos==0)CHECK(dot.kind==SyncDot::Zero);
             else if(pos==1)CHECK(dot.kind==SyncDot::Late);
             else CHECK(dot.kind==SyncDot::Early);
@@ -559,4 +561,27 @@ TEST_CASE("AVS2 late QR pixel settling preserves the first optical frame at 240 
     }
     REQUIRE(events.size()==2);CHECK(events[0].seq==2);CHECK(events[0].time_ms==500);
     CHECK(events[1].seq==3);CHECK(events[1].time_ms==1000);
+}
+
+TEST_CASE("AVS2 brand is centered and the moving box passes below white foreground ticks") {
+    PictureInfo info;QrPayload q;q.qr_flash=q.timecode=true;q.test_id="layout";
+    info.qr_json=qr_payload_text(q);info.source="Demo title";info.subtitle="Smaller subtitle";
+    SourceStill icon;icon.width=icon.height=4;icon.rgba.resize(4*4*4);
+    for(size_t i=0;i<icon.rgba.size();i+=4){icon.rgba[i]=255;icon.rgba[i+3]=255;}
+    info.app_icon=&icon;
+    for(int rate:{1,2})for(int pos:{0,1,60/rate-1}) {
+        info.period_ms=1000.0/rate;Yuv422p10 frame,foreground;frame.resize(1280,720);foreground.resize(1280,720);
+        render_picture(frame,info,8,pos,60/rate,false);
+        render_sync_foreground(foreground,60/rate,info.period_ms,true);
+        const auto dot=sync_indicator(1280,720,pos,60/rate,info.period_ms,true);
+        int ticks_inside=0;
+        for(int y=dot.y;y<dot.y+dot.side;++y)for(int x=dot.x;x<dot.x+dot.side;++x) {
+            if(foreground.y[y*1280+x]==kYWhite){CHECK(frame.y[y*1280+x]==kYWhite);++ticks_inside;}
+        }
+        CHECK(ticks_inside>0);CHECK(frame.y[dot.y*1280+dot.x+dot.side/2]==kYBlack);
+        const int icon_side=72,icon_top=18;
+        CHECK(frame.cr[(icon_top+icon_side/2)*640+640/2]>800);
+        CHECK(frame.cr[(icon_top+icon_side/2)*640+(640-icon_side/2-1)/2]<800);
+        const auto decoded=decode_qr_signal(frame.y.data(),1280,720,1280);REQUIRE(decoded);CHECK(decoded->payload.qr_flash);
+    }
 }

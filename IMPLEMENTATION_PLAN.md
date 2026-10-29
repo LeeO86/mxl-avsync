@@ -1053,3 +1053,23 @@ must agree with the decoded identity; its bounded 100-ms sampling window also
 handles slower QR pixel settling without moving the first optical timestamp.
 The old custom locator is only the compatibility path for legacy signals.
 A later physical iPhone test remains pending; the user chose to run it later.
+
+
+## AVsync 2.0 release layout (2026-10-29)
+
+The maintainer requested centered icon/AVsync branding in place of TEST SIGNAL
+for the compact picture, a black centerline on the moving box below the white
+scale ticks, the existing source caption labelled Title and a smaller subtitle.
+The obsolete separate header Title input is hidden; storage/API keys remain
+compatible, preserving user labels. The native generator composites a shared
+transparent tick foreground above its animated layer, rather than covering
+static ticks. This explicitly supersedes the older mandatory TEST SIGNAL
+header for AVS2; NMOS labels/descriptions and generator UI still identify tests.
+
+Release target is container 2.0.0 plus a new App 2.0.0 TestFlight build. It
+includes the previously validated independent audio timecode/AVS2 and local
+capture changes. Android capture and independent physical timing accuracy are
+not claimed. Public screenshots come from the actual native shared renderer.
+The user reported both optical tests successful and markedly steadier, with
+10–30-ms video variation on the SRT/browser path; no new accuracy validation
+or attribution to WebRTC alone follows from that observation.

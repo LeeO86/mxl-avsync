@@ -58,6 +58,8 @@ std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int h
 
 std::optional<QrDetection> decode_qr_signal(const uint16_t* luma, int width, int height, int stride);
 
+void render_sync_foreground(Yuv422p10& frame, int period_frames, double period_ms, bool qr_flash = true);
+
 struct ResultPicture {
     std::string number;
     std::string sentence;

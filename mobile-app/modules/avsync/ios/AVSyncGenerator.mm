@@ -11,11 +11,13 @@ void rgb(uint16_t y,uint16_t cb,uint16_t cr,uint8_t *out) {
     out[1]=uint8_t(std::lround(std::clamp(l-.187324*u-.468124*v,0.0,1.0)*255));
     out[2]=uint8_t(std::lround(std::clamp(l+1.8556*u,0.0,1.0)*255));out[3]=255;
 }
-UIImage *image_from_frame(const avsync::Yuv422p10& frame) {
+UIImage *image_from_frame(const avsync::Yuv422p10& frame,bool white_only=false) {
     NSMutableData *rgba=[NSMutableData dataWithLength:size_t(frame.width)*frame.height*4];auto *dst=(uint8_t*)rgba.mutableBytes;
     for(int y=0;y<frame.height;++y)for(int x=0;x<frame.width;++x) {
         const size_t ci=size_t(y)*(frame.width/2)+x/2;
-        rgb(frame.y[size_t(y)*frame.width+x],frame.cb[ci],frame.cr[ci],dst+(size_t(y)*frame.width+x)*4);
+        auto *pixel=dst+(size_t(y)*frame.width+x)*4;
+        if(white_only) { const uint8_t value=frame.y[size_t(y)*frame.width+x]==avsync::kYWhite?255:0;pixel[0]=pixel[1]=pixel[2]=pixel[3]=value; }
+        else rgb(frame.y[size_t(y)*frame.width+x],frame.cb[ci],frame.cr[ci],pixel);
     }
     CGDataProviderRef provider=CGDataProviderCreateWithCFData((__bridge CFDataRef)rgba);
     CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -65,6 +67,11 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     make_still(image,_sourceImage);
     _info.source_image=&_sourceImage;
 }
+- (UIImage *)syncForeground {
+    avsync::Yuv422p10 frame;frame.resize(1280,720);
+    avsync::render_sync_foreground(frame,_plan->period_frames(),_info.period_ms,true);
+    return image_from_frame(frame,true);
+}
 - (NSDictionary *)geometry {
     auto g=avsync::qr_flash_geometry(1280,720);
     return @{ @"width":@1280,@"height":@720,@"markerX":@(g.marker_x),@"markerY":@(g.marker_y),@"markerSide":@(g.marker_side),@"stripX":@(g.strip_x),@"stripY":@(g.strip_y),@"stripWidth":@0,@"stripHeight":@0 };
@@ -74,7 +81,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     const uint32_t data=(avsync::binary_to_gray(uint32_t(seq&0xffffff))<<4)|(pos&15);
     const uint32_t bits=(data<<4)|((__builtin_popcount(data)&1)<<3)|5;
     const auto dot=avsync::sync_indicator(1280,720,pos,period,_info.period_ms,true);uint8_t color[4];rgb(dot.y10,dot.cb10,dot.cr10,color);
-    return @{ @"sequence":@(seq),@"position":@(pos),@"white":@(avsync::flash_white(pos,1000.0/60)),@"strip":@(bits),@"syncX":@(dot.x),@"syncY":@(dot.y),@"syncSize":@(dot.side),@"syncR":@(color[0]),@"syncG":@(color[1]),@"syncB":@(color[2]),@"syncPositionMs":@(avsync::sync_place(pos,period,_info.period_ms).position_ms) };
+    return @{ @"sequence":@(seq),@"position":@(pos),@"white":@(avsync::flash_white(pos,1000.0/60)),@"strip":@(bits),@"syncX":@(dot.x),@"syncY":@(dot.y),@"syncSize":@(dot.side),@"syncLineWidth":@2,@"syncR":@(color[0]),@"syncG":@(color[1]),@"syncB":@(color[2]),@"syncPositionMs":@(avsync::sync_place(pos,period,_info.period_ms).position_ms) };
 }
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }
 - (NSData *)audioForSequence:(uint64_t)seq { const auto samples=_plan->audio(seq);return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)]; }

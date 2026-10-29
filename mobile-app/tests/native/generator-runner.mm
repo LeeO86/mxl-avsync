@@ -111,10 +111,11 @@ int main(int argc, char **argv) { @autoreleasepool {
                     [styled drawAtPoint:CGPointZero];
                     [([state[@"white"] boolValue]?UIColor.whiteColor:UIColor.blackColor) setFill];
                     UIRectFill(CGRectMake(geo.marker_x,geo.marker_y,geo.marker_side,geo.marker_side));
-                    const uint32_t bits=[state[@"strip"] unsignedIntValue];
-                    for(int cell=0;cell<32;++cell) { [(bits&(1u<<(31-cell))?UIColor.whiteColor:UIColor.blackColor) setFill];UIRectFill(CGRectMake(geo.strip_x+cell*geo.strip_w,geo.strip_y,geo.strip_w,geo.strip_h)); }
                     [[UIColor colorWithRed:number(@"syncR")/255 green:number(@"syncG")/255 blue:number(@"syncB")/255 alpha:1] setFill];
                     UIRectFill(CGRectMake(number(@"syncX"),number(@"syncY"),number(@"syncSize"),number(@"syncSize")));
+                    [UIColor.blackColor setFill];
+                    UIRectFill(CGRectMake(number(@"syncX")+(number(@"syncSize")-number(@"syncLineWidth"))/2,number(@"syncY"),number(@"syncLineWidth"),number(@"syncSize")));
+                    [[source syncForeground] drawAtPoint:CGPointZero];
                 }];
                 NSString *file=[NSString stringWithFormat:@"%s/%dhz-%d.png",argv[1],rate,pos];
                 assert([UIImagePNGRepresentation(snapshot) writeToFile:file atomically:YES]);

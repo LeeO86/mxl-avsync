@@ -134,3 +134,15 @@ test('preview slots match the role and normal generator activity is green', () =
   a.stopped=true; assert.equal(a.generatorSignal.kind,''); assert.equal(a.generatorSignal.label,'Test signal stopped');
   a.info={role:'analyzer'}; assert.deepEqual(Array.from(a.previewSlots,p=>p.slot),['input','generated']);
 });
+
+test('one Title control edits the persisted source caption through refresh and Apply', async () => {
+  const html=fs.readFileSync(path.join(__dirname,'../../web/index.html'),'utf8');
+  assert.match(html,/<label>Title <input v-model="source"/);
+  assert.doesNotMatch(html,/<label>Source name|<label>Title <input v-model="title"/);
+  const backend=server(),a=app(backend.fetch);a.info={role:'generator'};
+  backend.state.generator.source='Saved caption';await a.refresh();
+  assert.equal(a.source,'Saved caption');a.source='New title';
+  for(let i=0;i<4;i++)await a.refresh();assert.equal(a.source,'New title');
+  await a.saveGenerator();assert.equal(backend.state.generator.source,'New title');
+  assert.equal(a.signalDirty,false);
+});

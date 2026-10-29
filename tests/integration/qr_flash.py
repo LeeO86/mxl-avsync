@@ -13,12 +13,14 @@ parser.add_argument('--binary',type=Path,required=True)
 parser.add_argument('--out',type=Path,required=True)
 args=parser.parse_args();binary=args.binary.resolve();out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
 
-def run(command,log):
-    with log.open('w') as file:subprocess.run([str(x) for x in command],stdout=file,stderr=subprocess.STDOUT,check=True)
+def run(command,log,accepted=(0,)):
+    with log.open('w') as file:
+        result=subprocess.run([str(x) for x in command],stdout=file,stderr=subprocess.STDOUT)
+    if result.returncode not in accepted:raise RuntimeError(f"{command[0]} exited {result.returncode}; see {log}")
 
 def analyze(path,name,expected,minimum=3):
     result=out/(name+'.json')
-    run([binary,'analyze','--input',path,'--json',result],out/(name+'-analyze.log'))
+    run([binary,'analyze',*(['--input',path] if binary.name=='avsync-testfile-tool' else [path]),'--json',result],out/(name+'-analyze.log'),accepted=(0,2) if expected is None else (0,))
     data=json.loads(result.read_text());events=data.get('events',[])
     good=[e for e in events if e.get('av_offset_ms') is not None and e.get('grade')!='invalid']
     if expected is None:assert not good,(name,good)

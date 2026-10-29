@@ -252,7 +252,7 @@ void blit_rgba(Yuv422p10& frame, int dst_x, int dst_y, int box, const SourceStil
     }
 }
 
-void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, double period_ms, bool show_indicator, bool qr_flash = false)
+void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, double period_ms, bool show_indicator, bool qr_flash = false, bool ticks_only = false)
 {
     const SyncPlace place = sync_place(frame_in_period, period_frames, period_ms);
     const FrameGeometry g = qr_flash ? qr_flash_geometry(frame.width,frame.height) : frame_geometry(frame.width, frame.height);
@@ -261,7 +261,7 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
     const int tick_w = std::max(3, frame.width / 640);
     const Y10 black{kYBlack, kYNeutralChroma, kYNeutralChroma};
     const Y10 white{kYWhite, kYNeutralChroma, kYNeutralChroma};
-    fill_yuv(frame, g.sweep_x0, g.sweep_y - track_h / 2, span, track_h, black);
+    if(!ticks_only)fill_yuv(frame, g.sweep_x0, g.sweep_y - track_h / 2, span, track_h, black);
     const int radius = std::max(12, frame.height / 40);
     const double frame_ms = period_ms / static_cast<double>(std::max(1, period_frames));
     const int frame_ms_i = std::max(1, static_cast<int>(std::lround(frame_ms)));
@@ -355,12 +355,19 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
             stations.push_back(label.ms);
         }
     }
+    // The moving square and its black centerline travel beneath the white ticks.
+    if(show_indicator && !ticks_only) {
+        const auto dot=sync_indicator(frame.width,frame.height,frame_in_period,period_frames,period_ms,qr_flash);
+        fill_yuv(frame,dot.x,dot.y,dot.side,dot.side,{dot.y10,dot.cb10,dot.cr10});
+        const int stripe=std::max(2,frame.height/360);
+        fill_yuv(frame,dot.x+(dot.side-stripe)/2,dot.y,stripe,dot.side,black);
+    }
     for (int ms : stations) {
         const int tx = station_x(ms);
         const int tick_h = (ms == 0) ? track_h * 5 : (labeled(ms) ? track_h * 3 : track_h * 2);
         fill_yuv(frame, tx - tick_w / 2, g.sweep_y - tick_h / 2, tick_w, tick_h, white);
     }
-    if (!labels.empty()) {
+    if (!ticks_only && !labels.empty()) {
         const int label_scale = labels.front().scale;
         const int pad = std::max(2, label_scale);
         const int th = text_px_height(label_scale) + pad * 2;
@@ -375,15 +382,19 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
             draw_text_box(frame, label.x0, label_y, text, label_scale);
         }
     }
-    if (show_indicator) {
-        const auto dot = sync_indicator(frame.width, frame.height, frame_in_period, period_frames, period_ms,qr_flash);
-        fill_yuv(frame, dot.x, dot.y, dot.side, dot.side, {dot.y10,dot.cb10,dot.cr10});
-    }
+    if(ticks_only)return;
     const int word = frame.height >= 720 ? 2 : 1;
     const int word_y = g.sweep_y + radius + 6;
     draw_text_box(frame, g.sweep_x0, word_y, "early", word);
     const int late_w = text_px_width("late", word) + std::max(2, word) * 2;
     draw_text_box(frame, g.sweep_x1 - late_w, word_y, "late", word);
+}
+
+void render_sync_foreground(Yuv422p10& frame,int period_frames,double period_ms,bool qr_flash) {
+    std::fill(frame.y.begin(),frame.y.end(),kYBlack);
+    std::fill(frame.cb.begin(),frame.cb.end(),kYNeutralChroma);
+    std::fill(frame.cr.begin(),frame.cr.end(),kYNeutralChroma);
+    draw_sync_scale(frame,0,period_frames,period_ms,false,qr_flash,true);
 }
 
 const SourceStill* cached_app_icon()
@@ -424,6 +435,7 @@ void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int 
         int src_h;
         int sub_w;
         int sub_h;
+        int sub_scale;
         int gap;
         int image;
         int block_w;
@@ -434,8 +446,10 @@ void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int 
         Metrics m;
         m.src_w = has_source ? text_px_width(info.source, s) + pad * 2 : 0;
         m.src_h = has_source ? text_px_height(s) + pad * 2 : 0;
-        m.sub_w = has_subtitle ? text_px_width(info.subtitle, s) + pad * 2 : 0;
-        m.sub_h = has_subtitle ? text_px_height(s) + pad * 2 : 0;
+        m.sub_scale=std::max(1,s*2/3);
+        const int sub_pad=std::max(2,m.sub_scale);
+        m.sub_w = has_subtitle ? text_px_width(info.subtitle, m.sub_scale) + sub_pad * 2 : 0;
+        m.sub_h = has_subtitle ? text_px_height(m.sub_scale) + sub_pad * 2 : 0;
         m.gap = std::max(4, s);
         const int text_w = std::max(m.src_w, m.sub_w);
         const int text_h = m.src_h + ((m.src_h > 0 && m.sub_h > 0) ? m.gap : 0) + m.sub_h;
@@ -471,7 +485,7 @@ void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int 
         text_y += m.src_h + (has_subtitle ? m.gap : 0);
     }
     if (has_subtitle) {
-        draw_text_box(frame, text_x, text_y, info.subtitle, scale);
+        draw_text_box(frame, text_x, text_y, info.subtitle, m.sub_scale);
     }
 }
 
@@ -490,11 +504,14 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
         fill_yuv(frame,g.marker_x,g.marker_y,g.marker_side,g.marker_side,
             {uint16_t(marker_white?kYWhite:kYBlack),kYNeutralChroma,kYNeutralChroma});
         const int scale=std::max(1,frame.height/270),gap=std::max(8,frame.width/160);
-        const int icon_px=std::max(32,frame.height/12);
-        const int title_x=frame.width/2-text_px_width("TEST SIGNAL",scale)/2;
-        draw_text_box(frame,title_x,frame.height/25,"TEST SIGNAL",scale);
+        const int icon_px=std::max(32,frame.height/10),icon_y=frame.height/40;
+        const int icon_x=(frame.width-icon_px)/2;
         if(const SourceStill* icon=info.app_icon?info.app_icon:cached_app_icon())
-            blit_rgba(frame,title_x+text_px_width("TEST SIGNAL",scale)+gap,frame.height/25,icon_px,*icon);
+            blit_rgba(frame,icon_x,icon_y,icon_px,*icon);
+        else draw_app_icon(frame,icon_x,icon_y,icon_px);
+        const int title_pad=std::max(2,scale);
+        const int title_width=text_px_width("AVsync",scale)+2*title_pad;
+        draw_text_box(frame,(frame.width-title_width)/2,icon_y+icon_px+gap,"AVsync",scale);
         draw_text_box(frame,g.qr_x,g.qr_y-text_px_height(scale)-gap,"QR + FLASH / "+info.format_line,scale);
         draw_text_box(frame,g.qr_x,g.qr_y+g.qr_size+gap,"Event "+std::to_string(seq)+" / "+info.offset_line,scale);
         draw_sync_scale(frame,frame_in_period,period_frames,info.period_ms,info.show_sync_indicator,true);

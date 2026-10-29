@@ -57,6 +57,8 @@ jobs:
         run: ./tests/integration/file.sh
       - name: audio timecode files
         run: python3 tests/integration/timecode.py build/mxl-avsync
+      - name: QR flash crop and codec paths
+        run: python3 tests/integration/qr_flash.py --binary build/mxl-avsync --out "$RUNNER_TEMP/qr-flash"
       - name: stage 2 file paths
         run: ./tests/integration/stage2.sh
       - name: web form draft rules

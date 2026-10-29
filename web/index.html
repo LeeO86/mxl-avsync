@@ -145,8 +145,7 @@
           <select v-model="audioTimecode"><option value="1200">1200 baud</option><option value="600">600 baud (1 / second)</option><option value="legacy">Legacy chirps</option></select>
         </label>
         <label>Chirp level dBFS <input type="number" v-model.number="level" min="-40" max="-1"/></label>
-        <label>Title <input v-model="title" maxlength="80"/></label>
-        <label>Source name <input v-model="source" maxlength="80"/></label>
+        <label>Title <input v-model="source" maxlength="80"/></label>
         <label>Subtitle <input v-model="subtitle" maxlength="80" placeholder="phone, email"/></label>
         <label>Source picture (PNG with transparency, or an animated GIF)
           <input ref="sourceImageInput" type="file" accept="image/png,image/gif,.png,.gif" @change="onImage"/>
