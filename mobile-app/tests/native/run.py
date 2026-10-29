@@ -54,7 +54,7 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
     assert 'no audio' in analyze(tmp / 'silent.mov', expect_error=True)['error']
     run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=black:s=640x360:r=50:d=3', '-i', tmp / 'offset35.mov', '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'copy', '-shortest', tmp / 'no-marker.mov'])
     assert 'No matching' in analyze(tmp / 'no-marker.mov', expect_error=True)['error']
-    run(['xcrun', '--sdk', 'iphonesimulator', 'clang++', '-target', 'arm64-apple-ios15.1-simulator', '-isysroot', sdk, '-std=c++20', '-O2', '-fobjc-arc', '-I' + str(module), *includes, HERE / 'live-runner.mm', module / 'AVSyncStreamAnalyzer.mm', *sorted(module.glob('Core_*.cpp')), *frameworks, '-o', tmp / 'live-runner'])
+    run(['xcrun', '--sdk', 'iphonesimulator', 'clang++', '-target', 'arm64-apple-ios15.1-simulator', '-isysroot', sdk, '-std=c++20', '-O2', '-fobjc-arc', '-I' + str(module), *includes, HERE / 'live-runner.mm', module / 'AVSyncStreamAnalyzer.mm', module/'AVSyncQRCodeReader.mm', *sorted(module.glob('Core_*.cpp')), *frameworks, '-o', tmp / 'live-runner'])
     reports = json.loads(subprocess.check_output(['xcrun', 'simctl', 'spawn', device, str(tmp / 'live-runner'), str(tmp / 'offset35.mov')], text=True))
     readings = [r for r in reports if r.get('kind') == 'reading']
     assert readings and abs(readings[-1]['offset_ms'] - 35) < 1, reports
@@ -99,7 +99,7 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
     high = analyze(tmp / 'highfps.mov', calibration=True)
     assert len(high['frames']) > 100 and high['framesAfter'] > 50, high
     # Production compact codec, both visual rates, and a delayed audio path.
-    codec_sources=[ROOT/f'core/src/{n}.cpp' for n in ['plan','chirp','marker','qr','timecode','detect','g711']]
+    codec_sources=[ROOT/f'core/src/{n}.cpp' for n in ['plan','chirp','marker','qr','timecode','detect','g711']]+[ROOT/'third_party/nayuki/qrcodegen.cpp']
     run(['clang++','-std=c++20','-O2',*includes,HERE/'timecode-fixture.cpp',*codec_sources,'-o',tmp/'timecode-fixture'])
     for event_rate in (1,2):
         folder=tmp/f'timecode-{event_rate}';folder.mkdir()

@@ -485,7 +485,6 @@ TEST_CASE("mobile static plate omits only the shared animated sync square") {
 TEST_CASE("AVS2 QR alone anchors a cropped picture and timestamps flashes before decoding") {
     for(int rate:{1,2}) {
         QrFlashTracker tracker;
-        const int width=960,height=540;
         const auto g=qr_flash_geometry(1280,720);
         // Crop away all outside corners, bars and the entire old bottom strip.
         const int left=g.qr_x-12,top=g.qr_y-12,cw=g.marker_x+g.marker_side-left+12,ch=g.qr_size+24;
@@ -522,4 +521,24 @@ TEST_CASE("AVS2 rejects static pictures and expired geometry") {
     auto q=decode_qr_signal(image.y.data(),1280,720,1280);REQUIRE(q);tracker.observe(*q,0);
     for(int frame=0;frame<40;++frame){VideoObservation f;f.time_ms=frame*20;tracker.push(image.y.data(),1280,720,1280,f);CHECK(tracker.take_events().empty());}
     CHECK_FALSE(tracker.valid_frame()); // 780-ms-old QR geometry cannot keep measuring.
+}
+
+TEST_CASE("AVS2 cannot relabel a pulse with frozen or later unrelated QR identity") {
+    for(bool frozen:{false,true}) {
+        QrFlashTracker tracker;Yuv422p10 picture;picture.resize(1280,720);
+        QrPayload p;p.timecode=p.qr_flash=true;p.k=7;p.tk=1000000000;p.source_id=77;p.test_id="negative";
+        PictureInfo info;info.period_ms=500;info.qr_json=qr_payload_text(p);
+        for(int i=0;i<40;++i) {
+            double time=i*20.0;bool white=i>=25&&i<30;
+            // The actual QR stays at event seven, even during the pulse.
+            render_picture(picture,info,7,i%25,25,white);
+            if(i%5==0) {
+                auto q=decode_qr_signal(picture.y.data(),1280,720,1280);REQUIRE(q);
+                if(!frozen&&i>=30){q->payload.k=8;q->payload.tk+=500000000;}
+                tracker.observe(*q,time);
+            }
+            VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),1280,720,1280,f);
+            CHECK(tracker.take_events().empty());
+        }
+    }
 }

@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 #import "AVSyncStreamAnalyzer.h"
+#import "AVSyncQRCodeReader.h"
 #include "avsync/avsync.hpp"
 int main(int argc,char**argv){@autoreleasepool{
  NSURL*url=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];
@@ -14,10 +15,15 @@ int main(int argc,char**argv){@autoreleasepool{
  NSString *testQR=environment[@"AVSYNC_TEST_QR"];
  if(environment[@"AVSYNC_TEST_WALL_OFFSET_MS"])[processor setClockAnchor:0 unixTimeMs:[environment[@"AVSYNC_TEST_WALL_OFFSET_MS"] doubleValue]];
  CMSampleBufferRef v=[video copyNextSampleBuffer],a=[audio copyNextSampleBuffer];
- NSMutableArray*reports=[NSMutableArray array];
+ NSMutableArray*reports=[NSMutableArray array];double lastQR=-1e30;
  while(v||a){bool chooseVideo=v&&(!a||CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(v),CMSampleBufferGetPresentationTimeStamp(a))<=0);
   const double currentMs=CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(chooseVideo?v:a))*1000;
-  if(chooseVideo){[processor pushVideo:v];CFRelease(v);v=[video copyNextSampleBuffer];}else{[processor pushAudio:a];CFRelease(a);a=[audio copyNextSampleBuffer];}
+  if(chooseVideo){
+   if(environment[@"AVSYNC_TEST_SCAN_QR"]&&currentMs-lastQR>=100){
+    lastQR=currentMs;NSDictionary *qr=[AVSyncQRCodeReader readPixelBuffer:CMSampleBufferGetImageBuffer(v)];
+    for(NSDictionary *detection in qr[@"detections"])[processor observeQRDetection:detection timeMs:currentMs];
+   }
+   [processor pushVideo:v];CFRelease(v);v=[video copyNextSampleBuffer];}else{[processor pushAudio:a];CFRelease(a);a=[audio copyNextSampleBuffer];}
   if(testQR){
    if(environment[@"AVSYNC_TEST_ADVANCE_QR"]){
     auto qr=avsync::parse_qr_payload(testQR.UTF8String);

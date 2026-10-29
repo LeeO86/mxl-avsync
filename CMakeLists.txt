@@ -56,6 +56,7 @@ add_library(avsync-core STATIC
     core/src/phone.cpp
     core/src/phone_generator.cpp
     core/src/picture_reader.cpp
+    third_party/nayuki/qrcodegen.cpp
 )
 target_include_directories(avsync-core
     PUBLIC core/include
@@ -113,7 +114,6 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         generator/picture.cpp
         generator/picture_render.cpp
         generator/source_image.cpp
-        third_party/nayuki/qrcodegen.cpp
         app/report.cpp
         app/file_tool.cpp
     )

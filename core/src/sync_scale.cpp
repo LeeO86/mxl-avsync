@@ -41,9 +41,9 @@ SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms)
     return place;
 }
 
-SyncIndicator sync_indicator(int width, int height, int frame, int period_frames, double period_ms) {
+SyncIndicator sync_indicator(int width, int height, int frame, int period_frames, double period_ms, bool qr_flash) {
     const auto place = sync_place(frame, period_frames, period_ms);
-    const auto g = frame_geometry(width, height);
+    const auto g = qr_flash ? qr_flash_geometry(width,height) : frame_geometry(width, height);
     const int span = std::max(1, g.sweep_x1 - g.sweep_x0);
     const int radius = std::max(12, height / 40);
     const double along = (place.position_ms + place.scale_ms) / (2 * place.scale_ms);

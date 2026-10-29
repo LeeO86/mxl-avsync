@@ -1,4 +1,5 @@
 #include "avsync/avsync.hpp"
+#include "../../third_party/nayuki/qrcodegen.hpp"
 
 #include <cctype>
 #include <charconv>
@@ -237,6 +238,7 @@ FrameGeometry qr_flash_geometry(int width, int height) {
     g.qr_size=g.marker_side=41*unit;
     g.qr_x=(width-86*unit)/2;g.qr_y=std::max(0,int(height*.23));
     g.marker_x=g.qr_x+45*unit;g.marker_y=g.qr_y;
+    g.sweep_x0=width/5;g.sweep_x1=width*4/5;g.sweep_y=int(height*.77);
     return g;
 }
 
@@ -286,7 +288,14 @@ void QrFlashTracker::observe(const QrDetection& q,double time) {
         if(movement>std::max(.005,side*.08)){phase_=MarkerReading::State::Invalid;blacks_=0;edges_.clear();codes_.clear();}
     }
     anchor_=q;anchor_ms_=time;transform_=h;
-    codes_.push_back({q.payload,time});while(codes_.size()>32||(!codes_.empty()&&time-codes_.front().time>2000))codes_.pop_front();
+    std::array<uint8_t,1089> modules{};
+    if(!codes_.empty()&&qr_payload_text(codes_.back().payload)==qr_payload_text(q.payload))modules=codes_.back().modules;
+    else {
+        const auto text=qr_payload_text(q.payload);
+        const auto symbol=qrcodegen::QrCode::encodeSegments(qrcodegen::QrSegment::makeSegments(text.c_str()),qrcodegen::QrCode::Ecc::QUARTILE,4,4,-1,false);
+        for(int y=0;y<33;++y)for(int x=0;x<33;++x)modules[y*33+x]=symbol.getModule(x,y)?0:1;
+    }
+    codes_.push_back({q.payload,time,modules});while(codes_.size()>32||(!codes_.empty()&&time-codes_.front().time>2000))codes_.pop_front();
     match();
 }
 void QrFlashTracker::push(const uint16_t* pixels,int width,int height,int stride,VideoObservation frame) { push_pixels(pixels,false,width,height,stride,frame); }
@@ -335,9 +344,25 @@ void QrFlashTracker::push_pixels(const void* pixels,bool eight_bit,int width,int
     pose_.height=std::hypot(pose_.corner_x[3]-pose_.corner_x[0],pose_.corner_y[3]-pose_.corner_y[0]);
     if(phase==MarkerReading::State::White) {
         if(phase_==MarkerReading::State::Black&&blacks_>=2) {
-            frame.event=true;frame.marker_white=true;frame.quality="good";frame.contrast=contrast;frame.flags.push_back("qr_flash");frame.flags.push_back("optical_capture");
-            edges_.push_back({frame,1,false});
+            frame.event=true;frame.marker_white=true;frame.quality="good";frame.contrast=contrast;frame.flags.push_back("qr_flash");frame.flags.push_back("frame_counter_unavailable");
+            const auto g=qr_flash_geometry(width,height);const double unit=g.qr_size/41.0;
+            const double ex[]={g.qr_x+4*unit,g.qr_x+37*unit,g.qr_x+37*unit,g.qr_x+4*unit};
+            const double ey[]={g.qr_y+4*unit,g.qr_y+4*unit,g.qr_y+37*unit,g.qr_y+37*unit};
+            bool optical=anchor_->payload.estimated_source;
+            for(int i=0;i<4;++i)optical|=std::hypot(anchor_->x[i]*width-ex[i],anchor_->y[i]*height-ey[i])>3;
+            if(optical)frame.flags.push_back("optical_capture");
+            edges_.push_back({frame,1,false,{}});
         } else if(phase_==phase&&!edges_.empty()&&frame.time_ms-edges_.back().frame.time_ms<=150)++edges_.back().whites;
+        if(!edges_.empty()&&edges_.back().whites<=3&&frame.time_ms-edges_.back().frame.time_ms<=100) {
+            // Keep sparse module-center evidence from the pulse itself. A later
+            // decoded identity must match this image, not just a nearby time.
+            std::array<uint8_t,1089> symbol{};
+            for(int y=0;y<33;++y)for(int x=0;x<33;++x) {
+                const double value=sample(x+.5,y+.5);
+                symbol[y*33+x]=value<0?2:value<black+.35*contrast?0:value>black+.65*contrast?1:2;
+            }
+            edges_.back().symbols.push_back(symbol);
+        }
         blacks_=0;
     }else {++blacks_;last_black_ms_=frame.time_ms;}
     phase_=phase;
@@ -353,6 +378,15 @@ void QrFlashTracker::match() {
             const double after=code.time-edge.frame.time_ms;
             // Decode away from a scan-out boundary; never infer missing identities.
             if(after<25||after>period*.85)continue;
+            // A code already shown well before this pulse is an old/frozen QR.
+            if(std::any_of(codes_.begin(),codes_.end(),[&](const Code& old){return old.payload.k==code.payload.k&&old.time<edge.frame.time_ms-25;}))continue;
+            bool symbol_matches=false;
+            for(const auto& symbol:edge.symbols) {
+                int known=0,wrong=0;
+                for(size_t i=0;i<symbol.size();++i)if(symbol[i]<2){++known;wrong+=symbol[i]!=code.modules[i];}
+                if(known>=int(symbol.size()*.80)&&wrong==0){symbol_matches=true;break;}
+            }
+            if(!symbol_matches)continue;
             if(emitted_seq_&&code.payload.k<=*emitted_seq_)continue;
             auto out=edge.frame;out.seq=code.payload.k;out.timecode=true;out.source_id=code.payload.source_id;
             out.event_time_ns=quantize_timecode_ns(code.payload.tk);out.estimated_source=code.payload.estimated_source;

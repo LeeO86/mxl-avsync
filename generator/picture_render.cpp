@@ -252,10 +252,10 @@ void blit_rgba(Yuv422p10& frame, int dst_x, int dst_y, int box, const SourceStil
     }
 }
 
-void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, double period_ms, bool show_indicator)
+void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, double period_ms, bool show_indicator, bool qr_flash = false)
 {
     const SyncPlace place = sync_place(frame_in_period, period_frames, period_ms);
-    const FrameGeometry g = frame_geometry(frame.width, frame.height);
+    const FrameGeometry g = qr_flash ? qr_flash_geometry(frame.width,frame.height) : frame_geometry(frame.width, frame.height);
     const int span = std::max(1, g.sweep_x1 - g.sweep_x0);
     const int track_h = std::max(6, frame.height / 120);
     const int tick_w = std::max(3, frame.width / 640);
@@ -376,7 +376,7 @@ void draw_sync_scale(Yuv422p10& frame, int frame_in_period, int period_frames, d
         }
     }
     if (show_indicator) {
-        const auto dot = sync_indicator(frame.width, frame.height, frame_in_period, period_frames, period_ms);
+        const auto dot = sync_indicator(frame.width, frame.height, frame_in_period, period_frames, period_ms,qr_flash);
         fill_yuv(frame, dot.x, dot.y, dot.side, dot.side, {dot.y10,dot.cb10,dot.cr10});
     }
     const int word = frame.height >= 720 ? 2 : 1;
@@ -497,7 +497,7 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
             blit_rgba(frame,title_x+text_px_width("TEST SIGNAL",scale)+gap,frame.height/25,icon_px,*icon);
         draw_text_box(frame,g.qr_x,g.qr_y-text_px_height(scale)-gap,"QR + FLASH / "+info.format_line,scale);
         draw_text_box(frame,g.qr_x,g.qr_y+g.qr_size+gap,"Event "+std::to_string(seq)+" / "+info.offset_line,scale);
-        draw_sync_scale(frame,frame_in_period,period_frames,info.period_ms,info.show_sync_indicator);
+        draw_sync_scale(frame,frame_in_period,period_frames,info.period_ms,info.show_sync_indicator,true);
         draw_source_ident(frame,info,frame.width/25,frame.width-frame.width/25,
             std::max(int(frame.height*.79),g.qr_y+g.qr_size+text_px_height(scale)+gap*2),frame.height-frame.height/30);
         return;

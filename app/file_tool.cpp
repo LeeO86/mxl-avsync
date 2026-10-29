@@ -359,8 +359,8 @@ int run_generate(const GenerateRequest& request, std::string& error)
                 payload.source_id = plan_config.source_id;
                 payload.test_id = request.test_id;
                 payload.mode = "FILE";
-                payload.k = qr_seq;
-                payload.tk = tk;
+                payload.k = payload.qr_flash ? shown_seq : qr_seq;
+                payload.tk = payload.qr_flash && shown_seq == 0 ? 0 : tk;
                 payload.sweep = !request.sweep.empty();
                 payload.offset_ms = offset;
                 payload.rate = request.event_rate;

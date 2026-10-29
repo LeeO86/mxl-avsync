@@ -81,19 +81,20 @@ int main(int argc, char** argv)
             info.qr_json = qr_payload_text(plan.qr(sequence));
             info.period_ms = 1000.0 / rate;
             render_picture(source, info, sequence, position, plan.period_frames(), flash_white(position, 1000.0 / 60));
-            // Resample source pixels; its 60-Hz strip must survive 50-Hz capture.
+            // Resample source pixels; its 60-Hz QR/flash must survive 50-Hz capture.
             for (int y = 0; y < 540; ++y) {
                 for (int x = 0; x < 960; ++x) {
                     camera[size_t(y + 180) * 1920 + x + 240] = source.y[size_t(y * 4 / 3) * 1280 + x * 4 / 3];
                 }
             }
             if (!checked) {
-                PictureReader reader;
-                const auto picture = reader.read(camera.data(), 1920, 1080, 1920, 0);
-                const auto qr = decode_qr_text(camera.data(), 1920, 1080, 1920);
-                std::cout << "fixture preflight located=" << picture.located
-                          << " optical=" << !picture.canonical.empty() << " qr=" << bool(qr) << '\n' << std::flush;
-                if (!picture.located || !qr) return 2;
+                QrFlashTracker reader;
+                const auto qr = decode_qr_signal(camera.data(), 1920, 1080, 1920);
+                if(qr)reader.observe(*qr,0);
+                reader.push(camera.data(),1920,1080,1920,VideoObservation{});
+                std::cout << "fixture preflight located=" << reader.pose().found
+                          << " photometry=" << reader.valid_frame() << " qr=" << bool(qr) << '\n' << std::flush;
+                if (!reader.valid_frame() || !qr || !qr->payload.qr_flash) return 2;
                 checked = true;
             }
         }

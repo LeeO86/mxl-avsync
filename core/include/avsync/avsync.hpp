@@ -234,7 +234,7 @@ struct SyncIndicator {
     SyncDot kind=SyncDot::Zero;
     uint16_t y10=940, cb10=512, cr10=512;
 };
-SyncIndicator sync_indicator(int width, int height, int frame, int period_frames, double period_ms);
+SyncIndicator sync_indicator(int width, int height, int frame, int period_frames, double period_ms, bool qr_flash = false);
 
 
 struct MarkerReading {
@@ -395,8 +395,8 @@ public:
     bool active() const { return anchor_.has_value(); }
     std::optional<uint64_t> sequence() const { return anchor_ ? std::optional<uint64_t>(anchor_->payload.k) : std::nullopt; }
 private:
-    struct Code { QrPayload payload; double time; };
-    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; };
+    struct Code { QrPayload payload; double time; std::array<uint8_t,1089> modules; };
+    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; std::vector<std::array<uint8_t,1089>> symbols; };
     std::optional<QrDetection> anchor_;
     double anchor_ms_ = -1e30, last_frame_ms_ = -1e30;
     std::array<double, 9> transform_{};

@@ -73,7 +73,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     const auto frame=_plan->frame_at(target);const int period=_plan->period_frames();const uint64_t seq=1+frame/period;const int pos=int(frame%period);
     const uint32_t data=(avsync::binary_to_gray(uint32_t(seq&0xffffff))<<4)|(pos&15);
     const uint32_t bits=(data<<4)|((__builtin_popcount(data)&1)<<3)|5;
-    const auto dot=avsync::sync_indicator(1280,720,pos,period,_info.period_ms);uint8_t color[4];rgb(dot.y10,dot.cb10,dot.cr10,color);
+    const auto dot=avsync::sync_indicator(1280,720,pos,period,_info.period_ms,true);uint8_t color[4];rgb(dot.y10,dot.cb10,dot.cr10,color);
     return @{ @"sequence":@(seq),@"position":@(pos),@"white":@(avsync::flash_white(pos,1000.0/60)),@"strip":@(bits),@"syncX":@(dot.x),@"syncY":@(dot.y),@"syncSize":@(dot.side),@"syncR":@(color[0]),@"syncG":@(color[1]),@"syncB":@(color[2]),@"syncPositionMs":@(avsync::sync_place(pos,period,_info.period_ms).position_ms) };
 }
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }

@@ -58,7 +58,7 @@ int main(int argc, char **argv) { @autoreleasepool {
                 NSDictionary *frame=[source frameAt:host+double(pos)/60];
                 assert([frame[@"sequence"] intValue]==event);
                 assert([frame[@"position"] intValue]==pos);
-                const auto point=sync_indicator(width,height,pos,60/rate,1000.0/rate);
+                const auto point=sync_indicator(width,height,pos,60/rate,1000.0/rate,true);
                 assert([frame[@"syncX"] intValue]==point.x && [frame[@"syncY"] intValue]==point.y);
                 assert([frame[@"syncSize"] intValue]==point.side);
                 if(pos==0) assert([frame[@"syncR"] intValue]==255 && [frame[@"syncG"] intValue]==255);
@@ -70,7 +70,7 @@ int main(int argc, char **argv) { @autoreleasepool {
                 const bool white=[frame[@"white"] boolValue];
                 for(int y=n(@"markerY");y<n(@"markerY")+n(@"markerSide");++y)for(int x=n(@"markerX");x<n(@"markerX")+n(@"markerSide");++x)luma[y*width+x]=white?kYWhite:kYBlack;
                 const double time=1000.0*(event-1)/rate+1000.0*pos/60;
-                if(pos==12)tracker.observe(anchor,time); // Deliver QR after the optical edge.
+                if(pos%6==0&&(event>1||pos>=12))tracker.observe(anchor,time); // Repeated 100-ms scans; first identity arrives after the edge.
                 VideoObservation capture;capture.time_ms=time;
                 tracker.push(luma.data(),width,height,width,capture);
                 auto events=tracker.take_events();detected.insert(detected.end(),events.begin(),events.end());
