@@ -418,3 +418,18 @@ TEST_CASE("compact picture lock cannot be acquired from a parity-valid code outs
     for(int n=12;n<15;++n)session.push_video(pixels.data(),320,180,320,n*5.0,0);
     REQUIRE(session.finish().locked_seq);CHECK(*session.finish().locked_seq==100);
 }
+
+TEST_CASE("compact white phase cannot acquire the previous period's black strip")
+{
+    PhoneSession session(2,{});
+    QrPayload qr;qr.mode="LIVE";qr.timecode=true;qr.source_id=77;qr.k=100;
+    qr.tk=1700000037000000000LL;qr.rate=2;
+    session.observe_signal(qr);
+    std::vector<uint16_t> pixels;render_picture(pixels,320,180,99,24,25,true);
+    for(int n=0;n<12;++n)session.push_video(pixels.data(),320,180,320,n*5.0,0);
+    CHECK_FALSE(session.finish().locked_seq);
+    CHECK(session.finish().phase_rejected_frames>=3);
+    render_picture(pixels,320,180,100,2,25,true);
+    for(int n=12;n<15;++n)session.push_video(pixels.data(),320,180,320,n*5.0,0);
+    REQUIRE(session.finish().locked_seq);CHECK(*session.finish().locked_seq==100);
+}

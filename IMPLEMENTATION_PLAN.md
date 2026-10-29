@@ -998,3 +998,13 @@ Sequence state advances by the actual delta; no observation is synthesized for
 missing pulses. Larger/unjustified jumps and legacy behavior remain guarded.
 Tests verify immediate recovery after a genuinely missed pulse, exact retained
 timestamps and rejection of a +2 jump arriving after only one period.
+
+
+A longer trace still contained a roughly half-second outlier after a tracking
+loss. The compact white phase now also requires a frame-position code that is
+inside the source's 100-ms flash window, rejecting previous-period black strip
+content during display scan-out. An uncertain anchor cannot publish a first
+measurement until an observed optical interval has been established. Tests
+cover the parity-valid previous-period strip and the 60-ms barcode delay.
+These guards improve correctness and may withhold a pulse when code evidence
+is incomplete; remaining live loss is not presented as fixed or validated.

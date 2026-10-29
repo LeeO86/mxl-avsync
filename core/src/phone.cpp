@@ -108,6 +108,13 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     // rolling shutter and moire can toggle the block without a new event.
     const bool white = reading.state == MarkerReading::State::White;
     if (signal_ && signal_->timecode) {
+        const auto format = parse_video_format(signal_->format);
+        const double grain_ms = index_to_ns(format->grain_rate(), 1) / 1e6;
+        // A white pulse lasts 100ms. During display scan-out the strip may
+        // still name the previous period's final (black) frame.
+        if (white && reading.frame_pos_mod16 >= std::min(16, int(std::ceil(100 / grain_ms)))) {
+            ++phase_rejected_frames_; pending_frames_ = 0; return;
+        }
         VideoObservation identity;
         identity.seq = reading.seq_low24;
         if (!identify_video(identity, *signal_)) {
@@ -151,6 +158,7 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
             anchor(); return; // Reacquire; a late barcode alone cannot date a flash.
         }
         event_time_ms=*white_onset_ms_;
+        if(!have_transition_){anchor();return;} // Establish an optical interval before publishing.
     }
     if (have_transition_ && std::abs(event_time_ms - last_transition_ms_ - delta * period) > period * 0.25) {
         ++timing_resets_; anchor(); return;

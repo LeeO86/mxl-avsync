@@ -29,7 +29,7 @@ int main(int argc,char**argv){try{
    auto pose=session.current_picture();
    if(pose.found){
     auto marker=avsync::read_located_marker_at_pose(luma.data(),w,h,w,pose,640);
-    const auto&r=marker.reading;detail["stripOk"]=r.strip_ok;detail["seq"]=r.seq_low24;detail["phase"]=int(r.state);detail["quality"]=r.quality;detail["contrast"]=r.contrast;
+    const auto&r=marker.reading;detail["stripOk"]=r.strip_ok;detail["seq"]=r.seq_low24;detail["phase"]=int(r.state);detail["quality"]=r.quality;detail["contrast"]=r.contrast;detail["framePos"]=r.frame_pos_mod16;
     auto g=avsync::frame_geometry(marker.width,marker.height);double mean=0;int n=0;
     for(int y=g.marker_y+g.marker_side/4;y<g.marker_y+3*g.marker_side/4;++y)for(int x=g.marker_x+g.marker_side/4;x<g.marker_x+3*g.marker_side/4;++x){mean+=marker.canonical[y*marker.width+x];++n;}
     if(n)detail["markerMean"]=mean/n;

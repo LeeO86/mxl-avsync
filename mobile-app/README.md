@@ -178,3 +178,7 @@ capture directory. This controlled replay is explicitly marked
 `externalReference`; it is distinct from replaying the QR observations that
 actually arrived during the take. Trace differences are reported when a
 changed detector accepts events rejected by the recorded version.
+
+Compact white phases additionally require a frame-position code inside the
+known source flash window. After uncertain acquisition, tracking first
+establishes an optical interval before publishing a measurement.
