@@ -84,7 +84,9 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     ++located_frames_;
     const auto& reading = located.reading;
     const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, height / 2, height);
-    bool continuous = marker_phase_pose_.found && time_ms >= marker_phase_ms_ && time_ms-marker_phase_ms_ <= 50;
+    const double frame_gap_ms = time_ms-marker_phase_ms_;
+    const double vote_window_ms = std::clamp(3*frame_gap_ms,40.0,120.0);
+    bool continuous = marker_phase_pose_.found && time_ms >= marker_phase_ms_ && frame_gap_ms <= 50;
     for(int i=0;i<4&&continuous;++i) {
         if(std::hypot(current_picture_.corner_x[i]-marker_phase_pose_.corner_x[i],
                       current_picture_.corner_y[i]-marker_phase_pose_.corner_y[i]) >
@@ -99,7 +101,17 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
         marker_phase_=reading.state;marker_phase_ms_=time_ms;marker_phase_pose_=current_picture_;
     }
     if (!reading.strip_ok || reading.quality == "invalid" || reading.state == MarkerReading::State::Invalid) {
-        pending_frames_ = 0; return;
+        // One parity failure is not contradictory identity evidence. Preserve
+        // compact votes only within this continuous optical pulse and a short
+        // frame-rate-aware window; geometry/phase loss still resets them.
+        const bool parity_gap = signal_ && signal_->timecode && continuous &&
+            !reading.strip_ok && reading.contrast >= 200 &&
+            reading.state == MarkerReading::State::White && white_onset_ms_ &&
+            time_ms-*white_onset_ms_ <= 120 &&
+            time_ms-pending_last_valid_ms_ <= std::max(20.0,2*frame_gap_ms) &&
+            time_ms-pending_time_ms_ <= vote_window_ms;
+        if(!parity_gap)pending_frames_=0;
+        return;
     }
     ++valid_frames_;
     decoded_seq_ = reading.seq_low24;
@@ -125,10 +137,14 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     if (signal_ && signal_->timecode && (!locked_seq_ || reading.seq_low24 != *locked_seq_) && !white) {
         pending_frames_ = 0; return;
     }
-    if (!pending_frames_ || pending_seq_ != reading.seq_low24) {
+    const bool expiring_vote = signal_ && signal_->timecode &&
+        (!locked_seq_ || reading.seq_low24 != *locked_seq_) &&
+        time_ms-pending_time_ms_ > vote_window_ms;
+    if (!pending_frames_ || pending_seq_ != reading.seq_low24 || expiring_vote) {
         pending_seq_ = reading.seq_low24; pending_time_ms_ = time_ms; pending_frames_ = 1;
     } else ++pending_frames_;
-    // Confirm across frames but retain the FIRST frame's timestamp.
+    pending_last_valid_ms_=time_ms;
+    // Three agreeing valid frames; compact parity gaps are bounded above.
     if (pending_frames_ < 3) return;
     picture_code_confirmed_ = true;
     confirmed_picture_seq_ = pending_seq_;

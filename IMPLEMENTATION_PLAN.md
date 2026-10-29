@@ -980,7 +980,7 @@ the next matching code can. Compact sequence gaps require the separate temporal 
 
 Validation: core/picture CTest, 32 JS tests, actual App retention/Save callbacks,
 raw diagnostic opt-in/bounds/exact replay and full native AVFoundation suite
-pass. Signed local iPhone builds were installed without deleting app data. In
+pass. Signed local iPhone builds were installed. A later preservation check found empty saved state after development/copy operations; the exact reset point was not isolated. Available exported calibration/results were recovered through the native storage API and verified after relaunch, with a private external backup. Device preferences and private assets must be backed up before future mutations. In
 a 45-report physical follow-up before the final lock guard, 31 reports were
 accepted readings and 35 exposed video latency, including four using the new
 paired-audio reference while QR was expired. Recognition loss and wrong-code
@@ -1008,3 +1008,20 @@ measurement until an observed optical interval has been established. Tests
 cover the parity-valid previous-period strip and the 60-ms barcode delay.
 These guards improve correctness and may withhold a pulse when code evidence
 is incomplete; remaining live loss is not presented as fixed or validated.
+
+
+## Compact confirmation across isolated parity loss (2026-10-29)
+
+The remaining optical trace contains frequent isolated strip-parity failures.
+For compact signals only, a parity failure can retain prior agreeing votes
+while geometry and white phase remain continuous, reference contrast remains
+valid, the onset is at most 120 ms old, and both the latest-valid gap and total
+vote window are bounded. The total window is 40–120 ms according to observed
+frame spacing; different valid codes, source/phase/geometry loss and timeout
+reset votes. Three agreeing valid samples remain required. This supersedes
+strict consecutiveness only for these bounded compact parity gaps; legacy
+confirmation is unchanged. A regression invalidates every third strip and
+still recovers exact optical timestamps; contradictory jumps and missing-edge
+negative cases remain guarded. Raw replay recovered an additional genuine
+pulse without changing its optical timestamp. No change to pair-count/spread
+acceptance gates or calibration.

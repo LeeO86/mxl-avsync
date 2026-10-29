@@ -182,3 +182,16 @@ changed detector accepts events rejected by the recorded version.
 Compact white phases additionally require a frame-position code inside the
 known source flash window. After uncertain acquisition, tracking first
 establishes an optical interval before publishing a measurement.
+
+Compact confirmation can retain agreeing samples across isolated parity loss
+within a 40–120-ms frame-rate-aware window of the same continuous white pulse.
+Different valid codes and source/geometry/phase loss reset votes. Three valid
+agreeing samples remain necessary; legacy confirmation is consecutive.
+
+
+Before installing a development build or changing device files, privately back
+up the app's preference plist (saved session/calibration/results) and any private
+Application Support image assets. Verify saved state again afterwards. Numeric
+diagnostic history is not a saved-session backup. Do not use broad
+`devicectl copy to --remove-existing-content` operations for subdirectory cleanup;
+use scoped app-owned cleanup instead. Keep backups outside Git.

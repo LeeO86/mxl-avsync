@@ -355,9 +355,9 @@ TEST_CASE("compact phone timing retains the optical onset while barcode parity r
     constexpr int w=320,h=180;
     QrPayload qr;qr.mode="LIVE";qr.timecode=true;qr.source_id=77;qr.k=1;
     qr.tk=1700000037100000000LL;qr.rate=2;qr.format="1080p50";
-    PhoneSession clean(2,{}),delayed(2,{}),no_edge(2,{}),skipped(2,{}),bad_jump(2,{});
-    clean.observe_signal(qr);delayed.observe_signal(qr);no_edge.observe_signal(qr);skipped.observe_signal(qr);bad_jump.observe_signal(qr);
-    std::vector<double> clean_times,delayed_times;
+    PhoneSession clean(2,{}),delayed(2,{}),no_edge(2,{}),skipped(2,{}),bad_jump(2,{}),intermittent(2,{});
+    clean.observe_signal(qr);delayed.observe_signal(qr);no_edge.observe_signal(qr);skipped.observe_signal(qr);bad_jump.observe_signal(qr);intermittent.observe_signal(qr);
+    std::vector<double> clean_times,delayed_times,intermittent_times;uint64_t last_intermittent=0;
     std::vector<uint64_t> skipped_seqs;uint64_t last_skipped=0;
     uint64_t last_clean=0,last_delayed=0;
     for(int frame=0;frame<400;++frame){
@@ -367,6 +367,10 @@ TEST_CASE("compact phone timing retains the optical onset while barcode parity r
         const bool white=event_frame>=0&&position<20;
         std::vector<uint16_t> pixels;render_picture(pixels,w,h,seq,position/4,25,white);
         clean.push_video(pixels.data(),w,h,w,frame*5.0,0);
+        auto broken=pixels;
+        if(frame%3==1){auto g=frame_geometry(w,h);for(int y=g.strip_y;y<g.strip_y+g.strip_h;++y)for(int x=g.strip_x+28*g.strip_w;x<g.strip_x+29*g.strip_w;++x)broken[y*w+x]=broken[y*w+x]>500?kYBlack:kYWhite;}
+        intermittent.push_video(broken.data(),w,h,w,frame*5.0,0);
+        if(auto event=intermittent.latest_video_event();event&&event->seq!=last_intermittent){intermittent_times.push_back(event->time_ms);last_intermittent=event->seq;}
         if(!(seq==3&&white))skipped.push_video(pixels.data(),w,h,w,frame*5.0,0);
         if(auto event=skipped.latest_video_event();event&&event->seq!=last_skipped){skipped_seqs.push_back(event->seq);last_skipped=event->seq;CHECK(event->time_ms==100+(event->seq-1)*500);}
         std::vector<uint16_t> wrong;render_picture(wrong,w,h,seq==2?3:seq,position/4,25,white);
@@ -385,8 +389,8 @@ TEST_CASE("compact phone timing retains the optical onset while barcode parity r
         if(auto event=clean.latest_video_event();event&&event->seq!=last_clean){clean_times.push_back(event->time_ms);last_clean=event->seq;}
         if(auto event=delayed.latest_video_event();event&&event->seq!=last_delayed){delayed_times.push_back(event->time_ms);last_delayed=event->seq;}
     }
-    REQUIRE(clean_times.size()==3);REQUIRE(delayed_times.size()==3);
-    for(size_t i=0;i<3;++i){CHECK(clean_times[i]==600+i*500);CHECK(delayed_times[i]==clean_times[i]);}
+    REQUIRE(clean_times.size()==3);REQUIRE(delayed_times.size()==3);REQUIRE(intermittent_times.size()==3);
+    for(size_t i=0;i<3;++i){CHECK(clean_times[i]==600+i*500);CHECK(delayed_times[i]==clean_times[i]);CHECK(intermittent_times[i]==clean_times[i]);}
     CHECK_FALSE(no_edge.latest_video_event()); // No black/white edge may be invented.
     REQUIRE(skipped_seqs.size()==2);CHECK(skipped_seqs[0]==2);CHECK(skipped_seqs[1]==4);
     CHECK(bad_jump.finish().timing_resets>=1);
