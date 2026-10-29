@@ -107,3 +107,32 @@ remotely stored App Manager API key; no Apple password/key is committed here.
 Expo Doctor passes 17/18 checks; the remaining check reports the existing
 `expo-av` dependency as unmaintained. Production bundle export and clean
 prebuild succeed; migration of calibration replay off expo-av is separate.
+
+## Retained readings and outline stability
+
+A temporary detection/status gap keeps the last accepted result saveable. The
+screen labels it live, paused or last-valid with age, pair count and spread.
+Repeated reports of the same pair do not rejuvenate it. Source identity changes,
+Clear and calibration changes still invalidate it. Exports retain the original
+acquisition timestamp and add save time, age and display state. A historical
+paired latency snapshot is labelled when used as a fallback. This presentation
+behavior does not improve or hide the detector's actual timing spread.
+
+The camera outline briefly holds/fades missed observations, smooths small corner
+motion and requires two nearby observations for acquisition or a large jump.
+It disappears after at most 600 ms without accepted geometry. The measured
+video/audio event timestamps and consistency thresholds are unchanged.
+
+Alongside `npm test` and the native suite, exercise the shipped React App's real
+report/Save callbacks with isolated test-only dependencies:
+
+```sh
+npm install --prefix /tmp/avsync-ui-deps --no-package-lock --ignore-scripts react@18.3.1 react-test-renderer@18.3.1
+AVSYNC_UI_DEPS=/tmp/avsync-ui-deps node tests/reading-ui.cjs
+```
+
+Run from mobile-app after npm ci. `AVSYNC_BABEL_MODULES` can point to another
+checkout's node_modules. Native surfaces are mocks; no browser/camera/network is
+used. The test covers status/timeout/pause, Save evidence/age, source change and
+explicit Clear. The Swift geometry test also covers bounded hold, jump rejection
+and reacquisition. Physical optical/acoustic timing remains device-test work.
