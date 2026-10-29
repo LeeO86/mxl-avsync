@@ -152,5 +152,14 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
             run(['ffmpeg','-v','error','-y','-i',raw,'-c:v','libx264','-pix_fmt','yuv420p','-crf','14','-c:a','pcm_s16le',movie])
             actual=analyze(movie)
             assert actual['eventCount']>=3 and abs(actual['offset_ms']-35)<1,actual
+            for variant,filters in [('full',None),('crop-rotate','crop=860:410:530:248,transpose=1')]:
+                target=movie
+                if filters:
+                    target=tmp/f'generated-{event_rate}-{variant}.mov'
+                    run(['ffmpeg','-v','error','-y','-i',movie,'-vf',filters,'-c:v','libx264','-crf','18','-pix_fmt','yuv420p','-c:a','copy',target])
+                readings=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(target)],text=True,env={**os.environ,'SIMCTL_CHILD_AVSYNC_TEST_SCAN_QR':'1'}))
+                good=[row for row in readings if row.get('kind')=='reading']
+                assert good and abs(good[-1]['offset_ms']-35)<1,(event_rate,variant,readings)
+        print('PASS: actual AVS2 pixels decoded in native file/live analyzers, cropped/rotated, 1/2 Hz; no injected QR metadata')
     print('PASS: compact LIVE audio timecode at 1/2 Hz, +35-ms AV, independent +120/+155-ms estimated latencies, audio-only without QR/image, actual generated FILE QR when AVSYNC_TESTFILE_TOOL is set.')
     print(f"PASS: +35 ms -> {report['offset_ms']:.6f} ms, {report['eventCount']} events; orientation metadata; live PCM16; conflicting offsets suppressed; 700-ms calibration tail; >100 frames at 240 fps; real calibration frames; missing-audio and missing-marker errors; independent chirp diagnostics; silent audio and stale picture status.")

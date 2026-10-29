@@ -1044,3 +1044,12 @@ explicit. Existing saved readings/calibration must be backed up and verified
 before any physical-device installation; no TestFlight or release is required.
 
 Validation and deployment results are recorded in docs/qr-flash.md once run.
+
+AVS2 validation passed on macOS and Linux, actual Apple Vision/native pipelines,
+controlled iPhone-source-to-MXL capture and the existing live/NMOS suites.
+See docs/qr-flash.md for exact cases and limits. The source layout's visual sync
+scale now lies below both measurement panels. Sparse pulse-time QR evidence
+must agree with the decoded identity; its bounded 100-ms sampling window also
+handles slower QR pixel settling without moving the first optical timestamp.
+The old custom locator is only the compatibility path for legacy signals.
+A later physical iPhone test remains pending; the user chose to run it later.

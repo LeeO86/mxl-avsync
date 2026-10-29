@@ -353,7 +353,7 @@ void QrFlashTracker::push_pixels(const void* pixels,bool eight_bit,int width,int
             if(optical)frame.flags.push_back("optical_capture");
             edges_.push_back({frame,1,false,{}});
         } else if(phase_==phase&&!edges_.empty()&&frame.time_ms-edges_.back().frame.time_ms<=150)++edges_.back().whites;
-        if(!edges_.empty()&&edges_.back().whites<=3&&frame.time_ms-edges_.back().frame.time_ms<=100) {
+        if(!edges_.empty()&&edges_.back().symbols.size()<32&&!edges_.back().emitted&&frame.time_ms-edges_.back().frame.time_ms<=100) {
             // Keep sparse module-center evidence from the pulse itself. A later
             // decoded identity must match this image, not just a nearby time.
             std::array<uint8_t,1089> symbol{};

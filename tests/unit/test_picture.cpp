@@ -542,3 +542,21 @@ TEST_CASE("AVS2 cannot relabel a pulse with frozen or later unrelated QR identit
         }
     }
 }
+
+TEST_CASE("AVS2 late QR pixel settling preserves the first optical frame at 240 fps") {
+    QrFlashTracker tracker;Yuv422p10 picture;picture.resize(640,360);
+    std::vector<VideoObservation> events;
+    for(int frame=0;frame<360;++frame) {
+        const double time=frame*1000.0/240;const uint64_t seq=1+frame/120;
+        QrPayload p;p.timecode=p.qr_flash=true;p.source_id=11;p.test_id="display-response";p.format="720p60";
+        // The flash responds immediately; the changed QR pixels take 42 ms.
+        p.k=frame>=120&&frame<130?1:seq;p.tk=int64_t(p.k-1)*500000000;
+        PictureInfo info;info.qr_json=qr_payload_text(p);
+        render_picture(picture,info,seq,frame%120,120,(frame%120)<24);
+        if(frame%24==0){auto q=decode_qr_signal(picture.y.data(),640,360,640);REQUIRE(q);tracker.observe(*q,time);}
+        VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),640,360,640,f);
+        auto fresh=tracker.take_events();events.insert(events.end(),fresh.begin(),fresh.end());
+    }
+    REQUIRE(events.size()==2);CHECK(events[0].seq==2);CHECK(events[0].time_ms==500);
+    CHECK(events[1].seq==3);CHECK(events[1].time_ms==1000);
+}

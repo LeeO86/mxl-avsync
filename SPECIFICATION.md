@@ -1001,7 +1001,7 @@ Optical paths retain unknown capture uncertainty; phone-clock latency remains
 explicitly estimated. Digital-path grain timing is still the received frame
 index; arrival time remains the first-edge arrival, not QR processing time.
 
-For AVS2 identity, up to three sparse 33×33 module-center samples are retained
+For AVS2 identity, up to 32 sparse 33×33 module-center samples are retained
 from the start of each pulse. The later decoded QR is re-encoded using the
 same fixed version/ECC/mask-selection rules; at least 80% confidently sampled
 modules and zero contradictory confident bits are required in one sample.
@@ -1009,4 +1009,4 @@ Unknown/transition modules are erased, not corrected by a permissive timing
 window. A QR already observed before the pulse cannot identify a new pulse.
 This prevents frozen QR or skipped-event callbacks from relabelling an edge.
 Nayuki is vendored into the portable core for this check, with no new external
-media/GUI dependency. Sampling occurs only during the first three white frames.
+media/GUI dependency. Sampling occurs only within the first 100 ms of the pulse and stops after identification. This allows QR pixels to settle after the flash has already started.
