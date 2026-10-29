@@ -39,7 +39,7 @@ jobs:
       - name: packages
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build pkg-config g++ \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build pkg-config g++ ffmpeg \
             libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
       - name: build
         run: |
@@ -55,12 +55,16 @@ jobs:
         run: ./tests/integration/clock.sh
       - name: file
         run: ./tests/integration/file.sh
+      - name: audio timecode files
+        run: python3 tests/integration/timecode.py build/mxl-avsync
+      - name: QR flash crop and codec paths
+        run: python3 tests/integration/qr_flash.py --binary build/mxl-avsync --out "$RUNNER_TEMP/qr-flash"
       - name: stage 2 file paths
         run: ./tests/integration/stage2.sh
       - name: web form draft rules
         run: node --test tests/web/*.test.cjs
       - name: phone display rules
-        run: node --test mobile-app/src/display.test.mjs
+        run: node --test mobile-app/src/*.test.mjs
 
   build-and-test:
     runs-on: ubuntu-24.04
@@ -122,6 +126,7 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="/opt/mxl/lib:/tmp/mxl/build/vcpkg_installed/x64-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./tests/integration/live.sh
+          python3 tests/integration/phone_generator.py
           ./tests/integration/no-signal.sh
           ./tests/integration/settings.sh
           ./tests/integration/ptp.sh

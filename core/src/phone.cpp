@@ -8,20 +8,6 @@ namespace {
 
 constexpr int64_t kNinetyDaysMs = 90LL * 24 * 60 * 60 * 1000;
 
-VideoFormat canonical_format(int width, int height, int event_rate)
-{
-    VideoFormat format;
-    format.token = "phone";
-    format.width = width;
-    format.height = height;
-    // The phone tracker only needs a stable period. 50p keeps the file-plan grid
-    // when the test picture was drawn at 50 frames per second.
-    format.frame = Rate{50, 1};
-    format.interlaced = false;
-    (void)event_rate;
-    return format;
-}
-
 } // namespace
 
 CalibrationState calibration_state(const CalibrationRecord* record, std::string_view os_version, int64_t now_unix_ms)
@@ -57,6 +43,44 @@ PhoneSession::PhoneSession(int event_rate, GradeWindows windows)
 {
 }
 
+void PhoneSession::observe_signal(const QrPayload& qr) {
+    if ((qr.rate != 1 && qr.rate != 2 && qr.rate != 4) || !parse_video_format(qr.format)) return;
+    const bool changed = signal_ && (signal_->test_id != qr.test_id || signal_->source_id != qr.source_id ||
+        signal_->mode != qr.mode || signal_->timecode != qr.timecode || signal_->rate != qr.rate ||
+        signal_->format != qr.format || signal_->qr_flash != qr.qr_flash || signal_->estimated_source != qr.estimated_source);
+    if (changed || (!signal_ && qr.timecode)) {
+        qr_flash_.reset();
+        // Do not retain a speculative legacy anchor when compact identity first arrives.
+        videos_.clear(); locked_seq_.reset(); pending_frames_ = 0; have_transition_ = false;
+        marker_phase_ = MarkerReading::State::Invalid; white_onset_ms_.reset();
+        if(changed){timecode_stream_.reset(); timecodes_.clear(); audio_.clear(); audio_set_ = false;}
+    }
+    signal_ = qr; event_rate_ = qr.rate;
+}
+
+void PhoneSession::collect_qr_events() {
+    for(auto& event:qr_flash_.take_events()) { locked_seq_=uint32_t(event.seq);videos_.push_back(std::move(event)); }
+}
+void PhoneSession::observe_qr(const QrDetection& q,double time) {
+    observe_signal(q.payload);
+    qr_flash_.observe(q,time);collect_qr_events();
+}
+
+void PhoneSession::update_qr_picture(double frame_start_ms) {
+        current_picture_=qr_flash_.pose();picture_code_confirmed_=qr_flash_.valid_frame();
+        if(current_picture_.found)++located_frames_;
+        if(picture_code_confirmed_) {
+            ++valid_frames_;last_valid_frame_ms_=frame_start_ms;
+            if(auto seq=qr_flash_.sequence()){decoded_seq_=uint32_t(*seq);confirmed_picture_seq_=uint32_t(*seq);confirmed_picture_time_ms_=frame_start_ms;}
+        }
+}
+void PhoneSession::push_video_u8(const uint8_t* luma,int width,int height,int stride,double time_ms) {
+    if(!qr_flash_active())return;
+    VideoObservation frame;frame.time_ms=time_ms;
+    qr_flash_.push_u8(luma,width,height,stride,frame);
+    update_qr_picture(time_ms);collect_qr_events();
+}
+
 void PhoneSession::set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms)
 {
     calibration_ = record;
@@ -65,45 +89,149 @@ void PhoneSession::set_calibration(const CalibrationRecord& record, std::string_
 
 void PhoneSession::push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms)
 {
-    if (!tracker_ready_) {
-        const LocatedMarker located = read_located_marker(luma, width, height, stride);
-        if (!located.located) {
-            return;
-        }
-        canonical_w_ = located.width;
-        canonical_h_ = located.height;
-        tracker_ = MarkerTracker(canonical_format(canonical_w_, canonical_h_, event_rate_), event_rate_);
-        tracker_ready_ = true;
+    if (signal_ && signal_->qr_flash) {
+        VideoObservation frame;frame.time_ms=frame_start_ms;
+        qr_flash_.push(luma,width,height,stride,frame);
+        update_qr_picture(frame_start_ms);
+        collect_qr_events();return;
     }
-    const LocatedMarker located = read_located_marker(luma, width, height, stride);
+    if (!cached_pose_.found || frame_start_ms - pose_time_ms_ > 150) {
+        cached_pose_ = locate_picture(luma, width, height, stride);
+        pose_time_ms_ = frame_start_ms;
+    }
+    LocatedMarker located = read_located_marker_at_pose(luma, width, height, stride, cached_pose_, 640);
+    if (located.located && !located.reading.strip_ok) {
+        cached_pose_ = locate_picture(luma, width, height, stride);
+        pose_time_ms_ = frame_start_ms;
+        located = read_located_marker_at_pose(luma, width, height, stride, cached_pose_, 640);
+    }
+    current_picture_ = located.pose;
+    current_picture_.found = located.located;
+    picture_code_confirmed_ = false;
     if (!located.located) {
+        pending_frames_ = 0; marker_phase_ = MarkerReading::State::Invalid; white_onset_ms_.reset(); return;
+    }
+    ++located_frames_;
+    const auto& reading = located.reading;
+    const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, height / 2, height);
+    const double frame_gap_ms = time_ms-marker_phase_ms_;
+    const double vote_window_ms = std::clamp(3*frame_gap_ms,40.0,120.0);
+    bool continuous = marker_phase_pose_.found && time_ms >= marker_phase_ms_ && frame_gap_ms <= 50;
+    for(int i=0;i<4&&continuous;++i) {
+        if(std::hypot(current_picture_.corner_x[i]-marker_phase_pose_.corner_x[i],
+                      current_picture_.corner_y[i]-marker_phase_pose_.corner_y[i]) >
+           std::max(4.0,current_picture_.fiducial_size)) continuous=false;
+    }
+    if(!continuous){marker_phase_=MarkerReading::State::Invalid;white_onset_ms_.reset();}
+    // Optical phase remains usable while strip parity is briefly unreadable.
+    // Retain the first clear white frame only after a continuous black phase.
+    if(reading.state!=MarkerReading::State::Invalid) {
+        if(reading.state==MarkerReading::State::Black) white_onset_ms_.reset();
+        else if(marker_phase_==MarkerReading::State::Black) white_onset_ms_=time_ms;
+        marker_phase_=reading.state;marker_phase_ms_=time_ms;marker_phase_pose_=current_picture_;
+    }
+    if (!reading.strip_ok || reading.quality == "invalid" || reading.state == MarkerReading::State::Invalid) {
+        // One parity failure is not contradictory identity evidence. Preserve
+        // compact votes only within this continuous optical pulse and a short
+        // frame-rate-aware window; geometry/phase loss still resets them.
+        const bool parity_gap = signal_ && signal_->timecode && continuous &&
+            !reading.strip_ok && reading.contrast >= 200 &&
+            reading.state == MarkerReading::State::White && white_onset_ms_ &&
+            time_ms-*white_onset_ms_ <= 120 &&
+            time_ms-pending_last_valid_ms_ <= std::max(20.0,2*frame_gap_ms) &&
+            time_ms-pending_time_ms_ <= vote_window_ms;
+        if(!parity_gap)pending_frames_=0;
         return;
     }
-    std::vector<uint16_t> canonical = located.canonical;
-    if (located.width != canonical_w_ || located.height != canonical_h_) {
-        canonical.assign(static_cast<size_t>(canonical_w_ * canonical_h_), kYBackground);
-        for (int y = 0; y < canonical_h_; ++y) {
-            const int sy = std::min(located.height - 1, y * located.height / canonical_h_);
-            for (int x = 0; x < canonical_w_; ++x) {
-                const int sx = std::min(located.width - 1, x * located.width / canonical_w_);
-                canonical[static_cast<size_t>(y) * canonical_w_ + x] = located.canonical[static_cast<size_t>(sy) * located.width + sx];
-            }
+    ++valid_frames_;
+    decoded_seq_ = reading.seq_low24;
+    last_valid_frame_ms_ = frame_start_ms;
+    // A decoded event number and the marker phase must agree. Monitor refresh,
+    // rolling shutter and moire can toggle the block without a new event.
+    const bool white = reading.state == MarkerReading::State::White;
+    if (signal_ && signal_->timecode) {
+        const auto format = parse_video_format(signal_->format);
+        const double grain_ms = index_to_ns(format->grain_rate(), 1) / 1e6;
+        // A white pulse lasts 100ms. During display scan-out the strip may
+        // still name the previous period's final (black) frame.
+        if (white && reading.frame_pos_mod16 >= std::min(16, int(std::ceil(100 / grain_ms)))) {
+            ++phase_rejected_frames_; pending_frames_ = 0; return;
+        }
+        VideoObservation identity;
+        identity.seq = reading.seq_low24;
+        if (!identify_video(identity, *signal_)) {
+            ++sequence_rejected_frames_; pending_frames_ = 0; return;
         }
     }
-    const FrameGeometry geo = frame_geometry(canonical_w_, canonical_h_);
-    const int row = geo.marker_y + geo.marker_side / 2;
-    const double time_ms = marker_row_time_ms(frame_start_ms, readout_ms, row, canonical_h_);
-    const int64_t frame_index = static_cast<int64_t>(std::llround(frame_start_ms / 20.0));
-    const auto obs = tracker_->push(canonical.data(), canonical_w_, frame_index, time_ms);
-    if (obs.event) {
-        videos_.push_back(obs);
+    if (!(signal_ && signal_->timecode) && white != bool(reading.seq_low24 & 1u)) { ++phase_rejected_frames_; pending_frames_ = 0; return; }
+    if (signal_ && signal_->timecode && (!locked_seq_ || reading.seq_low24 != *locked_seq_) && !white) {
+        pending_frames_ = 0; return;
     }
+    const bool expiring_vote = signal_ && signal_->timecode &&
+        (!locked_seq_ || reading.seq_low24 != *locked_seq_) &&
+        time_ms-pending_time_ms_ > vote_window_ms;
+    if (!pending_frames_ || pending_seq_ != reading.seq_low24 || expiring_vote) {
+        pending_seq_ = reading.seq_low24; pending_time_ms_ = time_ms; pending_frames_ = 1;
+    } else ++pending_frames_;
+    pending_last_valid_ms_=time_ms;
+    // Three agreeing valid frames; compact parity gaps are bounded above.
+    if (pending_frames_ < 3) return;
+    picture_code_confirmed_ = true;
+    confirmed_picture_seq_ = pending_seq_;
+    confirmed_picture_time_ms_ = frame_start_ms;
+    auto anchor = [&] {
+        locked_seq_ = pending_seq_; unwrapped_seq_ = pending_seq_;
+        last_seen_ms_ = time_ms;
+        have_transition_ = signal_ && signal_->timecode && white_onset_ms_ &&
+            time_ms >= *white_onset_ms_ && time_ms-*white_onset_ms_ <= 120;
+        if(have_transition_)last_transition_ms_=*white_onset_ms_;
+    };
+    if (!locked_seq_) { anchor(); return; }
+    int32_t delta = static_cast<int32_t>((pending_seq_ - *locked_seq_) & 0xFFFFFFu);
+    if (delta >= 0x800000) delta -= 0x1000000;
+    if (delta == 0) { last_seen_ms_ = time_ms; return; }
+    const bool coded_gap = signal_ && signal_->timecode && have_transition_ && delta > 1 && delta <= 4;
+    if (delta != 1 && !coded_gap) {
+        ++sequence_rejected_frames_;
+        if (time_ms - last_seen_ms_ > 1500) anchor();
+        return;
+    }
+    double period = 1000.0 / std::max(1, event_rate_);
+    if (signal_) if (auto f = parse_video_format(signal_->format)) period = plan_period(*f, event_rate_).period_ms;
+    double event_time_ms=pending_time_ms_;
+    if(signal_ && signal_->timecode) {
+        if(!white_onset_ms_ || time_ms-*white_onset_ms_>120 || time_ms<*white_onset_ms_) {
+            anchor(); return; // Reacquire; a late barcode alone cannot date a flash.
+        }
+        event_time_ms=*white_onset_ms_;
+        if(!have_transition_){anchor();return;} // Establish an optical interval before publishing.
+    }
+    if (have_transition_ && std::abs(event_time_ms - last_transition_ms_ - delta * period) > period * 0.25) {
+        ++timing_resets_; anchor(); return;
+    }
+    unwrapped_seq_ += delta; locked_seq_ = pending_seq_; last_seen_ms_ = time_ms;
+    last_transition_ms_ = event_time_ms; have_transition_ = true;
+    VideoObservation obs;
+    obs.event = true; obs.seq = unwrapped_seq_; obs.time_ms = event_time_ms;
+    obs.marker_white = white; obs.strip_ok = true; obs.quality = reading.quality;
+    obs.contrast = reading.contrast;
+    if (signal_) identify_video(obs, *signal_);
+    videos_.push_back(obs);
 }
 
 void PhoneSession::push_audio(const float* samples, size_t count, double start_ms, int sample_rate)
 {
     if (count == 0 || samples == nullptr || sample_rate <= 0) {
         return;
+    }
+    for (size_t at = 0; at < count; at += size_t(sample_rate / 10)) {
+        const size_t n = std::min(count - at, size_t(sample_rate / 10));
+        const double time = start_ms + at * 1000.0 / sample_rate;
+        timecode_stream_.push(samples + at, n, sample_rate, time, time);
+        for (const auto& packet : timecode_stream_.scan()) {
+            const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };
+            if (std::none_of(timecodes_.begin(), timecodes_.end(), same)) timecodes_.push_back(packet);
+        }
     }
     if (!audio_set_) {
         audio_origin_ms_ = start_ms;
@@ -120,13 +248,36 @@ void PhoneSession::push_audio(const float* samples, size_t count, double start_m
     audio_.insert(audio_.end(), samples, samples + count);
 }
 
+void PhoneSession::trim_before(double time_ms)
+{
+    timecodes_.erase(std::remove_if(timecodes_.begin(), timecodes_.end(), [&](const AudioTimecode& p) { return p.time_ms < time_ms; }), timecodes_.end());
+    videos_.erase(std::remove_if(videos_.begin(), videos_.end(), [&](const VideoObservation& v) { return v.time_ms < time_ms; }), videos_.end());
+    if (!audio_set_ || time_ms <= audio_origin_ms_) return;
+    const size_t drop = std::min(audio_.size(), static_cast<size_t>((time_ms - audio_origin_ms_) * audio_rate_ / 1000.0));
+    audio_.erase(audio_.begin(), audio_.begin() + drop);
+    audio_origin_ms_ += drop * 1000.0 / audio_rate_;
+}
+
 PhoneReport PhoneSession::finish(const std::string& test_id)
 {
     PhoneReport report;
+    report.video_events = videos_.size();
+    report.audio_samples = audio_.size();
+    report.phase_rejected_frames = phase_rejected_frames_;
+    report.sequence_rejected_frames = sequence_rejected_frames_;
+    report.timing_resets = timing_resets_;
+    report.pending_frames = pending_frames_;
+    report.decoded_seq = decoded_seq_;
+    report.locked_seq = locked_seq_;
+    report.last_valid_frame_ms = last_valid_frame_ms_;
+    if (!videos_.empty()) report.last_video_event_ms = videos_.back().time_ms;
+    double peak = 0;
+    for (float sample : audio_) peak = std::max(peak, std::abs(static_cast<double>(sample)));
+    if (peak > 1e-6) report.audio_peak_dbfs = 20 * std::log10(peak);
     report.calibration = calibration_state_name(calibration_state_);
     report.show_grade_colour = calibration_state_ == CalibrationState::Valid;
     report.uncertainty_ms = report.show_grade_colour ? calibration_.spread_ms : 0;
-    if (videos_.empty() || audio_.empty()) {
+    if (audio_.empty()) {
         return report;
     }
     AudioDetectConfig detect;
@@ -141,15 +292,30 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
         detect.timeline_origin_ms = audio_origin_ms_;
         detector = AudioDetector(detect);
     }
-    const auto hits = detector.detect(audio.data(), audio.size(), 0);
+    const bool have_timecode = (signal_ && signal_->timecode) || !timecodes_.empty();
+    const size_t diagnostic_window = have_timecode ? 48000 * 2 : 48000 * 6;
+    const size_t diagnostic_start = audio.size() > diagnostic_window ? audio.size() - diagnostic_window : 0;
+    const auto hits = detector.detect(audio.data() + diagnostic_start, audio.size() - diagnostic_start, diagnostic_start);
+    report.audio_hits = hits;
+    for (const auto& packet : timecode_stream_.scan(true)) {
+        const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };
+        if (std::none_of(timecodes_.begin(), timecodes_.end(), same)) timecodes_.push_back(packet);
+    }
+    std::sort(timecodes_.begin(), timecodes_.end(), [](const auto& a, const auto& b) { return a.time_ms < b.time_ms; });
+    report.audio_timecodes = timecodes_;
+    if (videos_.empty()) return report;
     ReferenceInfo reference;
     reference.type = "none";
     reference.sync_state = "unknown";
     Pairer pairer(detect.period_ms, windows_, reference, "LIVE", test_id);
-    for (const auto& video : videos_) {
+    const bool coded = (signal_ && signal_->timecode) || !report.audio_timecodes.empty();
+    for (auto video : videos_) {
+        if (signal_ && !video.timecode) identify_video(video, *signal_);
+        if (coded && !video.timecode) continue;
         pairer.observe_video(video, 0);
     }
     for (const auto& hit : hits) {
+        if (coded) break;
         AudioObservation obs;
         obs.chirp_id = hit.chirp_id;
         obs.time_ms = hit.time_ms;
@@ -161,6 +327,7 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
         obs.ambiguous = hit.ambiguous;
         pairer.observe_audio(obs);
     }
+    for (const auto& packet : report.audio_timecodes) pairer.observe_audio(audio_observation(packet));
     pairer.finish();
     report.events = pairer.results();
     if (calibration_state_ == CalibrationState::Valid) {

@@ -1,18 +1,52 @@
 {
   "expo": {
-    "name": "mxl-avsync",
+    "name": "AVsync",
     "slug": "mxl-avsync",
     "version": "2.0.0",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
-    "platforms": ["ios", "android"],
-    "ios": {"bundleIdentifier": "io.leeo86.mxl.avsync", "infoPlist": {"NSCameraUsageDescription": "See the AV sync test picture.", "NSMicrophoneUsageDescription": "Hear the AV sync chirps."}},
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "ios": {
+      "bundleIdentifier": "io.leeo86.mxl.avsync",
+      "infoPlist": {
+        "NSCameraUsageDescription": "See the AV sync test picture.",
+        "NSMicrophoneUsageDescription": "Hear the AV sync chirps."
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "icon": "./assets/icon.png"
+    },
     "android": {
       "package": "io.leeo86.mxl.avsync",
-      "adaptiveIcon": {"foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#091426"},
-      "permissions": ["CAMERA", "RECORD_AUDIO"]
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D1C32",
+        "monochromeImage": "./assets/monochrome-icon.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ],
+      "icon": "./assets/android-icon.png"
     },
-    "web": {"favicon": "./assets/favicon.png"},
-    "plugins": ["./modules/avsync/app.plugin.js"]
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "./modules/avsync/app.plugin.js",
+      "expo-asset",
+      "expo-font"
+    ],
+    "owner": "leeo86",
+    "extra": {
+      "eas": {
+        "projectId": "f55d25d9-cd44-4dc3-b4e4-50b6111a516c"
+      }
+    },
+    "newArchEnabled": false
   }
 }

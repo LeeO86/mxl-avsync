@@ -261,6 +261,17 @@ void Pairer::observe_video(const VideoObservation& video, double expected_offset
     videos_.push_back(pending);
 }
 
+AudioObservation audio_observation(const AudioTimecode& p) {
+    AudioObservation a;
+    a.estimated_source = p.estimated_source;
+    a.timecode = true; a.source_id = p.source_id; a.event_time_ns = p.video_send_ns;
+    a.audio_send_ns = p.audio_send_ns; a.time_ms = p.time_ms;
+    a.arrival_ms = p.arrival_ms; a.have_arrival = true;
+    a.tai_ns = int64_t(std::llround(p.time_ms * 1e6));
+    a.correlation = p.correlation; a.level_dbfs = p.level_dbfs; a.quality = "good";
+    return a;
+}
+
 void Pairer::observe_audio(const AudioObservation& audio)
 {
     audios_.push_back(audio);
@@ -300,13 +311,14 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
     m.mode = mode_;
     m.have_video = true;
     m.have_audio = true;
+    m.audio_timecode = audio->timecode; m.source_id = audio->source_id; m.audio_send_ns = audio->audio_send_ns;
     m.video_time_ms = pending.video.time_ms;
     m.audio_time_ms = audio->time_ms;
     m.video_tai_ns = pending.video.tai_ns;
     m.audio_tai_ns = audio->tai_ns;
-    m.expected_av_offset_ms = pending.expected_offset_ms;
+    m.expected_av_offset_ms = audio->timecode ? (audio->audio_send_ns - audio->event_time_ns) / 1e6 : pending.expected_offset_ms;
     m.av_offset_ms = audio->time_ms - pending.video.time_ms;
-    m.deviation_ms = *m.av_offset_ms - pending.expected_offset_ms;
+    m.deviation_ms = *m.av_offset_ms - m.expected_av_offset_ms;
     m.correlation = audio->correlation;
     m.audio_level_dbfs = audio->level_dbfs;
     m.clipped = audio->clipped;
@@ -320,7 +332,7 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
     if (audio->ambiguous) {
         m.flags.push_back("ambiguous");
     }
-    const bool use_deviation = std::abs(pending.expected_offset_ms) > 1e-9;
+    const bool use_deviation = std::abs(m.expected_av_offset_ms) > 1e-9;
     m.graded_on = use_deviation ? "deviation" : "offset";
     const double graded = use_deviation ? *m.deviation_ms : *m.av_offset_ms;
     if (audio->ambiguous || audio->quality == "invalid" || pending.video.quality == "invalid") {
@@ -342,15 +354,26 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
         m.uncertainty_ms = uncertainty.offset_ms;
         m.uncertainty_status = uncertainty.offset_status;
         m.latency_uncertainty_status = uncertainty.latency_status;
+        if (has_flag(m, "optical_capture")) {
+            m.uncertainty_ms.reset(); m.uncertainty_status = "unknown";
+        }
     }
     // Latency and index shift need the generator's T_k and a locked PTP reading.
     // Audio's set time is T_k plus the configured offset, so a clean path reports a shift near 0.
-    const bool locked = reference_.sync_state == "locked" && pending.video.have_set_time;
+    m.latency_estimated = pending.video.estimated_source || audio->estimated_source;
+    if (m.latency_estimated) {
+        m.latency_uncertainty_status = "unknown";
+        m.flags.push_back("estimated_source_clock_and_output");
+    }
+    // Phone source timestamps describe scheduled output on a UTC-derived clock.
+    // Keep the requested estimate, and retain the receiver clock status verbatim.
+    const bool locked = (reference_.sync_state == "locked" || m.latency_estimated)
+        && pending.video.have_set_time && mode_ == "LIVE";
     if (locked) {
         m.have_set_time = true;
         m.set_video_ns = pending.video.set_tai_ns;
         const double tk_ms = static_cast<double>(pending.video.set_tai_ns) / 1e6;
-        const double audio_set_ms = tk_ms + pending.expected_offset_ms;
+        const double audio_set_ms = audio->timecode ? double(audio->audio_send_ns) / 1e6 : tk_ms + pending.expected_offset_ms;
         m.video_index_shift_ms = pending.video.time_ms - tk_ms;
         m.audio_index_shift_ms = audio->time_ms - audio_set_ms;
         if (pending.video.have_arrival) {
@@ -412,6 +435,11 @@ std::vector<Measurement> Pairer::poll(double now_ms)
         double best_dist = 1e300;
         bool out_of_range = false;
         for (const auto& audio : audios_) {
+            if (pending.video.timecode || audio.timecode) {
+                if (!pending.video.timecode || !audio.timecode || pending.video.source_id != audio.source_id ||
+                    pending.video.event_time_ns != audio.event_time_ns) continue;
+                best = &audio; best_dist = 0; break;
+            }
             if (audio.chirp_id != want || audio.ambiguous) {
                 continue;
             }
@@ -425,7 +453,7 @@ std::vector<Measurement> Pairer::poll(double now_ms)
                 out_of_range = true;
             }
         }
-        const bool window_closed = now_ms > target + 2.0 * period_ms_;
+        const bool window_closed = now_ms > target + (pending.video.timecode ? 10000.0 : 2.0 * period_ms_);
         if (best != nullptr) {
             auto measured = pair_one(pending, best, {});
             pending.resolved = true;
@@ -451,7 +479,7 @@ std::vector<Measurement> Pairer::finish()
     for (const auto& audio : audios_) {
         horizon = std::max(horizon, audio.time_ms);
     }
-    return poll(horizon + 10.0 * period_ms_);
+    return poll(horizon + std::max(10001.0, 10.0 * period_ms_));
 }
 
 std::string current_grade(const std::vector<Measurement>& events, int last_n, const GradeWindows& windows, double now_ms, double stale_s)

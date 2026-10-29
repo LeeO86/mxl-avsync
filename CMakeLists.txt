@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.24)
-project(mxl-avsync VERSION 1.0.1 LANGUAGES C CXX)
+project(mxl-avsync VERSION 2.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(AVSYNC_CORE_ONLY "Build only avsync-core and its tests" OFF)
+option(AVSYNC_BUILD_TESTFILE_TOOL "Build the portable testfile generator/analyzer" OFF)
 option(AVSYNC_WITH_FFMPEG "Build the file generator and analyzer" ON)
 # Live MXL is linked when find_package(mxl) succeeds. avsync-core stays free of libmxl.
 
@@ -43,14 +44,19 @@ add_custom_command(
 add_library(avsync-core STATIC
     core/src/plan.cpp
     core/src/chirp.cpp
+    core/src/timecode.cpp
     core/src/detect.cpp
     core/src/marker.cpp
     core/src/grade.cpp
     core/src/qr.cpp
     core/src/g711.cpp
     core/src/text.cpp
+    core/src/sync_scale.cpp
     core/src/locate.cpp
     core/src/phone.cpp
+    core/src/phone_generator.cpp
+    core/src/picture_reader.cpp
+    third_party/nayuki/qrcodegen.cpp
 )
 target_include_directories(avsync-core
     PUBLIC core/include
@@ -61,10 +67,14 @@ set_source_files_properties(core/src/text.cpp PROPERTIES OBJECT_DEPENDS "${DEJAV
 target_link_libraries(avsync-core PUBLIC blend2d::blend2d)
 target_compile_options(avsync-core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
-add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp)
+add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp tests/unit/test_timecode.cpp)
 target_include_directories(avsync-core-tests PRIVATE third_party/doctest)
 target_link_libraries(avsync-core-tests PRIVATE avsync-core)
 target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
+add_executable(avsync-timecode-tool tests/tools/timecode_tool.cpp)
+target_include_directories(avsync-timecode-tool PRIVATE third_party)
+target_link_libraries(avsync-timecode-tool PRIVATE avsync-core)
 
 enable_testing()
 add_test(NAME core COMMAND avsync-core-tests)
@@ -102,14 +112,18 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     add_subdirectory(${zxing_src_SOURCE_DIR} ${CMAKE_BINARY_DIR}/zxing EXCLUDE_FROM_ALL)
     add_library(avsync-file STATIC
         generator/picture.cpp
+        generator/picture_render.cpp
         generator/source_image.cpp
-        third_party/nayuki/qrcodegen.cpp
         app/report.cpp
         app/file_tool.cpp
     )
     target_include_directories(avsync-file PUBLIC generator app core/include third_party third_party/nayuki)
     target_compile_definitions(avsync-file PUBLIC AVSYNC_ICON_PATH="${CMAKE_SOURCE_DIR}/web/icon.png")
     target_link_libraries(avsync-file PUBLIC avsync-core ZXing::ZXing PkgConfig::FFMPEG)
+    if(AVSYNC_BUILD_TESTFILE_TOOL)
+        add_executable(avsync-testfile-tool testfiles/tool.cpp)
+        target_link_libraries(avsync-testfile-tool PRIVATE avsync-file)
+    endif()
     add_executable(avsync-picture-tests tests/unit/test_picture.cpp)
     target_include_directories(avsync-picture-tests PRIVATE third_party/doctest)
     target_compile_definitions(avsync-picture-tests PRIVATE AVSYNC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
@@ -157,8 +171,11 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         add_executable(avsync-pattern-writer tests/tools/pattern_writer.cpp)
         target_link_libraries(avsync-pattern-writer PRIVATE avsync-mxlio)
         target_compile_options(avsync-pattern-writer PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        add_executable(avsync-phone-fixture tests/tools/phone_fixture.cpp)
+        target_link_libraries(avsync-phone-fixture PRIVATE avsync-mxlio)
+        target_compile_options(avsync-phone-fixture PRIVATE -Wall -Wextra -Wno-unused-parameter)
         if(MXL_RUNTIME_LIB_DIRS)
-            set_target_properties(avsync-sample-flow avsync-pattern-writer PROPERTIES BUILD_RPATH "${MXL_RUNTIME_LIB_DIRS}")
+            set_target_properties(avsync-sample-flow avsync-pattern-writer avsync-phone-fixture PROPERTIES BUILD_RPATH "${MXL_RUNTIME_LIB_DIRS}")
         endif()
         message(STATUS "libmxl found: live reader and writer are linked into mxl-avsync")
     else()

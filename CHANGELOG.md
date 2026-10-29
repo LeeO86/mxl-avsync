@@ -1,6 +1,26 @@
 # Changelog
 
-## 1.0.2 (unreleased)
+## 2.0.0 (2026-10-29)
+
+- Introduce the shared AVS2 QR + flash picture in file, MXL and iPhone sources
+  and receivers. Decode full event identity independently of flash timing;
+  retain legacy input compatibility. Upgrade compact-signal receivers together.
+- Replace per-frame full-picture rectification on iOS with sparse camera-plane
+  photometry. Support crops retaining QR quiet zone and flash field, validate
+  pulse-time QR evidence, and preserve onset through delayed QR pixel settling.
+- Center the app icon above AVsync, use Title for the existing saved source
+  label, remove the obsolete extra Title control and render a smaller subtitle.
+- Draw a black centerline on the moving sync box and keep white scale ticks
+  above it, using the same foreground in native iPhone and server rendering.
+- Refresh public project-site screenshots and release installation guidance.
+
+
+- Keep the last valid mobile measurement saveable through temporary signal loss,
+  label its age and spread, and preserve acquisition time in saved/exported results.
+  Source changes and explicit clears still discard the retained snapshot.
+- Stabilize the camera outline with bounded hold/fade and corner smoothing;
+  reject one-off geometry jumps and expire lost targets within 600 ms. The
+  detector's timing, validity gates and AV samples remain unchanged.
 
 - Fix source-picture selection so Apply enables and uploads PNG/GIF files; retain
   failed or newly selected uploads and reset the file input on Apply/Discard.
@@ -8,6 +28,29 @@
   recoverable placeholder. Generator pages no longer request analyzer input.
 - Move generator activity from the red banner to a green header status pill,
   with neutral muted/stopped states. Error banners remain for actual failures.
+
+
+- Brand the mobile app AVsync, enlarge the header mark and generate separate
+  iOS launcher, framed content and Android adaptive/themed icons from one SVG.
+- Show the applied calibration and saved date in mobile settings; distinguish
+  inactive corrections from 0 ms and dismiss the sheet by tapping its backdrop.
+
+- Share the server color-bar/sync-scale renderer with the iPhone generator.
+  Add saved source name/subtitle and a private system-picker image import.
+
+- Add a native iPhone fullscreen generator (1200 baud, 1/2 Hz) and automatic
+  optical/tile search in the live analyzer. Preserve source-frame timing across
+  camera frame rates and explicitly mark phone source latency as estimated.
+
+- Integrate compact audio-only timecode across the generator, file/live analyzers
+  and native iOS app, with CRC/FEC, full event identity and legacy compatibility.
+- Align each white pulse to chirp onset and add draft-preserving 1/2-Hz and
+  1200/600-baud controls. Count skipped live collisions; reject overlapping files.
+- Decode audio without picture/QR and show separately estimated phone latency,
+  independent signal pills, picture outline and current-stage diagnostics.
+- Restore working native capture/calibration, retain zero correction without
+  calibration, and preserve antialiased generator text. Add end-to-end channel,
+  file, native iOS and form regressions; hardware timing remains unverified.
 
 ## 1.0.1 (2026-10-26)
 

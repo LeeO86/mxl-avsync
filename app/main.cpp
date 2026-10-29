@@ -18,7 +18,7 @@ void usage()
     std::cout << R"(mxl-avsync )" << avsync::kAppVersion << R"(
 
   mxl-avsync generate --format 1080p50 --duration 60 --offset 0 --out test.mov
-      [--offset-sweep -40,-20,0,20,40] [--event-rate 2] [--audio-rate 48000]
+      [--offset-sweep -40,-20,0,20,40] [--event-rate 1|2] [--audio-timecode 1200|600|legacy] [--audio-rate 48000]
       [--channels 2] [--container mov|mp4|mkv] [--video-codec prores|v210|h264]
       [--audio-codec pcm24|pcm16|aac] [--title ...] [--source ...] [--subtitle ...]
       [--source-image png|gif]
@@ -105,6 +105,7 @@ int main(int argc, char** argv)
         if (!sweep.empty()) {
             request.sweep = split_doubles(sweep);
         }
+        request.audio_timecode = opt("--audio-timecode", "1200");
         request.event_rate = std::atoi(opt("--event-rate", "2").c_str());
         request.audio_rate = std::atoi(opt("--audio-rate", "48000").c_str());
         request.channels = std::atoi(opt("--channels", "2").c_str());

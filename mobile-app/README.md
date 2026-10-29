@@ -1,3 +1,197 @@
 # Phone app
 
-Not part of 1.0. SPECIFICATION §12 fixes the shape: Expo, one native module per platform, `avsync-core` inside the module, camera and microphone on one clock, calibration against an LED + piezo rig. Build it only after the live analyzer has been measured on the Linux host.
+## Run
+
+Use Node/npm, Xcode and CocoaPods on macOS. From `mobile-app/`:
+
+```sh
+npm ci
+npm test
+npm run ios:device
+npm start
+```
+
+Use the custom development build, not Expo Go. The local Avsync Expo module contains the camera view and C++ analysis bridge. After native changes run `pod install` in `ios/` and rebuild. On newer Xcode versions the SDK 52 CLI can hang on device discovery; a generic signed iOS build plus `xcrun devicectl device install app` / `device process launch` works. Unlock the iPhone to launch. Keep Mac and iPhone on the same network.
+
+## Live measurement
+
+The Measure tab uses the original dark camera/guide/result layout. Native AVFoundation camera and microphone capture start together. The app selects the rear wide camera format with the highest supported maximum frame rate, choosing the larger raster on a tie, and explicitly sets both frame durations. The overlay distinguishes the configured camera rate from the rate actually processed. CPU load, dropped frames and light can affect achievable performance; the configured rate is not an accuracy claim.
+
+The C++ phone detector receives camera luma and PCM audio on the capture session's shared timestamp timeline. Results update roughly once per second after the initial observation window; this is continuous analysis, not eight-second movie recording. Aim at the complete test picture with four visible corner markers and audible chirps (currently 2 events/second). Status text distinguishes missing picture, unreadable marker code and missing matching chirps. Save result stores a snapshot; Results lists saved measurements and tap-to-export JSON.
+
+Calibration is optional. Missing, expired or incompatible calibration means **0 ms correction**, with an uncalibrated status. Positive offset means audio is late. A separate **estimated latency** panel uses matching LIVE QR/audio TAI references and the phone clock; its clock/capture accuracy remains unknown, as described below.
+
+## Calibration
+
+Open Settings → Repeat calibration. Aim at a visible clap/tap or an LED/piezo reference. Start, wait briefly, then make one sharp sound. The same high-frame-rate camera/audio path captures the take. A ring buffer keeps 750 ms before the detected sound, then capture continues until at least 700 ms of BOTH video and audio have arrived after it. Frames on both sides are required. No fixed 100-frame cap truncates high-rate takes. If no transient is detected within 12 seconds, the UI asks to retry.
+
+The review shows actual frames, signed time relative to the sound, counts before/after and frame-by-frame stepping. Replay plays the actual PCM sound. Saving stores sound PTS minus selected contact-frame PTS. The correction is applied once; it expires on OS change or after 90 days. Movie-path calibrations from earlier builds are intentionally incompatible with the raw native path.
+
+## Detector and accuracy
+
+Phone frames are rectified to a fixed 640×360 test-picture raster before decoding the Gray code; using arbitrary observed tile widths changes the integer strip geometry. The corner search uses local contrast and spatial geometry, avoids expanding fiducials into nearby text, and ranks candidates using the known reference strip. Cached geometry reduces per-frame work. The legacy file analyzer remains available for regression tests/debug recordings.
+
+Manual clap calibration is approximate. Rolling shutter and independent LED/piezo validation remain open; observed event spread is not a validated capture uncertainty. The app reports uncertainty unknown, avoids validated grading and does not invent measurements without matched events. Android native capture/analysis is not implemented. Raw calibration frames/audio are temporary local cache files; they are not an archival media library.
+
+## Verification
+
+```sh
+npm test
+npm run test:ios-native
+```
+
+Native tests require Xcode, ffmpeg and a booted arm64 iOS simulator. They cover encoded +35 ms signal analysis, display orientation, missing audio/markers, timestamped live PCM16 processing, a calibration tail of at least 650 ms after the transient, and >100 selectable frames at 240 fps. These tests verify signal processing and buffering, not physical capture accuracy.
+
+## Stability and diagnostics
+
+The phone tracker confirms event codes across three frames, checks phase/sequence/timing consistency and uses the first confirming candidate frame's timestamp. Pose and sequence lock survive rolling audio/video pruning. Numeric live results require at least three consistent matched pairs. Excessive spread clears the reading instead of publishing an upper median from contradictory pairs; this can also withhold measurements from a genuinely unstable source path.
+
+`Library/Caches/avsync-diagnostics.json` stores the latest 120 native reports across app restarts, including raw per-event IDs/timestamps/offsets and capture rates. It contains no live video/audio recording. This provides evidence for debugging remaining real-device instability; the capture accuracy remains unvalidated.
+
+Diagnostic schema 2 adds current-interval picture/code counts, accepted video events, phase/sequence rejection counters, decoded/locked sequence identities, event ages, audio sample count/peak level, recognized chirps and correlations, and a `stage` explaining where analysis stops. Chirps are detected independently even when no video event was accepted. The UI uses current picture detection rather than lifetime counts, so a lost picture cannot remain reported as “listening for chirps.” Audio/chirp statistics cover the buffered window (up to six seconds), not just the latest report interval. Native regressions cover picture loss after prior successful detection, chirps without a picture, and valid video with silent audio. These diagnostics require a native rebuild; Metro reload alone cannot update them.
+
+
+## Live recognition feedback and estimated latency
+
+Independent audio and picture pills use gray for absent/stale input, orange for detection and green for a confirmed picture code or fully validated audio timecode. The chirp carries one of four IDs, **not a full timecode**: audio stays orange for the legacy four-ID signal, even after image pairing. Green is reserved for an independently decoded, CRC-validated audio timecode; an experimental codec is tested under `tests/audio-timecode/`, but it is not wired into the production generator or this app yet. Historical hits outside the current interval, ambiguous pairs and paused/stalled capture cannot keep a green pill. A native quadrilateral follows the actual detected corners at up to 10 Hz, matches portrait resizeAspectFill cropping, and expires if frames stop. It is orange when a picture is found and green when its code is confirmed; it is not the old fixed guide rectangle.
+
+The phone decodes QR payloads with Apple's built-in Vision framework, at most once per second on a separate worker. A LIVE QR supplies the source event identity, TAI send timestamp, format/rate and configured audio offset. The event's camera/microphone PTS is mapped through the capture session clock to device UTC. TAI−UTC defaults to **37 seconds** for the current source and can be changed explicitly in Settings; this is a configured assumption, not discovered PTP lock. Nearby event projection uses the actual planned grain period, respects the 24-bit wrap and expires after three seconds. FILE signals and unavailable capture-clock mapping produce no absolute estimate. An expired QR suppresses the QR-only estimate. For compact audio timecode, a fresh accepted video/audio pair can instead use the CRC-validated packet’s common video-send timestamp: source ID, audio-send timestamp, reception time and configured source offset must match that exact pair. A recent packet alone cannot invent a video estimate. This path uses actual per-event capture times, independent of AV calibration or the displayed median. The QR is still required to establish picture identity, format and rate for pairing. Sweep mode has no known per-event legacy source audio offset, so the QR-only path supplies video latency only.
+
+Video and audio estimates include device capture delay and may be negative if clocks are wrong. They are separate from the AV offset, are always labelled estimated, and do not acquire the AV calibration's correction or a verified uncertainty. Source clock accuracy is also unknown to the phone. The user explicitly requested useful estimates despite these limits; they do not replace the independent calibration/clock validation required by the original specification.
+
+“Check clock” makes three HTTPS requests only when tapped, using the WorldTimeAPI-compatible service `https://worldtime.timezone.io/api/timezone/Etc/UTC` ([provider documentation](https://www.timezone.io/docs/worldtimeapi)). It brackets API−phone clock difference over request/response times without assuming symmetric network delay, reports RTT, rejects cached/invalid/inconsistent answers and local clock jumps, and expires after five minutes or a clock change. It does not set the phone clock or silently correct latency. API clock error and capture error are not bounded by this bracket; it is a **coarse sanity check** only. The original worldtimeapi.org endpoint was unreachable during development; the configured compatible endpoint returned valid UTC data. [NIST explains network-path accuracy limits](https://www.nist.gov/pml/time-and-frequency-division/time-distribution/internet-time-service-its).
+
+Regression coverage includes pill progression and expiry, ambiguous/mismatched chirp identities, negative estimates, UTC/TAI conversion, source audio offsets, sequence wrap, source expiry, unsupported/file references, real native +120 ms video/+155 ms audio estimates, and four-corner aspect-fill mapping. A physical phone/Safari test remains necessary to validate overlay alignment, QR availability and performance on the capture path.
+
+
+The integrated compact audio timecode now drives the green audio pill only
+after CRC validation. Both 1/2-Hz sources are acquired from QR metadata; the
+stability window retains at least three recent events at 1 Hz. Independently
+decoded LIVE audio supplies estimated audio latency even without image/QR,
+with device/source clock and capture accuracy still unknown. Per-channel `videoState`/`audioState`, `videoSource`, QR age and QR/video sequences preserve the reason for a missing video estimate even while audio latency is available. A native rebuild
+is required (Expo Go cannot load this codec). See ../docs/audio-timecode.md.
+
+## Generate on the iPhone
+
+The **Generate** tab opens a native fullscreen source at 1200 baud, selectable
+1/2 chirps/s. Film it with an external camera feeding the updated server
+analyzer. AV sync includes the phone output; latency is explicitly estimated.
+This requires a rebuilt native development client. See [workflow, timing and
+validation limits](../docs/phone-generator.md). Run
+`python3 tests/native/generator.py` from this directory with a booted simulator.
+
+## EAS Cloud and TestFlight
+
+The linked EAS project is `@leeo86/mxl-avsync`. Run EAS commands from
+`mobile-app/`; the Git-root `.easignore` also includes the shared C++ core.
+
+```sh
+npx eas-cli@26.0.0 build --platform ios --profile production
+npx eas-cli@26.0.0 submit --platform ios --profile production --latest
+```
+
+Production is a signed store/Release build with embedded JavaScript and the
+native analyzer/generator. It launches without Metro, Expo Go or a running Mac.
+Build numbers are managed remotely and incremented per production build.
+The Xcode 26.2 cloud image meets Apple's iOS 26 SDK upload requirement.
+
+EAS Submit uploads to App Store Connect/TestFlight; the public App Store
+listing and review are separate. Signing credentials stay in EAS/Apple, not
+in this repository. Inspect an upload without starting a build using
+`eas build:inspect --platform ios --profile production --stage archive --output /tmp/avsync-eas-archive`.
+
+App Store Connect record: `6827797077` (`io.leeo86.mxl.avsync`). The first
+cloud delivery is version 2.0.0 / build 1; subsequent build numbers increment
+in EAS. The internal TestFlight group is `Team (Expo)`. EAS Submit has a
+remotely stored App Manager API key; no Apple password/key is committed here.
+Expo Doctor passes 17/18 checks; the remaining check reports the existing
+`expo-av` dependency as unmaintained. Production bundle export and clean
+prebuild succeed; migration of calibration replay off expo-av is separate.
+
+## Retained readings and outline stability
+
+A temporary detection/status gap keeps the last accepted result saveable. The
+screen labels it live, paused or last-valid with age, pair count and spread.
+Repeated reports of the same pair do not rejuvenate it. Source identity changes,
+Clear and calibration changes still invalidate it. Exports retain the original
+acquisition timestamp and add save time, age and display state. A historical
+paired latency snapshot is labelled when used as a fallback. This presentation
+behavior does not improve or hide the detector's actual timing spread.
+
+The camera outline briefly holds/fades missed observations, smooths small corner
+motion and requires two nearby observations for acquisition or a large jump.
+It disappears after at most 600 ms without accepted geometry. The measured
+video/audio event timestamps and consistency thresholds are unchanged.
+
+Alongside `npm test` and the native suite, exercise the shipped React App's real
+report/Save callbacks with isolated test-only dependencies:
+
+```sh
+npm install --prefix /tmp/avsync-ui-deps --no-package-lock --ignore-scripts react@18.3.1 react-test-renderer@18.3.1
+AVSYNC_UI_DEPS=/tmp/avsync-ui-deps node tests/reading-ui.cjs
+```
+
+Run from mobile-app after npm ci. `AVSYNC_BABEL_MODULES` can point to another
+checkout's node_modules. Native surfaces are mocks; no browser/camera/network is
+used. The test covers status/timeout/pause, Save evidence/age, source change and
+explicit Clear. The Swift geometry test also covers bounded hold, jump rejection
+and reacquisition. Physical optical/acoustic timing remains device-test work.
+
+### Developer raw diagnostics (opt-in, iOS)
+
+Ordinary Release/TestFlight builds exclude the raw recorder. A local Debug build
+(or a test compiled with `AVSYNC_DIAGNOSTIC_CAPTURE=1`) records only when launched
+with environment `AVSYNC_DEBUG_CAPTURE=1`. Each process makes one private capture
+under `Library/Caches/avsync-debug-capture/<UUID>`: a five-second window (including its final audio block) and at most
+512 MiB of the exact downsampled 8-bit luma sent to PhoneSession, mono float PCM,
+original capture timestamps, observed QR payloads, clock anchors and accepted
+event/geometry trace. Calibration is excluded. A bounded background writer may
+drop debug buffers; its counters are explicit and never remove analysis input.
+`diagnosticCapture.complete` indicates the files have closed. This diagnostic
+code neither uploads data nor writes it into the repository. Copy privately
+with the Xcode device tools; remove recordings from device/Mac after analysis.
+Raw recordings can contain personal camera views and microphone audio.
+
+`tests/native/diagnostic-replay.cpp` replays these exact inputs into PhoneSession
+and writes a per-frame marker trace alongside the capture. It reports accepted
+event/time differences, including those caused by debug buffer drops. Verify
+capture/replay with `python3 tests/native/diagnostic-capture.py DIR`, where DIR is
+the synthetic `timecode-2` fixture directory produced by `tests/native/run.py`.
+This is reproducibility tooling, not independent physical timing validation.
+
+
+Phone timing-field uniformity uses a 5th-to-95th percentile span so a sparse
+cursor/hot pixel does not invalidate an otherwise uniform flash. Mixed
+transition fields still fail the same span limit; strip parity/contrast/noise
+checks remain. Compact-code event timing retains a continuous optical
+black-to-white onset while its barcode is being confirmed, rather than dating
+the event from late successful decoding. Missing onset evidence cannot produce
+a backdated event. Physical timing accuracy remains unvalidated.
+
+Small compact-code sequence gaps (two to four steps) recover only with an
+established optical anchor and matching delta×period spacing inside the
+existing quarter-period tolerance. Missing events are never synthesized.
+The QR identity window is checked before a code can acquire tracking lock.
+
+The replay tool optionally accepts a same-source `REFERENCE_QR_JSON` after the
+capture directory. This controlled replay is explicitly marked
+`externalReference`; it is distinct from replaying the QR observations that
+actually arrived during the take. Trace differences are reported when a
+changed detector accepts events rejected by the recorded version.
+
+Compact white phases additionally require a frame-position code inside the
+known source flash window. After uncertain acquisition, tracking first
+establishes an optical interval before publishing a measurement.
+
+Compact confirmation can retain agreeing samples across isolated parity loss
+within a 40–120-ms frame-rate-aware window of the same continuous white pulse.
+Different valid codes and source/geometry/phase loss reset votes. Three valid
+agreeing samples remain necessary; legacy confirmation is consecutive.
+
+
+Before installing a development build or changing device files, privately back
+up the app's preference plist (saved session/calibration/results) and any private
+Application Support image assets. Verify saved state again afterwards. Numeric
+diagnostic history is not a saved-session backup. Do not use broad
+`devicectl copy to --remove-existing-content` operations for subdirectory cleanup;
+use scoped app-owned cleanup instead. Keep backups outside Git.

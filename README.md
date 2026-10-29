@@ -1,6 +1,17 @@
 # mxl-avsync
 
-AV sync and latency measurement for MXL. A generator writes a visible and audible test signal (timing marker, Gray-coded frame strip, QR code, chirps), live into MXL flows or as test files. An analyzer finds the markers and chirps at any point of a chain and reports the AV offset with a pass/warn/fail grade, and — with the platform's PTP/TAI clock — the audio and video latency. A phone app for measuring at a real monitor comes last.
+AV sync and latency measurement for MXL and iPhone. Version 2.0 uses a large
+QR code beside a flash field and independently decodable audio timecode. File,
+live MXL and native iOS sources/receivers share the signal and measuring core.
+The analyzer reports audio/video offset and, with a suitable clock reference,
+latency. Phone-clock latency is explicitly estimated with unknown physical
+accuracy. Android capture is planned.
+
+Get `ghcr.io/leeo86/mxl-avsync:2.0.0` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
+for iOS TestFlight information. Upgrade compact-signal generator and receivers
+together: old receivers do not understand AVS2. Legacy signals remain supported.
+[Signal and validation details](docs/qr-flash.md) · [Release notes](docs/release-notes-2.0.0.md).
+
 
 **Status: measuring core, file tools, control plane, live MXL reader and writer, and the phone core.** The container image is `ghcr.io/leeo86/mxl-avsync`, user 1000:1000. `/metrics` exports every family from the first scrape, counters at 0. Latency gauges are not exported. `mxl-avsync` links libmxl when the package is found; `avsync-core` does not. `/readyz` is 200 when the process and HTTP service are up and, with NMOS registration configured, the node is listed in the Query API. The generator also requires its output flows to be created. Analyzer routes and signal are independent: `not_routed`, `waiting` and `no_signal` remain ready and are reported in `/statusz`, the input-state metric and the UI. The analyzer also writes a result picture flow, and the web UI polls `/api/v1/preview/input.jpg` and `/api/v1/preview/generated.jpg` once a second. Clock state comes from an optional ptp4l management socket (`AVSYNC_PTP_SOCKET`), otherwise the kernel (`adjtimex(2)`); `AVSYNC_PTP_STATUS_URL` is an explicit override. `/statusz`, `/api/v1/status`, the UI and metrics identify `sync_source` (`ptp4l`, `kernel` or `url`). See [clock reference and deployment requirements](docs/clock-reference.md) for socket permissions, PTP error reporting and NTP TAI setup. Latency and the index shifts are reported only when that clock is locked and the QR names the event. `video_content_vs_grain_ms` and `audio_content_vs_grain_ms` compare that content time with the MXL grain timestamp even when the clock is unknown. This repo does not implement ST 2110, SRT, or SIP; those flows come from the sibling gateways. File-mode H.264 and G.711 are test aids. A real phone still needs a device. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
 
@@ -50,4 +61,24 @@ AVSYNC_ROLE=generator AVSYNC_STATE_DIR=/tmp/avsync ./build/mxl-avsync serve
 
 MIT (`LICENSE`).
 
+## Ready-to-play test clips
+
+See [testfiles/README.md](testfiles/README.md) for eight verified AV-sync clips in MP4, MOV and MKV (720p to 4K), known offsets, manifests, analysis reports and regeneration commands.
+
 Signal and Settings forms keep local drafts across status/JPEG polling, with an Unsaved changes indicator and Apply/Discard. Only successful Apply or explicit Discard adopts the server settings; failed saves and newer edits made during a save are retained.
+
+
+## Audio timecode and white flash
+
+The default signal carries independently decodable audio timecode at 1200 baud.
+At zero offset, each white flash starts with the chirp. Choose 1 or 2 chirps/s
+in Signal; 600 baud and legacy compatibility are also available. See
+[the format, phone feedback, audio-only latency and tests](docs/audio-timecode.md).
+
+## Test-picture labels
+
+The Signal form's **Title** is the large caption below the sync scale;
+**Subtitle** is smaller. For existing deployments the saved `source` field and
+`AVSYNC_SOURCE` keep their names and values. The obsolete header `title` /
+`AVSYNC_TITLE` remains accepted by the legacy API but is not a second title
+control for AVS2. Both container and iPhone show the centered AVsync brand.

@@ -31,6 +31,12 @@ nlohmann::json measurement_to_json(const Measurement& m)
         {"reference", {{"type", m.reference.type}, {"domain", m.reference.domain}, {"sync_state", m.reference.sync_state},
                           {"accuracy_ns", m.reference.accuracy}}},
     };
+    if (m.latency_estimated) {
+        j["latency_estimated"] = true;
+        j["source_reference"] = "phone-utc-scheduled-output";
+        j["latency_uncertainty_status"] = "unknown";
+    }
+    if (m.audio_timecode) j["audio_timecode"] = {{"valid", true}, {"source_id", m.source_id}, {"send_time_ns", m.audio_send_ns}};
     if (m.have_video) {
         j["video_event_time"] = live ? nlohmann::json(m.video_tai_ns) : nlohmann::json(m.video_time_ms);
     }

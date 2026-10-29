@@ -5,3 +5,21 @@ build/
 *.mkv
 *.manifest.json
 .cache/
+
+# Generated Expo dependencies and native projects
+mobile-app/node_modules/
+mobile-app/.expo/
+mobile-app/ios/
+mobile-app/android/
+
+# Curated, reproducible AV-sync fixtures
+!/testfiles/*.mp4
+!/testfiles/*.mov
+!/testfiles/*.mkv
+!/testfiles/*.manifest.json
+
+# EAS local signing material (remote credentials are managed by EAS)
+mobile-app/credentials.json
+mobile-app/*.p8
+mobile-app/*.p12
+mobile-app/*.mobileprovision

@@ -293,7 +293,7 @@ Output:
 ```
 [doctest] doctest version is "2.4.11"
 [doctest] run with "--help" for options
-===============================================================================
+========================================================================
 [doctest] test cases:  2 |  2 passed | 0 failed | 0 skipped
 [doctest] assertions: 31 | 31 passed | 0 failed |
 [doctest] Status: SUCCESS!
@@ -465,6 +465,100 @@ That is seq, `video_content_vs_grain_ms`, `audio_content_vs_grain_ms`, `content_
 
 Left on purpose: the AMWA suite (no Docker, and no mDNS registry on this host), a separate interlaced file mux (the plan does not ask for one), stage 4 (per-channel sequences, programme lip-sync, IS-07), the phone on a device, the LED/piezo rig, and the ST 2110 hour run.
 
+## Mac iPhone development setup (2026-10-25)
+
+Added an Expo development client and device/LAN start scripts on SDK 52, with its compatible React Native patch. Replaced the unsupported Unicode settings glyph with Ionicons. The existing Swift capture source is an unregistered scaffold: callbacks discard samples, there is no podspec/Expo module registration or C++ PhoneSession bridge, and the JS module is a report store only. A development build currently tests the UI and Expo camera/audio APIs; it does not validate synchronized native measurement. Native bridging and real-device calibration remain pending.
+
+## Recorded iPhone workflow (2026-10-25)
+
+Replaces the nonfunctional mobile placeholder: calibration had used JS timer frames and audio metering, and measurement had no capture/analysis call. The local `Avsync` Expo module now links the repository C++ detector sources through CocoaPods. AVFoundation decodes actual camera movies, preserving audio/video media PTS, applying video display orientation, and passing luma/PCM into PhoneSession. Calibration locates a sharp sound and extracts real frames around it for manual contact selection. Replay uses the actual movie. Recording, analysis, errors, result export, persistent calibration/results and OS/90-day expiry are wired into the UI.
+
+Explicit deviations from §12: a bounded 5-second calibration take and 8-second test take replace live detection/automatic stop on a transient; capture uses Expo camera movie recording and media PTS, not the specified raw host-clock capture; frame rate is observed rather than forced to at least 60 fps; rolling-shutter readout is not corrected; test event rate is currently fixed at 2/s. Manual clap/tap calibration is an approximate reference, not a validated replacement for the LED/piezo rig. Uncertainty remains unknown and no validated grade or absolute latency is shown. Android analysis remains unsupported. These limits are shown in the app/README. The prior statement that no C++ bridge or Expo registration exists is superseded by this implementation; the old raw capture scaffold remains excluded from the build.
+
+Validation: 17 JS tests; native iOS decoder test measured +34.999975 ms on a deterministic +35 ms encoded video, five matched events/150 frames, actual calibration JPEGs and waveform, and explicit failures for absent audio/markers. Real-device optical/acoustic accuracy is still unvalidated.
+
+## Native live capture and original UI (2026-10-26)
+
+User requested restoration of the original camera-first UI, continuous analysis, maximum camera FPS, post-transient calibration frames and measurement with zero correction when uncalibrated. The native Expo view now uses AVCaptureVideoDataOutput and AVCaptureAudioDataOutput in one session, with PCM16/32 conversion and shared sample timestamps. It selects the maximum supported frame-rate range, sets activeFormat and both frame durations, and reports configured versus processed FPS. C++ analysis publishes roughly once per second from bounded windows. This supersedes the movie-only measurement workflow; the file analyzer remains for debugging/tests. The use of AVCaptureAudioDataOutput rather than AVAudioEngine is an explicit implementation choice to keep both tracks in one capture-session clock.
+
+Calibration uses the same raw capture path, retaining about 750 ms before a transient and waiting for at least 700 ms of both tracks after it. It rejects takes without frames on both sides; no fixed 100-frame truncation remains. Review preserves frame stepping, sound replay and before/after counts. Missing/expired calibration means 0 ms correction; legacy movie-path calibrations are invalidated by capture-path version. The original dark preview, guide, result, tabs and settings layout is restored.
+
+A user camera recording reproduced the corner search selecting QR/text/code squares instead of four image corners and expanding corner boxes into nearby text. The locator now uses local contrast, spatial corner constellations and geometry/reference-strip ranking, without that expansion. Phone rectification uses fixed 640×360 geometry to avoid integer strip-width drift. A cached pose reduces repeated searches. The previously unrecognized, non-occluded user recording now produces three matched events; this demonstrates recognition, not independently validated offset accuracy. The separate recording containing a browser context-menu obstruction is not a valid full-picture validation case.
+
+Validation: 17 JS tests including explicit zero correction without calibration; four existing C++ locator/phone/calibration tests (33 assertions); native encoded-signal, orientation and missing-track tests, live PCM16 analysis, post-transient buffering and 240 fps frame-count regression. Native iPhone build succeeded. Physical capture accuracy/rolling-shutter validation remains open; processed FPS may be lower than the configured sensor rate and is shown separately. Android remains unsupported.
+
+## Reject inconsistent phone measurements (2026-10-26)
+
+User-reported large fluctuations were confirmed from the app's saved results: two pairs in each result, with within-result spreads of about 493 ms and 1019 ms; configured capture was 240 fps and processed capture about 222–224 fps. The saved calibration was only about 7.1 ms, so calibration magnitude cannot explain those spreads. The old cache did not retain individual live event details, so it cannot conclusively separate all optical/pairing issues from real source-path variation.
+
+A concrete acceptance bug was reproduced: parity-valid wrong event codes and repeated block flicker could become extra video events. Phone-specific tracking now requires marker phase/event-number agreement, three-frame confirmation while retaining the first frame timestamp, sequential IDs and plausible event timing. A ring trim keeps six seconds of samples while retaining sequence/pose lock, replacing periodic destructive resets. Publishing requires at least three consistent pairs with spread bounded by max(50 ms, three processed-frame intervals); otherwise the UI clears the number and asks for consistent events. This spread gate is an acceptance criterion, not a capture-accuracy claim. It deliberately withholds a number if the real source offset varies too much as well.
+
+Added a bounded cache-only diagnostic history (120 reports with individual event timestamps/IDs, reasons and raw offsets), preserved across restarts, without live camera/audio recordings. Regression tests cover three-frame parity-valid sequence corruption and flicker at 240 fps, unchanged +35 ms timing, preserved state under rolling trim, and suppression of alternating +35/+235 ms offsets. The capture path and calibration format are unchanged.
+
+## Curated test files (2026-10-26)
+
+Added `testfiles/` with eight real-renderer clips: 1080p50 H.264/AAC at 0/+100/−100 ms, 1080p25 and 1080p59.94 H.264/AAC at 0 ms, 720p50 ProRes HQ/PCM24 at 0 ms, 1080p50 H.264/PCM16 MKV at +35 ms, and 2160p50 HEVC/AAC at 0 ms. Delivery MP4s use 8-bit 4:2:0, with hvc1 for HEVC. Each has an event manifest, decoded analysis report and indexed actual stream metadata/hash. All eight final files passed at least three matched events with ≤2 ms error against their named offset. All are below 95 MiB per clip.
+
+The optional `AVSYNC_BUILD_TESTFILE_TOOL` target exposes just the existing file tools, allowing generation on this Mac without compiling Linux live-service code. The Python driver uses a ProRes/PCM reference and FFmpeg delivery encoding: direct H.264/AAC generation in the current Mac FFmpeg 8.1.1 environment reproduced about −18.7 ms actual offset from a requested 0 ms clip. That direct generator path remains a known issue; final fixtures avoid it and are independently decoded/checked. Intermediate container checks are explicitly superseded after transcode rather than falsely reported as final checks. Pixel-format and timestamp compatibility are documented in the testfiles README.
+
+
+## Phone failure-stage diagnostics (2026-10-26)
+
+The on-device cache from a failed browser test contained 120 status reports and no paired events. For 112 reports, cumulative located/valid-frame counters stayed unchanged while the UI incorrectly claimed that picture code had been found and it was listening. The cache did not contain independent video-event/audio-hit evidence, so it cannot identify the failed capture stage retrospectively or establish that Safari caused it.
+
+Diagnostic schema 2 separates recent located/decoded-frame counts, accepted buffered video events, sequence/phase/timing rejection counts, pending/locked/decoded identities, last-valid/event ages, buffered audio level/sample count, recognized chirp identities/times/correlation, and paired events. Chirp detection now also runs when no video event was accepted, making audio failure distinguishable from video failure. Status messages use current interval picture counts instead of cumulative lifetime counters. The bounded cache still stores numeric/event diagnostics only, not live audio/video recordings. Acceptance thresholds, camera FPS and calibration are unchanged. Offline regressions distinguish picture loss after earlier detection, black video with audible chirps, and valid video with silent audio. A new physical Safari/camera test is pending because the user was unavailable; do not claim this instrumentation fixes optical recognition or validates accuracy.
+
+
+## Visual recognition and optional phone latency estimates (2026-10-26)
+
+User requested gray/orange/green audio/image pills, an actual detected-picture outline and retention of latency as an estimate despite unverified phone UTC accuracy. Audio green means a valid chirp-ID/picture-event association; the four chirp shapes do not encode full timecode. Picture green requires three-frame confirmed code with a short 150 ms visual lease at event boundaries. The native four-corner outline follows actual geometry at up to 10 Hz, handles portrait aspect-fill cropping and expires on absent frames. UI feedback expires independently if native reports stall.
+
+Explicit deviation from the original phone-only-AV requirement (§12): a separate estimated-latency panel maps capture-session timestamps to phone UTC and compares them with a matching LIVE QR's TAI event schedule. It assumes configured TAI−UTC (default 37 s), extrapolates nearby identities using the true grain-grid period, and expires references within three seconds. No capture clock, FILE mode, mismatched QR or unknown per-event sweep audio time suppresses the corresponding estimate. Device/source clock accuracy, rolling-shutter/capture delay and physical accuracy remain unknown. AV calibration is differential and does not correct these per-path estimates. Negative values are retained to expose clock errors.
+
+Vision QR decoding runs separately at most once per second. A user-triggered, three-request HTTPS clock sanity check via worldtime.timezone.io reports API−phone difference bounds and RTT, with expiry/cache/jump/failure checks. This is not PTP/NTP synchronization or an independent accuracy bound; the app neither sets UTC nor silently adjusts estimates. The replacement endpoint was tested after worldtimeapi.org failed. The same native build is required for geometry, Vision and clock mapping; Metro alone only updates UI.
+
+
+## Corrected audio-timecode requirement and text coverage (2026-10-26)
+
+The user explicitly requires full send-time information in audio itself, decodable without image/QR and through a telephone/G.711 path. Four repeating chirp IDs and QR-derived audio latency are insufficient. The earlier interpretation of audio green as a picture-event association is superseded: legacy chirps remain orange; green is reserved for an independently decoded, CRC-validated audio timecode. An experimental native encoder/decoder and offline comparison now exist under `tests/audio-timecode/`; the wire format is still a candidate and is not connected to the production generator or phone app. The current QR-assisted latency panel is a legacy fallback and does not fulfill audio-only measurement.
+
+Candidate direction (proposal, not a finalized wire format): a short known chirp defines the timing anchor; an attached voice-band data burst carries source/session identity, event identity, actual audio-send TAI timestamp, video-relative send offset/time reference, version and integrity/error-correction data. Decoder completion time must not replace the stored arrival time of the chirp anchor. Telephone FSK in the V.23 frequency/rate family is a starting candidate, with a slower fragmented profile if real-phone testing requires it. G.711 A/mu-law at 8 kHz, telephone filtering, AGC, noise, resampling/drift, packet loss/PLC and speaker/microphone echo must be tested; codec-table success alone does not establish call-path compatibility. Audio-only latency still has separate receiver-clock uncertainty.
+
+The reported pixelated generator text was traced to draw_text discarding Blend2D's A8 antialiased mask via a coverage threshold, then writing fully opaque 10-bit pixels. It now composites all nonzero coverage into the existing 10-bit luma. Layout/font sizes and machine-readable marker/strip/QR rendering are unchanged. New text tests require intermediate edge shades, opaque strokes, background preservation, both light/dark text and safe clipping/padding. Result-picture contrast tests now check strong foreground ink rather than requiring antialiased fringes to have full contrast.
+
+
+## Audio-timecode candidate comparison (2026-10-26)
+
+User authorized tests of both rates and prefers **1200 baud**. `tests/audio-timecode/` now provides a dependency-free C++20 encoder/blind decoder, independent wire-vector checks and a Python/FFmpeg driver. A 30-ms chirp retains its centre as the timing anchor; a 10-ms guard precedes a 476-symbol FSK telegram at 1300/2100 Hz. The 25-byte candidate carries version/flags, source/session ID, 32-bit event sequence, 64-bit audio-send TAI ns, signed source audio/video offset ns and CRC-32, with terminated K7/rate-1/2 coding, interleaving and soft Viterbi decoding. This is a custom candidate, not a conformant V.23 modem. Duration is 436.667 ms at 1200 baud and 833.333 ms at 600 baud; the latter was compared at 1 event/s, not silently overlapped at 2/s. Fragmentation is not implemented.
+
+After a separate exploratory run, frozen parameters were tested with 128 packets/condition and a new seed. All 25 non-extreme-noise conditions decoded every complete packet in 1200/600 1-Hz streams and the additional 1200 2-Hz stream. This includes actual 8-kHz G.711 A/µ-law, telephone filtering, AGC, Opus, resampling/drift, noise through 6 dB, echo and 40-ms data erasures. At 0 dB, 1200 1-Hz decoded 65/128 and 1200 2-Hz 62/128, versus 600 1-Hz 128/128; at −6 dB both rates failed. No wrong payload or negative-control timecode was accepted. All full 64-bit timestamps and identities were checked without supplying image/manifest information to the decoder. Full row counts, sample hashes and limitations are in `tests/audio-timecode/results-2026-10-26.json` and its results note. The actual call/acoustic path, streaming implementation and live generator/iPhone integration remain open; this benchmark does not establish physical clock/capture accuracy.
+
+Live integration must also handle telegram overlap when source offsets change, and replace the legacy ±2-period association assumption with full identity/timestamp matching and explicit buffering limits. The offline test checks source offset fields as data; it does not prove video pairing or variable-offset scheduling.
+
+
+## Audio-onset reference and event-rate selection (2026-10-27)
+
+User requests the white visual flash to align with the chirp start, and a choice
+of 1 or 2 chirps/s. The audio-timecode experiment now defaults to an onset
+reference, explicitly signalled by CRC-protected header 0x23; historical 0x21
+packets retain centre semantics. Matched-filter synthesis/detection remains
+centre-based internally; reported arrival and transmitted timestamp refer to
+the same declared point. This is an experimental deviation from specification
+§4/§6's legacy centre reference, not a silent reinterpretation of old files.
+The probe accepts --event-rate 1|2 and validates contradictory periods/overlap.
+1200 baud supports both; the full 600-baud packet supports only 1/s.
+
+Production generator AVSYNC_EVENT_RATE already supports these rates. Live
+generator/phone integration of the new audio format, a white pulse on each event
+instead of the legacy alternating marker, and compact 17/15-byte encoding remain
+pending. No released signal or phone capture behaviour is changed here.
+
+Validation: 128-packet start-reference channel matrix (93 rows, no hard-gate
+violations or wrong payloads); 8-packet historical-centre matrix; dedicated
+1/2-Hz A/µ-law +35-ms timing/reference/mixed-stream/invalid-option regression.
+See tests/audio-timecode/RESULTS-2026-10-27.md for stress failures and remaining
+physical/video/live-integration limits.
+
 ## Route-independent readiness (1.0.1 unreleased)
 
 Supersedes the original §16.4 media-dependent readiness contract: an analyzer is deployment-ready before routing and remains ready on unroute or signal loss. Process/HTTP health and configured Query API registration are still required. The generator also waits for creation of both output flows. Media readiness and input state remain diagnostics, now also included together in `/statusz`. Heartbeat reads/writes share the runtime mutex.
@@ -486,6 +580,267 @@ The unchanged Stage-2 tile check failed on a generated 720p50 ProRes signal scal
 A full-renderer QR/text unit regression checks the intended (80,40), 640×360 pose, all four corners, three sequences and both marker states: 54 assertions pass; the original locator fails 51 of those assertions. Existing fiducial and phone cases remain green, and the unchanged full Stage-2 integration passes. No unpublished mobile implementation or private footage was imported into this release.
 
 
+## Complete onset/timecode integration (2026-10-27)
+
+Supersedes the prior prototype-only status. Production generator, CLI/file
+analyzer, live analyzer and iOS native bridge now share core/src/timecode.cpp.
+The compact v3 packet carries source ID, 48-bit Q32.16 common event time, a
+signed 1/16-ms source offset (omitted for protected zero), and CRC-32; K7 FEC and
+interleaving remain. Full 1200-baud duration is 330/303.333 ms, including prefix.
+The transmitted and received references are chirp onset. Old four-ID signals
+and experimental centre packets retain compatibility; no silent 15-ms shift.
+The main Signal draft form exposes 1/2 Hz and 1200/600/legacy. Invalid profiles
+and overlapping FILE sweeps are rejected; live collisions are counted/skipped.
+The marker now flashes white on each coded event, with matching QR/tracker
+metadata and exact integer source times. Coded identity pairing replaces the
+legacy repeating-ID time window. Packet completion does not replace chirp
+arrival. Audio-only file analysis and phone estimated latency need no image/QR.
+The phone's 1-Hz stability window was extended while retaining current-picture
+freshness gates. Physical calls, optical/acoustic capture accuracy and Android
+capture remain outside synthetic validation. No new release is implied by this
+branch. Wire contract and test commands are in docs/audio-timecode.md.
+
+
+Local validation completed: Core/picture CTest, 30 JS tests, full generated-file
+integration (1/2 Hz, 59.94, 600/legacy, G.711 +3217 ms), 128-packet production
+channel matrix and the full native iOS simulator suite. The simulator/native
+suite exposed and verified a shared compatible Vision QR-reader fallback for
+camera and file analysis. Results and hardware limits are recorded in
+tests/audio-timecode/RESULTS-2026-10-27-COMPACT.md. Linux/live/NMOS testing is
+delegated to the user's peer host on the pushed branch.
+
+Follow-up regression checks preserved both picture-search paths: the merge's
+digital-only refinement rejected a previously readable local camera take. The
+established camera search is now retained as a fallback after digital geometry/
+strip validation. Digital CTest, exposure/softening and native rendered-signal
+tests pass; local legacy-camera recognition is restored without claiming offset
+accuracy. No private footage or raw frame is included. The native publication
+window now uses the later received side, retaining 12 seconds for the identity
+pairer's bounded delay window. A +3217-ms AV / +3337-ms estimated audio-latency
+case passes through the actual native report, not merely the core pairer.
+
+
+## Linux integration feedback: explicit Matroska variant (2026-10-27)
+
+The full CLI correctly rejects Matroska's 1-ms timestamp scale by default
+(specification §9.3), while the portable testfile wrapper opts into container
+shifts. The timecode integration test and example now explicitly request
+`--allow-container-shift` for their intentional MKV/H.264 variant. No container
+checks, codec gates, analysis tolerances or strict defaults were changed.
+
+
+## Linux integration feedback: coded MXL index diagnostics (2026-10-27)
+
+The coded MXL audio path now supplies `have_grain_time` and `grain_tai_ns`,
+just as the legacy path does. The detected chirp onset on the 48-kHz input
+timeline is rounded to its nearest sample index relative to the current block,
+then converted through the MXL SDK's index-to-timestamp helper. This restores
+content-versus-grain diagnostics without changing sub-sample AV measurements,
+the stored chirp arrival mapping or the packet-completion time. File/phone
+observations still do not claim MXL grain timestamps. The unchanged closed-loop
+`tests/integration/live.sh` exercises the missing-field regression.
+
+
+## Linux integration feedback: QR metadata for located file tiles (2026-10-27)
+
+The unchanged Stage-2 scaled/padded-tile regression exposed a coded-signal
+pairing failure: QR lookup used the full input frame's geometry, leaving
+located video observations unidentified while coded audio had a protected
+identity. File analysis now also attempts QR lookup on the locator's rectified
+canonical picture before configuring its marker tracker. This restores source,
+profile and event-rate adoption without changing locator geometry/scoring or
+inventing video identity from the manifest.
+
+
+## Linux integration feedback: preserve QR pixels in padded canvases (2026-10-27)
+
+A standalone rendered v3 reproduction decoded the original 1280x720 QR and
+the exact 640x360 tile crop, but not a second bilinear rectification whose
+pose differed by two pixels. QR lookup now retains its fast standard geometry
+ROI and falls back to scanning the original full frame with ZXing when that
+ROI fails. This recovers tile metadata before rectification and avoids
+relaxing locator tolerances or fabrication from audio/manifest identity.
+The real ProRes/downscaled recording also required ZXing's global-histogram
+binarizer as a final retry on the same raw pixels; its default local binarizer
+could not read the roughly 1.5-pixel modules. QR error correction/parsing and
+all measurement gates remain unchanged. The unchanged Stage-2 encoded
+scaling/padding test is the integration regression, supplemented by a rendered
+v3 full-canvas QR unit test that verifies exact payload/source/rate recovery.
+
+## Signal-change reacquisition and CI dependency (2026-10-27)
+
+An explicit QR source/mode/profile/rate change now clears the old native/live
+audio decoder and identity windows. This prevents previously decoded timecodes
+from suppressing legacy pairing until their 20-second cache expires. A core
+regression decodes a compact packet, switches to legacy and verifies immediate
+fresh-buffer legacy chirp acquisition. QR updates naming later events do not
+clear state. The new external-FFmpeg CI regression also installs the ffmpeg
+executable explicitly; the pre-existing packages supplied libraries only.
+
+
+## Native phone source and optical live input (2026-10-27)
+
+User authorizes an iPhone source filmed into the server analyzer. This extends
+§12 beyond capture and supersedes §3's prohibition only for explicitly marked
+phone-clock **estimates**, not verified latency. The portable PhoneGeneratorPlan
+shares the compact modem and QR event timeline. Native playback queues audio
+on AV host time with reported output presentation latency and uses CADisplayLink
+target timestamps for a 60-Hz raster. UI selects 1/2 Hz and preserves Measure/
+Results. No transport or remote IS-05 control is introduced.
+
+A protected 0x08 estimated-source flag and QR clk=phone-utc are propagated into
+results/UI/widgets/result pictures, even with a locked receiver. Existing normal
+packets remain byte-compatible; old decoders reject the new phone flag safely.
+Source/capture clock and physical output timing remain unvalidated. Capture
+calibration is never reused as source-output calibration.
+
+The live analyzer gains a bounded, cached fiducial/rectification fallback. It
+keeps original pixels for QR, adopts source strip rate while retaining received
+MXL times, and publishes no video event from an invalid/lost pose. Optical AV
+uncertainty is unknown. See docs/phone-generator.md for lifecycle, test commands
+and hardware limits. Validation results are recorded after execution.
+
+
+Local phone-source validation: Core/Picture CTest and all 30 JS tests pass;
+the complete existing native capture/calibration regression suite stays green.
+The actual UIKit generator renderer/QR and every 60-Hz strip/flash phase pass
+at 1/2 Hz; its audio independently decodes with the protected estimated flag,
+including G.711 A/µ-law at 8 kHz. Full simulator and generic iPhone builds pass.
+Simulator UI inspection verified both rates, Stop, Close and restart, and
+backgrounding stops output until explicitly restarted. It exposed a delayed
+dismissal-completion callback that left JS busy; cleanup now resolves before
+the animation ends, verified by a second start. Physical output/capture timing
+and a new physical-device installation remain unverified.
+
+## Linux optical fixture feedback (2026-10-27)
+
+A real native MXL fixture carries PhoneGeneratorPlan's 720p60 source as a
+960x540 tile in a 1920x1080/50 camera raster. Its QR, strip and marker were
+readable, but the 960-pixel search quantized outer edges and left a few
+pixels of margin; strict canonical geometry rejected it. PictureReader now
+tries bounded local quad insets/outsets on original pixels only after the
+initial pose fails. At most eight original-pixel steps per direction are
+tried, scaled to the search resolution. Existing geometry/parity/state gates
+are unchanged, and an initially valid strip identity must be preserved.
+A rendered phone-QR regression at 1920x1080 and 3840x2160 covers initial/cached/search reads and loss.
+The normal direct path and existing valid poses retain their fast path.
+
+## Reproducible native phone camera regression (2026-10-27)
+
+The independent Linux validation publisher/harness is now versioned as
+`tests/tools/phone_fixture.cpp` and `tests/integration/phone_generator.py`.
+CMake builds `avsync-phone-fixture` only with MXL. The fixture uses the shared
+PhoneGeneratorPlan and renderer, current TAI, a 720p60 source strip in a
+960x540 tile inside 1080p50, compact estimated-source audio, +35-ms planned AV
+and a three-second picture loss with continuous audio. The harness verifies
+1/2 Hz, correct protected source identity, explicit estimated latency and
+loss/reacquisition, including rejection of invalid/stale video observations.
+Random IDs, separate temporary domains, a free port and finally-based cleanup
+keep existing routes/services untouched. It preserves the validated camera-
+frame timing tolerance and gates; physical phone/camera accuracy is not inferred.
+The existing Linux/MXL live CI job invokes this regression after the normal
+live test; portable builds do not acquire an MXL fixture dependency.
+
+
+Executed Linux camera fixture: 1/2-Hz runs recovered 18/37 valid pairs, all
++34.992 ms for the planned +35 ms, no video observations inside the image
+lapse, then successful reacquisition. Every phone result retained estimated
+source/latency labels and unknown uncertainty. Three CTest suites and the
+normal direct MXL integration passed. These are synthetic SDK/software
+results, not physical camera/phone timing calibration. The signed iPhone
+build also passes macOS codesign verification with access to trust services;
+installation awaits an available physical device.
+
+
+## EAS Cloud / TestFlight delivery (2026-10-28)
+
+The user authorizes a cloud-built, independently launchable iPhone app in
+TestFlight, with eventual App Store distribution. The native app keeps its
+existing bundle identifier and tested old React Native architecture explicitly.
+EAS production uses store distribution, Release, bundled JS (no development
+client or Metro dependency), remote incremented iOS build numbers, and a pinned
+Xcode 26.2 image to meet the current Apple SDK upload requirement. SDK 52 and
+existing native capture/generator code are retained. The Git-root EAS archive
+keeps shared C++ sources above mobile-app while excluding generated projects,
+test media, build outputs and local signing material. EAS manages remote
+signing credentials; no keys/passwords belong in the public repo. Only exempt
+OS-provided HTTPS encryption is used by the app, so the non-exempt-encryption
+flag is false. TestFlight upload is separate from a public App Store review.
+
+
+EAS project f55d25d9-cd44-4dc3-b4e4-50b6111a516c and App Store Connect record
+6827797077 are linked. Store signing/profile and an App Manager-role API key
+are managed remotely; only non-secret project/app identifiers are versioned.
+The first cloud build is 2.0.0 (1). Production Hermes bundle export and clean
+CNG prebuild pass; Expo Doctor's sole remaining warning is the existing
+unmaintained expo-av calibration-replay dependency (17/18 pass), not a
+version/native compatibility failure. TestFlight delivery status is tracked
+separately from source configuration and from public App Store review.
+
+
+The first EAS production build 2.0.0 (1) and its submission both completed
+successfully. The downloaded store artifact was inspected: bundle ID/version
+match, iPhoneOS 26.2 / Xcode 26.2, minimum iOS 15.1, embedded main.jsbundle,
+compiled native analyzer/generator and privacy manifests are present. No Metro
+connection is required for this Release artifact. Successful submission alone
+does not establish Apple's final TestFlight processing/installation state.
+
+
+## Mobile/server generator appearance parity (2026-10-28)
+
+User reports the first phone source rendered only a grayscale subset and asks
+for the server pattern with bars/visual sync plus editable name/subtitle/image.
+Rendering is now shared in generator/picture_render.cpp, separated from ZXing
+QR decoding in picture.cpp. Both targets use the same EG1 bars, fiducials,
+marker, strip, QR, source-ident block and sync-scale layout. iOS bundles the
+same DejaVu font and app mark, using CoreText A8 text coverage instead of
+linking desktop Blend2D/FFmpeg/ZXing into the phone. Sync math moves into a
+portable source; native CALayers animate the common square and timing strip
+without rewriting static imagery or using JS for timing. The server's default
+render is unchanged; only native static plates suppress the moving square.
+
+Generate has persisted name/subtitle and a system PHPicker image selection.
+Only the selected image is copied to private Application Support and bounded
+to 512 px; stable image UUIDs survive container-path changes. State replacement
+removes only the previous app-owned copy; the Photos original is untouched.
+Invalid IDs/remote paths cannot be passed to the renderer. Source labels/images
+do not alter codec/source/event identity or capture/output calibration. Existing
+2-argument native generate remains supported; new clients use generateStyled.
+
+
+## Platform-aware icon sizing (2026-10-28)
+
+Before the next TestFlight build, user requests an enlarged SVG-derived mark
+without the old outer tile/padding. assets/app-icon.svg now makes the former
+inner panel the full canvas, enlarging artwork by 24.27%. A pinned generation
+script derives all raster assets: opaque square/frame-free iOS launcher/touch
+icons; blue-framed content marks for web, test picture and 44-pt mobile header;
+transparent safe-zone Android foreground plus monochrome and legacy variants.
+Mask/corner/system highlight belongs to iOS or the Android launcher. The SVG
+and generated platform views remain separate from a private user's selected
+source-ident photo. The script checks iOS opacity and Android safe-circle
+bounds. Android capture remains unsupported; only icon packaging is prepared.
+
+### Mobile name and settings (2026-10-28)
+
+The user requested AVsync as the mobile display name (no MXL transport is used on the phone). Keep the existing bundle identifier, Expo slug and EAS project so installed copies update normally. The header and mobile test picture use AVsync. Settings show the correction actually applied, its saved date and whether a stored correction is inactive; invalid/missing calibration still uses 0 ms. A separate dismissible backdrop closes the scrollable settings sheet without swallowing its controls; Android Back dismisses the same modal.
+
+### Public project site and privacy policy (2026-10-28)
+
+User requests GitHub Pages to introduce the AVsync mobile app and MXL containers,
+plus a public privacy policy. Buildless site/ publishes independently on gh-pages;
+no app/server merge, tag or release is implied. Marketing distinguishes TestFlight
+from public App Store availability, Android plans from implemented iOS capture,
+and estimated phone latency from clock-referenced container latency. The policy
+records actual temporary calibration files (not deleted by clearing correction),
+local state/images/diagnostics, optional HTTPS clock requests, explicit sharing,
+Apple/TestFlight diagnostics and GitHub Pages security logs. User selected GitHub
+profile plus repository support as public contact.
+The mobile Settings sheet links to the public privacy policy and its support
+contacts. This JavaScript change takes effect in the next distributed build;
+previously delivered 2.0.0 (2) remains unchanged.
+
+
 ## Container web UI corrections (2026-10-29)
 
 User reports an always-broken generator preview, disabled Apply after choosing
@@ -497,3 +852,224 @@ broken image behind a placeholder while polling can recover it. Normal generator
 activity is a green header pill, muted/stopped neutral; red remains for failures.
 This explicitly updates the old red-banner requirement in specification §11.
 No codec, media scheduling, API or route changes.
+
+
+## Mobile result retention and outline stability (2026-10-29)
+
+User reports a vanishing Save target and flashing outline while filming WebRTC.
+Source inspection found unconditional JS clearing for status reports and a 1.6-s
+report timeout, plus immediate replacement of outline geometry by a single miss.
+The UI now retains the last native-accepted sample with explicit live/held/paused
+state, pair age/count/spread, and preserved acquisition timestamp on save/export.
+Duplicate reports of one pair do not refresh its age. Validated audio/QR identity
+changes and explicit clear/calibration changes invalidate retained readings.
+Latency can show the same paired snapshot when fresh estimates are unavailable,
+labelled historical. Signal pills still describe current capture.
+
+The native presentation tracker requires two nearby observations to acquire a
+quad, lightly smooths corner motion, rejects a one-off large jump and holds a
+missed quad for at most 600 ms (dim amber after 180 ms). It resets on capture stop
+or calibration/reset; green has a short independent confirmation lease. This
+changes neither PhoneSession, pairing thresholds, capture FPS nor event times.
+The supplied diagnostic has real intermittent pairing and widely varying event
+offsets; UI stability is not proof those timing variations have been corrected.
+PR #34 changes only web/docs/tests, so its CI rebuild has no intentional media
+algorithm change. The retained 815c55f staging binary additionally has the newer
+compact audio protocol, unlike released/main legacy media. No server rollout is
+part of this mobile fix.
+
+
+## Paired phone video latency and channel diagnostics (2026-10-29)
+
+A new user sample contained accepted video/audio pairs and a fresh CRC audio
+packet, but only audio latency. Source inspection found the video estimate
+unnecessarily gated on a QR read within three seconds; publishing audio then
+replaced the global reason with estimated, hiding a missing video reference.
+This is a reproducible omission path, not proof that QR expiry alone caused
+all reported physical recognition/timing failures.
+
+The phone may now recover video latency from a fresh accepted timecoded pair
+and that exact CRC packet's common video-send TAI timestamp. Source ID, audio
+send time, audio reception time and per-event source offset must match; stale,
+future, FILE and invalid pairs are rejected. This never subtracts a calibrated
+median from an unrelated audio estimate. The existing fresh QR path remains.
+Per-channel state and video-source fields plus QR age/sequence diagnostics make
+missing video references visible even when independent audio latency succeeds.
+This extends the user-authorized estimated phone latency, with unknown clock
+and capture accuracy, without changing server reference rules or phone pairing,
+optical detection, camera FPS, calibration or acceptance thresholds. QR is still
+needed to establish picture identity and its limited sequence projection.
+A connected physical capture is required to investigate the remaining jitter.
+
+Validation: all 32 JS unit tests, the actual React App Save/retention regression,
+and the full native AVFoundation suite pass. New native 1/2-Hz tests with a
+QR observed only at t=0 retain +120-ms video/+155-ms audio estimates after
+QR expiry. Audio-only input still never invents video latency. Unit cases
+reject wrong source/send/reception/offset identities, invalid and stale/future
+pairs and FILE mode, and show that AV calibration does not affect latency.
+These are deterministic software tests; no physical phone capture was made.
+
+## Opt-in iPhone raw diagnostics (2026-10-29)
+
+For the user-authorized connected-device investigation, a Debug-only recorder
+can be explicitly enabled at process launch. Production Release/TestFlight
+builds exclude it. It records at most five seconds/512 MiB of the same luma and
+PCM buffers analyzed by PhoneSession, preserving capture timestamps, QR arrival
+ordering, clock anchors and accepted video-event trace. A bounded asynchronous
+writer limits memory; debug drops are counted separately from analysis input.
+Raw files remain private local cache data and must not be committed/uploaded.
+The standalone replay helper exercises PhoneSession with the stored inputs and
+checks accepted sequences/times, with a separate per-frame marker trace. No
+optical algorithm, capture format or acceptance gate changes in this addition.
+
+## Sparse timing-field disturbance (2026-10-29)
+
+The connected iPhone supplied a five-second private raw take with 595 frames,
+zero debug drops and no QR observation during that initial take. Exact replay
+reproduced zero video events. Of 594 located frames, 448 had a valid Gray strip
+but all had Invalid marker phase. The central field was over 98% consistently
+black or white in most frames; a small opposite-luminance disturbance made the
+full min/max span exceed 400. The original span rule therefore invalidated an
+otherwise readable test picture. Setup obstructions (paused playback, player
+controls and a desktop notification) were separately observed in earlier takes;
+those are not evidence that the original long-run jitter is entirely a setup
+problem.
+
+Only the timing-field uniformity span now uses the 5th-to-95th percentile, with
+the same mean, threshold and 400-level rejection gate. Gray-strip parity,
+reference contrast/noise and three-frame/sequence/pairing rules are unchanged.
+This tolerates sparse bright/dark cursor-like defects while rejecting a mixed
+transition covering a material part of the timing field. A real device timing
+accuracy claim still requires independent validation. Raw footage stays local.
+
+
+## Compact phone optical onset retention (2026-10-29)
+
+The same private take exposes a second timing bug after marker recovery: the
+first clear optical white frame precedes the accepted barcode timestamp by
+0–71 ms. Dating the pulse from the first parity-valid code therefore makes
+otherwise regular audio/video pairs jump. Compact PhoneSession now observes
+black/white phase independently of strip parity, retains the first clear white
+frame after black and uses it only after the new sequence passes the existing
+three-frame checks. Geometry must remain continuous, the phase observation gap
+must be at most 50 ms and code confirmation within 120 ms of the onset. Missing
+phase continuity reanchors without inventing a late onset. Legacy timing and pairing checks are preserved; compact sequence-gap
+validation is described below. First compact QR
+acquisition clears speculative legacy sequence lock while retaining already
+received audio; actual source changes still clear audio as before.
+
+A deterministic test corrupts parity for the first 60 ms of each flash: accepted
+compact events retain their original optical timestamps. A white-only sequence
+with no observed black/white edge cannot manufacture events. Source-acquisition
+and sparse cursor regressions pass. Offline replay of the 595-frame take with
+an explicitly supplied matching source reference produces ten video events and
+nine pairs; the nine-pair range shrinks from about 76 ms with marker recovery
+alone to about 14 ms after onset retention. The reference was projected from a
+real same-source QR and checked against the decoded common audio timestamp;
+no QR arrived during that initial raw window. This controlled replay is not an
+independent absolute-offset/latency validation. Raw files are not in the repo.
+
+A subsequent live trace showed a parity-valid wrong code cluster acquiring
+sequence lock outside the QR's permitted ±60-event identity window. Such
+observations were already excluded from timecoded pairing, but could poison
+tracking first. The same existing identify_video window is now checked before
+pending/confirmed/locked state is updated. This does not widen the window;
+a stale initial QR still requires reacquisition for compact picture identity.
+A regression verifies that an out-of-window code cannot acquire lock and that
+the next matching code can. Compact sequence gaps require the separate temporal validation below.
+
+Validation: core/picture CTest, 32 JS tests, actual App retention/Save callbacks,
+raw diagnostic opt-in/bounds/exact replay and full native AVFoundation suite
+pass. Signed local iPhone builds were installed. A later preservation check found empty saved state after development/copy operations; the exact reset point was not isolated. Available exported calibration/results were recovered through the native storage API and verified after relaunch, with a private external backup. Device preferences and private assets must be backed up before future mutations. In
+a 45-report physical follow-up before the final lock guard, 31 reports were
+accepted readings and 35 exposed video latency, including four using the new
+paired-audio reference while QR was expired. Recognition loss and wrong-code
+lock were still observed in that sample; the final guard addresses the latter,
+not a claim of uninterrupted capture or calibrated absolute timing. No new
+TestFlight/cloud build is part of this diagnostic task.
+
+
+The final live follow-up exposed repeated losses after whole missed pulses:
+requiring delta==1 forced repeated reacquisition even when the new code and
+optical interval agreed. Compact tracking now permits gaps of two to four
+sequence steps only after an established optical anchor and only when onset
+spacing agrees with delta*period within the original quarter-period tolerance.
+Sequence state advances by the actual delta; no observation is synthesized for
+missing pulses. Larger/unjustified jumps and legacy behavior remain guarded.
+Tests verify immediate recovery after a genuinely missed pulse, exact retained
+timestamps and rejection of a +2 jump arriving after only one period.
+
+
+A longer trace still contained a roughly half-second outlier after a tracking
+loss. The compact white phase now also requires a frame-position code that is
+inside the source's 100-ms flash window, rejecting previous-period black strip
+content during display scan-out. An uncertain anchor cannot publish a first
+measurement until an observed optical interval has been established. Tests
+cover the parity-valid previous-period strip and the 60-ms barcode delay.
+These guards improve correctness and may withhold a pulse when code evidence
+is incomplete; remaining live loss is not presented as fixed or validated.
+
+
+## Compact confirmation across isolated parity loss (2026-10-29)
+
+The remaining optical trace contains frequent isolated strip-parity failures.
+For compact signals only, a parity failure can retain prior agreeing votes
+while geometry and white phase remain continuous, reference contrast remains
+valid, the onset is at most 120 ms old, and both the latest-valid gap and total
+vote window are bounded. The total window is 40–120 ms according to observed
+frame spacing; different valid codes, source/phase/geometry loss and timeout
+reset votes. Three agreeing valid samples remain required. This supersedes
+strict consecutiveness only for these bounded compact parity gaps; legacy
+confirmation is unchanged. A regression invalidates every third strip and
+still recovers exact optical timestamps; contradictory jumps and missing-edge
+negative cases remain guarded. Raw replay recovered an additional genuine
+pulse without changing its optical timestamp. No change to pair-count/spread
+acceptance gates or calibration.
+
+## Shared QR + flash acquisition (2026-10-29)
+
+Maintainer-directed replacement of the custom corner/Gray-strip dependency for
+compact timecode sources: all event identity is in a large, compact AVS2 QR,
+with an adjacent equal-size flash panel. This supersedes the compact-source
+geometry/strip decisions in §§4/5/12; legacy input remains readable. File/MXL/
+iPhone generators and receivers share payload, geometry and optical tracker.
+The iOS fast path samples the original 8-bit camera plane without raster copy
+or perspective rectification. QR processing is asynchronous, carries its
+capture timestamp and corners, and can identify an already observed edge.
+
+No per-frame drop/duplicate statistics are inferred without the old strip.
+A/V identity uses full source and video-send time independently present in
+both channels. Source clock estimates and unknown capture uncertainty remain
+explicit. Existing saved readings/calibration must be backed up and verified
+before any physical-device installation; no TestFlight or release is required.
+
+Validation and deployment results are recorded in docs/qr-flash.md once run.
+
+AVS2 validation passed on macOS and Linux, actual Apple Vision/native pipelines,
+controlled iPhone-source-to-MXL capture and the existing live/NMOS suites.
+See docs/qr-flash.md for exact cases and limits. The source layout's visual sync
+scale now lies below both measurement panels. Sparse pulse-time QR evidence
+must agree with the decoded identity; its bounded 100-ms sampling window also
+handles slower QR pixel settling without moving the first optical timestamp.
+The old custom locator is only the compatibility path for legacy signals.
+A later physical iPhone test remains pending; the user chose to run it later.
+
+
+## AVsync 2.0 release layout (2026-10-29)
+
+The maintainer requested centered icon/AVsync branding in place of TEST SIGNAL
+for the compact picture, a black centerline on the moving box below the white
+scale ticks, the existing source caption labelled Title and a smaller subtitle.
+The obsolete separate header Title input is hidden; storage/API keys remain
+compatible, preserving user labels. The native generator composites a shared
+transparent tick foreground above its animated layer, rather than covering
+static ticks. This explicitly supersedes the older mandatory TEST SIGNAL
+header for AVS2; NMOS labels/descriptions and generator UI still identify tests.
+
+Release target is container 2.0.0 plus a new App 2.0.0 TestFlight build. It
+includes the previously validated independent audio timecode/AVS2 and local
+capture changes. Android capture and independent physical timing accuracy are
+not claimed. Public screenshots come from the actual native shared renderer.
+The user reported both optical tests successful and markedly steadier, with
+10–30-ms video variation on the SRT/browser path; no new accuracy validation
+or attribution to WebRTC alone follows from that observation.

@@ -22,7 +22,9 @@ struct PictureInfo {
     double av_offset_ms = 0;
     double media_ms = 0;
     double period_ms = 500;
+    bool show_sync_indicator = true; // Native display may animate this as a separate layer.
     const struct SourceStill* source_image = nullptr;
+    const struct SourceStill* app_icon = nullptr;
 };
 
 struct SourceStill {
@@ -53,6 +55,10 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
 
 // Decodes the QR in the top-left of a 10-bit luma plane. Empty if none.
 std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int height, int stride);
+
+std::optional<QrDetection> decode_qr_signal(const uint16_t* luma, int width, int height, int stride);
+
+void render_sync_foreground(Yuv422p10& frame, int period_frames, double period_ms, bool qr_flash = true);
 
 struct ResultPicture {
     std::string number;

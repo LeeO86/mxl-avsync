@@ -11,6 +11,32 @@
 
 using namespace avsync;
 
+TEST_CASE("full signal stays readable with lifted camera blacks and mild optical softening") {
+    Yuv422p10 picture; picture.resize(1280,720);
+    QrPayload payload; payload.test_id="camera-exposure"; payload.k=17; payload.tk=1000;
+    PictureInfo info; info.qr_json=qr_payload_json(payload); info.title="TEST SIGNAL";
+    info.source="Optical fixture"; info.subtitle="Exposure and softening"; info.period_ms=500;
+    render_picture(picture,info,17,0,25,true);
+    for(bool soften:{false,true}) {
+        constexpr int width=960,height=540,left=80,top=40;
+        std::vector<uint16_t> raw(width*height,300), pixels;
+        for(int y=0;y<360;++y)for(int x=0;x<640;++x)
+            raw[(y+top)*width+x+left]=uint16_t(170+picture.y[(y*2)*1280+x*2]*0.65);
+        pixels=raw;
+        if(soften)for(int y=1;y<height-1;++y)for(int x=1;x<width-1;++x){
+            int sum=0;for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)sum+=raw[(y+dy)*width+x+dx];
+            pixels[y*width+x]=uint16_t(sum/9);
+        }
+        const auto located=read_located_marker(pixels.data(),width,height,width);
+        REQUIRE(located.located);
+        CHECK(std::abs(located.pose.origin_x-left)<=6);
+        CHECK(std::abs(located.pose.origin_y-top)<=6);
+        CHECK(located.reading.strip_ok);
+        CHECK(located.reading.seq_low24==17);
+        CHECK(located.reading.state==MarkerReading::State::White);
+    }
+}
+
 namespace {
 
 std::string fixture(const char* name)
@@ -71,6 +97,41 @@ TEST_CASE("locator keeps the full rendered tile corners instead of QR and text s
         CHECK(located.reading.seq_low24 == sequence);
         CHECK(located.reading.state == (white ? MarkerReading::State::White : MarkerReading::State::Black));
     }
+}
+
+TEST_CASE("coded QR survives a scaled tile outside the canvas QR region")
+{
+    QrPayload payload;
+    payload.test_id = "TEST-stage2";
+    payload.mode = "FILE";
+    payload.k = 1;
+    payload.tk = 1000000000;
+    payload.format = "720p50";
+    payload.rate = 1;
+    payload.timecode = true;
+    payload.source_id = 1880207804;
+    const auto json = qr_payload_json(payload);
+    PictureInfo info;
+    info.qr_json = json;
+    Yuv422p10 frame;
+    frame.resize(1280, 720);
+    render_picture(frame, info, 1, 0, 50, true);
+    std::vector<uint16_t> canvas(960 * 540, kYBlack);
+    for (int y = 0; y < 360; ++y) {
+        for (int x = 0; x < 640; ++x) {
+            const size_t p = size_t(y * 2) * frame.width + x * 2;
+            canvas[size_t(y + 40) * 960 + x + 80] =
+                (unsigned(frame.y[p]) + frame.y[p + 1] + frame.y[p + frame.width] + frame.y[p + frame.width + 1]) / 4;
+        }
+    }
+    const auto decoded = decode_qr_text(canvas.data(), 960, 540, 960);
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == json);
+    const auto parsed = parse_qr_payload(*decoded);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->timecode);
+    CHECK(parsed->source_id == payload.source_id);
+    CHECK(parsed->rate == 1);
 }
 
 TEST_CASE("result picture states")
@@ -162,7 +223,8 @@ TEST_CASE("result picture contrast, margin, latency, senders and count")
     const uint16_t background = pass.y[0];
     bool border = true;
     bool ink = false;
-    int worst = 10000;
+    // Antialiased fringes approach the background; require strong foreground ink.
+    int strongest = 0;
     for (int y = 0; y < pass.height; ++y) {
         for (int x = 0; x < pass.width; ++x) {
             const uint16_t sample = pass.y[static_cast<size_t>(y) * static_cast<size_t>(pass.width) + static_cast<size_t>(x)];
@@ -172,13 +234,13 @@ TEST_CASE("result picture contrast, margin, latency, senders and count")
             }
             if (!edge && sample != background) {
                 ink = true;
-                worst = std::min(worst, std::abs(static_cast<int>(sample) - static_cast<int>(background)));
+                strongest = std::max(strongest, std::abs(static_cast<int>(sample) - static_cast<int>(background)));
             }
         }
     }
     CHECK(border);
     CHECK(ink);
-    CHECK(worst >= 300);
+    CHECK(strongest >= 300);
     for (const char* grade : {"warn", "fail", "invalid"}) {
         ResultPicture pictured = base;
         pictured.grade = grade;
@@ -188,10 +250,10 @@ TEST_CASE("result picture contrast, margin, latency, senders and count")
         }
         const Yuv422p10 frame = paint(pictured);
         const uint16_t fill = frame.y[0];
-        int gap = 10000;
+        int gap = 0;
         for (uint16_t sample : frame.y) {
             if (sample != fill) {
-                gap = std::min(gap, std::abs(static_cast<int>(sample) - static_cast<int>(fill)));
+                gap = std::max(gap, std::abs(static_cast<int>(sample) - static_cast<int>(fill)));
             }
         }
         CHECK(gap >= 300);
@@ -290,8 +352,8 @@ TEST_CASE("large qr stays decodable and the sync square moves")
         return frame.y[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)];
     };
     CHECK(sample(zero, at_zero) == kYWhite);
-    CHECK(sample(late, at_late) == static_cast<uint16_t>(145 * 4));
-    CHECK(sample(early, at_early) == static_cast<uint16_t>(81 * 4));
+    CHECK(late.y[size_t(geometry.sweep_y-25)*late.width+at_late-10] == static_cast<uint16_t>(145 * 4));
+    CHECK(early.y[size_t(geometry.sweep_y-25)*early.width+at_early-10] == static_cast<uint16_t>(81 * 4));
     CHECK(zero.cb[static_cast<size_t>(geometry.sweep_y) * static_cast<size_t>(zero.width / 2) + static_cast<size_t>(at_zero / 2)] == kYNeutralChroma);
     CHECK(zero.y[static_cast<size_t>(geometry.sweep_y - 18) * static_cast<size_t>(zero.width) + static_cast<size_t>(at_zero)] == kYWhite);
 
@@ -330,13 +392,196 @@ TEST_CASE("large qr stays decodable and the sync square moves")
             }
         }
         const int runs = static_cast<int>(found.size() / 2);
-        if (runs > best_runs) {
+        // The first complete row is the boxes' top padding. Maximizing black
+        // runs can instead select holes inside antialiased glyphs below it.
+        if (runs >= 7) {
             best_runs = runs;
             boxes = std::move(found);
+            break;
         }
     }
     CHECK(best_runs >= 7);
     for (size_t i = 2; i + 1 < boxes.size(); i += 2) {
         CHECK(boxes[i] >= boxes[i - 1] + 4);
+    }
+}
+
+#include "avsync/picture_reader.hpp"
+TEST_CASE("live picture reader keeps direct path and reacquires a moving camera tile after loss") {
+    PictureReader reader;
+    CHECK_FALSE(reader.read(nullptr,16,16,16,0).located);
+    Yuv422p10 picture;picture.resize(1280,720);
+    PictureInfo info; info.title="TEST SIGNAL";
+    render_picture(picture,info,5,0,30,true);
+    auto direct=reader.read(picture.y.data(),1280,720,1280,0);
+    REQUIRE(direct.located);CHECK(direct.canonical.empty());CHECK(direct.reading.seq_low24==5);
+    constexpr int w=960,h=540;
+    std::vector<uint16_t> tile(w*h,150);
+    for (int step=0;step<4;++step) {
+        std::fill(tile.begin(),tile.end(),150);
+        if(step!=2) for(int y=0;y<360;++y)for(int x=0;x<640;++x)
+            tile[(y+40+step*5)*w+x+80+step*8]=picture.y[y*2*1280+x*2];
+        auto found=reader.read(tile.data(),w,h,w,1000+step*600);
+        if(step==2) { CHECK_FALSE(found.located);continue; }
+        REQUIRE(found.located);REQUIRE_FALSE(found.canonical.empty());
+        CHECK(found.reading.strip_ok);CHECK(found.reading.seq_low24==5);
+        CHECK(found.reading.state==MarkerReading::State::White);
+    }
+}
+
+#include "avsync/phone_generator.hpp"
+TEST_CASE("bounded optical search refines phone tile borders in 1080p and 4K cameras") {
+    PhoneGeneratorPlan plan("linux-phone-1",1,1793000000000000000LL,1000);
+    Yuv422p10 frame; frame.resize(1280,720);
+    PictureInfo info; info.title="TEST SIGNAL"; info.source="Synthetic phone camera";
+    info.qr_json=qr_payload_json(plan.qr(1)); info.period_ms=1000;
+    render_picture(frame,info,1,0,60,true);
+    for(int scale:{1,2}) {
+        const int width=1920*scale, height=1080*scale;
+        std::vector<uint16_t> camera(size_t(width)*height,240);
+        for(int y=0;y<540*scale;++y)for(int x=0;x<960*scale;++x)
+            camera[size_t(y+180*scale)*width+x+240*scale]=frame.y[size_t(y*4/(3*scale))*1280+x*4/(3*scale)];
+        PictureReader reader;
+        for(double now:{0.0,20.0,600.0}) {
+            const auto found=reader.read(camera.data(),width,height,width,now);
+            REQUIRE(found.located); REQUIRE_FALSE(found.canonical.empty());
+            CHECK(found.reading.geometry_ok); CHECK(found.reading.strip_ok);
+            CHECK(found.reading.seq_low24==1);
+            CHECK(found.reading.state==MarkerReading::State::White);
+        }
+        std::fill(camera.begin(),camera.end(),240);
+        CHECK_FALSE(reader.read(camera.data(),width,height,width,800).located);
+    }
+}
+
+TEST_CASE("mobile static plate omits only the shared animated sync square") {
+    for(int rate:{1,2}) {
+        PictureInfo info;info.period_ms=1000.0/rate;
+        const int period=60/rate;
+        for(int pos:{0,1,period-1}) {
+            Yuv422p10 animated,plate;animated.resize(1280,720);plate.resize(1280,720);
+            render_picture(animated,info,9,pos,period,flash_white(pos,1000.0/60));
+            info.show_sync_indicator=false;
+            render_picture(plate,info,9,pos,period,flash_white(pos,1000.0/60));
+            info.show_sync_indicator=true;
+            const auto dot=sync_indicator(1280,720,pos,period,info.period_ms);
+            CHECK(animated.y[(dot.y+dot.side/2)*1280+dot.x+dot.side/2]==kYWhite); // foreground tick wins
+            CHECK(animated.y[dot.y*1280+dot.x+dot.side/2]==kYBlack); // centerline extends beyond tick
+            CHECK(animated.y[dot.y*1280+dot.x+dot.side/4]==dot.y10);
+            if(pos==0)CHECK(dot.kind==SyncDot::Zero);
+            else if(pos==1)CHECK(dot.kind==SyncDot::Late);
+            else CHECK(dot.kind==SyncDot::Early);
+            bool changed=false,outside=false;
+            for(int y=0;y<720;++y)for(int x=0;x<1280;++x) {
+                const bool differs=animated.y[y*1280+x]!=plate.y[y*1280+x] || animated.cb[y*640+x/2]!=plate.cb[y*640+x/2] || animated.cr[y*640+x/2]!=plate.cr[y*640+x/2];
+                changed|=differs;
+                // 4:2:2 chroma shares each horizontal pair.
+                if(differs&&(x<dot.x-1||x>=dot.x+dot.side+1||y<dot.y||y>=dot.y+dot.side))outside=true;
+            }
+            CHECK(changed);CHECK_FALSE(outside);
+            CHECK(read_marker(plate.y.data(),1280,720,1280).strip_ok);
+        }
+    }
+}
+
+TEST_CASE("AVS2 QR alone anchors a cropped picture and timestamps flashes before decoding") {
+    for(int rate:{1,2}) {
+        QrFlashTracker tracker;
+        const auto g=qr_flash_geometry(1280,720);
+        // Crop away all outside corners, bars and the entire old bottom strip.
+        const int left=g.qr_x-12,top=g.qr_y-12,cw=g.marker_x+g.marker_side-left+12,ch=g.qr_size+24;
+        std::vector<uint16_t> crop(size_t(cw)*ch);
+        std::vector<VideoObservation> events;
+        for(int frame=0;frame<160;++frame) {
+            double time=frame*20.0;uint64_t seq=1+frame/(50/rate);int pos=frame%(50/rate);
+            QrPayload p;p.timecode=p.qr_flash=true;p.source_id=0xABCDEF12;p.test_id="roundtrip";
+            p.mode="LIVE";p.k=seq;p.tk=1793300000000000000LL+int64_t(seq-1)*(1000000000/rate);p.rate=rate;p.format="1080p50";
+            PictureInfo info;info.qr_json=qr_payload_text(p);info.period_ms=1000.0/rate;
+            Yuv422p10 image;image.resize(1280,720);render_picture(image,info,seq,pos,50/rate,flash_white(pos,20));
+            for(int y=0;y<ch;++y)std::copy_n(image.y.data()+size_t(y+top)*1280+left,cw,crop.data()+size_t(y)*cw);
+            if(frame%5==0) {
+                auto q=decode_qr_signal(crop.data(),cw,ch,cw);REQUIRE(q);REQUIRE(q->payload.qr_flash);
+                CHECK(q->payload.k==seq);CHECK(q->payload.tk==p.tk);tracker.observe(*q,time);
+            }
+            VideoObservation f;f.time_ms=time;f.have_arrival=true;f.arrival_ms=time+7;f.grain_index=frame;
+            tracker.push(crop.data(),cw,ch,cw,f);
+            auto out=tracker.take_events();events.insert(events.end(),out.begin(),out.end());
+            CHECK(tracker.valid_frame());
+        }
+        REQUIRE(events.size()==size_t(3*rate));
+        for(size_t i=0;i<events.size();++i) {
+            CHECK(events[i].seq==i+2);CHECK(events[i].time_ms==doctest::Approx((i+1)*1000.0/rate));
+            CHECK(events[i].arrival_ms==events[i].time_ms+7);CHECK(events[i].timecode);
+            CHECK(events[i].set_tai_ns==1793300000000000000LL+int64_t(i+1)*(1000000000/rate));
+        }
+    }
+}
+
+TEST_CASE("AVS2 rejects static pictures and expired geometry") {
+    QrFlashTracker tracker;QrPayload p;p.timecode=p.qr_flash=true;p.source_id=5;p.k=7;p.tk=1000000000;p.test_id="still";
+    PictureInfo info;info.qr_json=qr_payload_text(p);Yuv422p10 image;image.resize(1280,720);render_picture(image,info,7,0,30,true);
+    auto q=decode_qr_signal(image.y.data(),1280,720,1280);REQUIRE(q);tracker.observe(*q,0);
+    for(int frame=0;frame<40;++frame){VideoObservation f;f.time_ms=frame*20;tracker.push(image.y.data(),1280,720,1280,f);CHECK(tracker.take_events().empty());}
+    CHECK_FALSE(tracker.valid_frame()); // 780-ms-old QR geometry cannot keep measuring.
+}
+
+TEST_CASE("AVS2 cannot relabel a pulse with frozen or later unrelated QR identity") {
+    for(bool frozen:{false,true}) {
+        QrFlashTracker tracker;Yuv422p10 picture;picture.resize(1280,720);
+        QrPayload p;p.timecode=p.qr_flash=true;p.k=7;p.tk=1000000000;p.source_id=77;p.test_id="negative";
+        PictureInfo info;info.period_ms=500;info.qr_json=qr_payload_text(p);
+        for(int i=0;i<40;++i) {
+            double time=i*20.0;bool white=i>=25&&i<30;
+            // The actual QR stays at event seven, even during the pulse.
+            render_picture(picture,info,7,i%25,25,white);
+            if(i%5==0) {
+                auto q=decode_qr_signal(picture.y.data(),1280,720,1280);REQUIRE(q);
+                if(!frozen&&i>=30){q->payload.k=8;q->payload.tk+=500000000;}
+                tracker.observe(*q,time);
+            }
+            VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),1280,720,1280,f);
+            CHECK(tracker.take_events().empty());
+        }
+    }
+}
+
+TEST_CASE("AVS2 late QR pixel settling preserves the first optical frame at 240 fps") {
+    QrFlashTracker tracker;Yuv422p10 picture;picture.resize(640,360);
+    std::vector<VideoObservation> events;
+    for(int frame=0;frame<360;++frame) {
+        const double time=frame*1000.0/240;const uint64_t seq=1+frame/120;
+        QrPayload p;p.timecode=p.qr_flash=true;p.source_id=11;p.test_id="display-response";p.format="720p60";
+        // The flash responds immediately; the changed QR pixels take 42 ms.
+        p.k=frame>=120&&frame<130?1:seq;p.tk=int64_t(p.k-1)*500000000;
+        PictureInfo info;info.qr_json=qr_payload_text(p);
+        render_picture(picture,info,seq,frame%120,120,(frame%120)<24);
+        if(frame%24==0){auto q=decode_qr_signal(picture.y.data(),640,360,640);REQUIRE(q);tracker.observe(*q,time);}
+        VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),640,360,640,f);
+        auto fresh=tracker.take_events();events.insert(events.end(),fresh.begin(),fresh.end());
+    }
+    REQUIRE(events.size()==2);CHECK(events[0].seq==2);CHECK(events[0].time_ms==500);
+    CHECK(events[1].seq==3);CHECK(events[1].time_ms==1000);
+}
+
+TEST_CASE("AVS2 brand is centered and the moving box passes below white foreground ticks") {
+    PictureInfo info;QrPayload q;q.qr_flash=q.timecode=true;q.test_id="layout";
+    info.qr_json=qr_payload_text(q);info.source="Demo title";info.subtitle="Smaller subtitle";
+    SourceStill icon;icon.width=icon.height=4;icon.rgba.resize(4*4*4);
+    for(size_t i=0;i<icon.rgba.size();i+=4){icon.rgba[i]=255;icon.rgba[i+3]=255;}
+    info.app_icon=&icon;
+    for(int rate:{1,2})for(int pos:{0,1,60/rate-1}) {
+        info.period_ms=1000.0/rate;Yuv422p10 frame,foreground;frame.resize(1280,720);foreground.resize(1280,720);
+        render_picture(frame,info,8,pos,60/rate,false);
+        render_sync_foreground(foreground,60/rate,info.period_ms,true);
+        const auto dot=sync_indicator(1280,720,pos,60/rate,info.period_ms,true);
+        int ticks_inside=0;
+        for(int y=dot.y;y<dot.y+dot.side;++y)for(int x=dot.x;x<dot.x+dot.side;++x) {
+            if(foreground.y[y*1280+x]==kYWhite){CHECK(frame.y[y*1280+x]==kYWhite);++ticks_inside;}
+        }
+        CHECK(ticks_inside>0);CHECK(frame.y[dot.y*1280+dot.x+dot.side/2]==kYBlack);
+        const int icon_side=72,icon_top=18;
+        CHECK(frame.cr[(icon_top+icon_side/2)*640+640/2]>800);
+        CHECK(frame.cr[(icon_top+icon_side/2)*640+(640-icon_side/2-1)/2]<800);
+        const auto decoded=decode_qr_signal(frame.y.data(),1280,720,1280);REQUIRE(decoded);CHECK(decoded->payload.qr_flash);
     }
 }

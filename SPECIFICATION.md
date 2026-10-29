@@ -22,7 +22,7 @@ Names that are guesses and need a check before implementation are marked `TODO_`
 
 Design principles:
 
-1. **AV offset and latency are different quantities.** AV offset needs no common clock. Absolute latency needs one (TAI from PTP on the platform) and is never reported without it (§3).
+1. **AV offset and latency are different quantities.** AV offset needs no common clock. Verified absolute latency needs one (TAI from PTP on the platform); phone-clock estimates are separately marked, with unknown accuracy (§3).
 2. **Measure, don't guess.** Every result carries a quality and an uncertainty, or says `unknown`. A missing or ambiguous marker gives an invalid measurement, never an invented number. No accuracy is claimed that a test has not shown.
 3. **One portable core.** Event model, chirp synthesis and detection, marker drawing and detection, pairing and statistics live in `avsync-core`: C++20 with no dependencies on MXL, NMOS, FFmpeg or a GUI. The CLI, the media function and later the phone app (§12) use the same core.
 4. **Test signals are obvious.** The picture says TEST SIGNAL, the NMOS labels and tags say so, the function never routes anything by itself (§11).
@@ -144,7 +144,7 @@ From these:
 
 Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measured in M3) and is coarsened by writers that commit in batches (for example 960 samples per video frame, or packet bursts in a gateway). The reader MUST NOT count ranges that are not yet committed as late, and the uncertainty of every latency includes the batch size seen on that flow (§8.4).
 
-**LIVE without MXL** (the phone app, §12, and a recording made elsewhere). Only the AV offset is measured. A phone's system time (NTP, mobile network) is coarse wall-clock metadata, not a reference; it never turns an AV-offset measurement into a latency.
+**LIVE without a verified source reference.** AV offset remains a measurement. By explicit maintainer decision (2026-10-27), the iPhone source/capture workflows additionally expose **estimated latency**, with unknown clock/output/capture uncertainty. A phone's UTC is not a verified PTP reference; a locked server clock does not validate it. Phone-source packets and QR mark this distinction, and results retain `latency_estimated: true`. See [phone generator](docs/phone-generator.md). FILE playback never proves absolute latency.
 
 **Every result names its reference:** `reference: {type: "tai-ptp" | "file" | "none", domain, sync_state, accuracy_ns | "unknown"}`. A configured `AVSYNC_PTP_STATUS_URL` explicitly wins (`sync_source=url`). Otherwise, a reachable, valid `AVSYNC_PTP_SOCKET` supplies ptp4l management status (`sync_source=ptp4l`); absent or failed socket access falls back to read-only kernel state (`sync_source=kernel`). A valid unlocked PTP response is retained. Kernel lock requires STA_UNSYNC clear and a positive TAI offset. Real `esterror` must be within `AVSYNC_CLOCK_MAX_ERROR_US`; when both `esterror` and `maxerror` are at least 16000000 µs they are unreported, accuracy is unknown and the reason is "error not reported (PTP discipline)". Kernel state cannot identify PTP versus NTP. See [Clock reference](docs/clock-reference.md) for PTP mapping and runtime requirements. The URL override is an `http://` URL. That URL must return JSON `{"sync_state":"locked"|"unlocked"|"unknown","accuracy_ns":"<decimal ns or unknown>"}`. With a URL set, any other scheme or a failed read leaves `sync_state` `unknown`. Latency numbers are reported only from a measured arrival time while `sync_state` is `locked`.
 
@@ -167,7 +167,7 @@ An event is one video marker change and one chirp that belong together.
 | `event_id` | `EVT-` + zero-padded sequence number (`EVT-000024`). In LIVE mode the sequence number is `k` of §4.2 (it fits in 64 bits for any TAI time) |
 | `seq` | the number `k` |
 | `video_time` | set time of the video marker change (ms in FILE, TAI ns in LIVE) |
-| `audio_time` | set time of the chirp's reference point (the chirp's centre) |
+| `audio_time` | set time of the chirp's reference point (onset for audio timecode v3; centre in legacy mode) |
 | `expected_av_offset_ms` | `audio_time − video_time` as planned |
 | `chirp_id` | which of the four chirps (§6.1): `seq mod 4` |
 | `marker_phase` | the marker state after the change (`seq mod 2`) |
@@ -216,10 +216,10 @@ Events are paired by identity, not by nearest neighbour:
 1. **QR code** (top left, about 18 % of the height): changes once per second (`AVSYNC_QR_PERIOD_MS`, default 1000), error correction level M. Payload §5.6. It identifies the test and the event; it is not needed for timing.
 2. **Frame counter** (text): the grain index the generator wrote, and in LIVE mode the TAI time of the grain. The text says "frame as written by the generator"; the analyzer reports the frame it saw separately.
 3. **Free text**: `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES`, and the format, rate, audio format and set offset, drawn once per change.
-4. **Timing marker**: a large block (40 % × 40 % of the height, centred) that toggles between black (Y 64) and white (Y 940) at every event. Its edge is the video event.
+4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal flashes white (Y 940) for 100 ms from each event, then black (Y 64). Its rising edge coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
-7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). In 1.0 the analyzer assumes the full raster and uses them only to check the geometry.
+7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). The live analyzer retains a fast full-raster path and can also locate/rectify an optical or scaled test picture using these fiducials.
 8. **TEST SIGNAL** text at the top and bottom, always on, not configurable.
 
 ### 5.2 Event timing in the picture
@@ -243,7 +243,7 @@ Events are paired by identity, not by nearest neighbour:
 The detector reads only the marker block and the strip:
 
 1. Thresholds from the three reference blocks of the strip (mean luma of black and white; midpoint).
-2. Marker state: mean luma of the central 50 % of the marker block against the threshold; `invalid` when the block's luma spread is above a limit (a mixed frame, a transition from a frame-rate converter, a cut).
+2. Marker state: mean luma of the central 50 % of the marker block against the threshold; `invalid` when the block's 5th-to-95th percentile luma span exceeds the limit (a mixed frame, a transition from a frame-rate converter, a cut). Sparse cursor/hot-pixel defects are excluded from that timing-field span; strip-reference noise keeps its full range check.
 3. Strip: each block's mean against the threshold, Gray decode, parity check. A failed parity marks the grain `strip_invalid`.
 4. Video event: the first grain whose marker state differs from the previous grain's; its time is the grain's index time.
 5. Quality per grain: contrast (white − black), noise (spread inside the blocks), geometry check against the fiducials. Exported as `video_quality` (`good`, `degraded`, `invalid`).
@@ -281,7 +281,7 @@ The long field names of the draft (`schema`, `test_id`, …) are used in the man
 - Four chirp shapes, all band-limited, Hann-windowed (10 % fades), duration `AVSYNC_CHIRP_MS` (default 30 ms), band `AVSYNC_CHIRP_LOW_HZ`–`AVSYNC_CHIRP_HIGH_HZ` (default 700–2500 Hz, inside the G.711 telephone band, so the file-mode G.711 test aid can still carry them):
   - `0` linear up-chirp, `1` linear down-chirp, `2` up-chirp in the lower 60 % of the band, `3` down-chirp in the upper 60 % of the band.
   The four are chosen for low cross-correlation; M0 measures it and MAY change the shapes before 1.0.
-- The chirp's reference point is its centre. Event `k` uses chirp `k mod 4`.
+- The default is compact audio timecode v3: a known up-chirp references its start and a protected voice-band data burst independently carries source, common video-event time and audio offset. See [wire format, timing, compatibility and tests](docs/audio-timecode.md). Legacy mode retains centre reference and chirp `k mod 4`.
 - Silence between chirps (no noise bed, no tone).
 - Level `AVSYNC_CHIRP_LEVEL_DBFS` (default −12 dBFS peak), never clipping.
 - Every output sample is computed from its absolute sample index (a pure function), so a restart, a block size or a late block never shifts the signal, and the chirp centre can sit between two samples.
@@ -415,7 +415,7 @@ End-to-end latency between two analyzers is `t_arr(destination) − t_arr(source
 
 ```
 mxl-avsync generate --format 1080p50 --duration 60 --offset 0 \
-  [--offset-sweep -40,-20,0,20,40] [--event-rate 2] [--audio-rate 48000] [--channels 2] \
+  [--offset-sweep -40,-20,0,20,40] [--event-rate 2] [--audio-timecode 1200|600|legacy] [--audio-rate 48000] [--channels 2] \
   [--container mov|mp4|mkv] [--video-codec prores|v210|h264] [--audio-codec pcm24|pcm16|aac] \
   [--title …] [--notes …] --out test.mov
 ```
@@ -486,7 +486,8 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | Key | Default | Apply | Meaning |
 | --- | --- | --- | --- |
 | `AVSYNC_ROLE` | — (required for `serve`) | restart | `generator` or `analyzer` |
-| `AVSYNC_EVENT_RATE` | 2 | flow (gen) / live (ana) | 1, 2 or 4 events per second (§4.2); the analyzer takes it from the QR when it can |
+| `AVSYNC_EVENT_RATE` | 2 | flow (gen) / live (ana) | 1 or 2/s for timecode; legacy also supports 4/s. 600 baud requires 1/s. Analyzer adopts QR rate |
+| `AVSYNC_AUDIO_TIMECODE` | 1200 | flow | `1200`, `600`, or `legacy`; timecode has fixed 30-ms / 700–2500-Hz prefix, onset reference and one white pulse/event |
 | `AVSYNC_CHIRP_MS` | 30 | flow / live | 10–100 |
 | `AVSYNC_CHIRP_LOW_HZ`, `AVSYNC_CHIRP_HIGH_HZ` | 700, 2500 | flow / live | band, 100–20000, low < high |
 | `AVSYNC_STATE_DIR` | `/config` | restart | `config.json`, `routes.json`, `events/` |
@@ -581,9 +582,11 @@ At a real monitor and loudspeaker, the phone's camera sees the test picture and 
 - the grade colour with the same windows as §8.3 (from the QR's test id the app MAY fetch the analyzer's windows; else the defaults);
 - `Quality: good / degraded / invalid` and `Calibration: valid / missing / expired`;
 - a time series and the statistics after several events;
-- saved measurements (local), compare, export as the result JSON of §8 (`mode: "LIVE"`, `reference.type: "none"`).
+- saved measurements (local), compare, export as the result JSON of §8 (`mode: "LIVE"`, `reference.type: "none"`). The last valid measurement remains saveable through temporary recognition gaps, explicitly labelled with age/spread; a retained sample is never relabelled as a fresh measurement. Saving preserves its original acquisition time plus save time and age. Source changes and explicit clears discard the retained sample. Outline smoothing/brief hold affect presentation only and must not feed back into detection or timestamping.
 
-Only the AV offset is measured. The phone's clock is never used as a latency reference (§3.3).
+Compact phone event timing retains the first clear black-to-white optical onset while the Gray code is confirmed. A code outside the known QR identity window cannot acquire lock. A missed event may be skipped only when a bounded sequence gap agrees with the optical time interval; no observation is synthesized for the missing event.
+
+AV offset is measured. Optional estimated latency uses the phone clock with explicitly unknown physical timing accuracy (§3.3). The Generate tab also supplies a native test source for an external camera/analyzer; its source-output calibration is separate from capture calibration.
 
 ### 12.2 Technology
 
@@ -932,3 +935,90 @@ Decided by this spec (from the draft's open list, §17 there), open to review:
 ### 1.0.1 form editing contract
 
 Signal and Settings fields are local drafts. Status/JPEG refreshes do not replace or reconstruct the settings form. Focused or dirty fields retain their contents; Apply/Discard and an Unsaved changes indicator make adoption explicit. Failed writes retain the draft. A successful own write adopts its server response unless the user typed a newer edit while it was pending. Discard reloads current server values.
+
+
+## Integrated audio timecode v3 (2026-10-27)
+
+The onset-reference, compact protected audio format and white-pulse marker
+supersede the legacy-only event-ID/reference descriptions above when
+AVSYNC_AUDIO_TIMECODE is 1200 or 600. Generator/analyzers/native iPhone share
+one codec. Coded pairs use source plus full common timestamp, with an online
+10-second retention window; legacy ±2-period pairing remains only for legacy.
+Phone audio-only latency is explicitly estimated from device UTC, with unknown
+clock/capture accuracy; this user-authorized extension does not claim PTP lock.
+Detailed contract and hardware boundaries: [audio-timecode.md](docs/audio-timecode.md).
+
+
+### Mobile generator appearance (maintainer addition, 2026-10-28)
+
+The iOS source shares the server pattern renderer: EG1 color bars, fiducials,
+QR, timing marker/strip, source-ident area and early/zero/late sync scale. The
+native display layer advances the square on the common host-clock timeline.
+Name, subtitle and an optional selected image are local persisted settings.
+Photo selection exposes only the chosen image; a normalized private copy is
+stored independently of Photos. Presentation labels do not change audio/QR
+identity or imply source-output calibration. Text rasterization is CoreText
+on iOS with the same bundled DejaVu font, avoiding media/GUI dependencies in
+avsync-core and desktop rendering dependencies in the mobile binary.
+
+### QR + flash signal (AVS2, 2026-10-29)
+
+The compact audio-timecode generator now uses the shared AVS2 video layout in
+file, MXL and iPhone sources. A large version-4 QR (33 modules, correction Q,
+four quiet modules per side) sits beside an equal 41-module flash panel with a
+four-module gap. All measurement identity is carried in the QR; the Gray strip
+and outside fiducials are absent. Colour bars, source labels/image and the
+visual sync scale remain. Legacy audio mode retains its original video layout.
+
+AVS2 is `AVS2:` followed by 54 uppercase hexadecimal characters, encoded as QR
+alphanumeric data. The 27 big-endian bytes are: flags u8 (bit 0 LIVE, bit 1
+estimated phone source; other bits forbidden), source id u32, full event
+sequence u64, video send time i64 non-negative nanoseconds (TAI for LIVE,
+media timeline for FILE), signed source AV offset i32 in 1/16 ms, format u8
+and event rate u8 (1 or 2). Format indices 0–8 are respectively 1080p50,
+1080p25, 1080p59.94, 1080i25, 2160p50, 720p60, 720p50,
+960x540p25 and its 540p25 alias. Presentation labels are outside the payload.
+The independent CRC/FEC audio packet and its onset reference are unchanged.
+
+The QR changes on the source flash's first frame and remains for the complete
+event period. No next-event prediction or nearest-chirp association is used.
+A decoder passes identified QR corners in normalized capture coordinates to
+the dependency-free QrFlashTracker. It projects only sparse photometry samples
+in the adjacent panel and static finder patterns; it never rectifies a raster.
+Two black observations then two white observations confirm the rising edge,
+retaining the first white frame and its original index/arrival metadata.
+Mixed transition frames may bridge a bounded 60-ms black-to-white interval.
+A QR captured 25 ms to 85% of a source period after that edge identifies it;
+a late decoding callback does not change the edge timestamp. Missing identity
+or edges, stale geometry, source changes and duplicates cannot create events.
+Geometry expires after 750 ms. The normal QR retry target is 100 ms; scans are
+bounded to one in flight on iOS. Motion/finder failure withholds measurements.
+
+A crop is supported only while the QR including quiet zone and the sampled
+flash area remain visible. Frozen pictures cannot produce repeating events.
+AVS2 does not claim the old strip's per-frame drop/duplicate diagnostics.
+Optical paths retain unknown capture uncertainty; phone-clock latency remains
+explicitly estimated. Digital-path grain timing is still the received frame
+index; arrival time remains the first-edge arrival, not QR processing time.
+
+For AVS2 identity, up to 32 sparse 33×33 module-center samples are retained
+from the start of each pulse. The later decoded QR is re-encoded using the
+same fixed version/ECC/mask-selection rules; at least 80% confidently sampled
+modules and zero contradictory confident bits are required in one sample.
+Unknown/transition modules are erased, not corrected by a permissive timing
+window. A QR already observed before the pulse cannot identify a new pulse.
+This prevents frozen QR or skipped-event callbacks from relabelling an edge.
+Nayuki is vendored into the portable core for this check, with no new external
+media/GUI dependency. Sampling occurs only within the first 100 ms of the pulse and stops after identification. This allows QR pixels to settle after the flash has already started.
+
+
+### AVS2 presentation (2.0.0)
+
+The app icon is centered with AVsync immediately below it. The configured
+source caption is labelled Title in the web and mobile generator controls;
+Subtitle is rendered at two-thirds the title scale (minimum one raster scale).
+Existing source-name persistence is retained. The obsolete separate header
+Title control is removed; legacy API keys remain accepted. The moving sync
+box has a vertical black centerline. White scale ticks are foreground and the
+box travels underneath them in both native and server renderers. None of
+these decorative regions changes QR/flash geometry or audio timing.

@@ -10,6 +10,7 @@
 namespace avsync {
 
 struct MediaStatus {
+    uint64_t timecode_skipped = 0;
     bool ready = false;
     bool live = true;
     std::string state;

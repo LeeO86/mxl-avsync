@@ -3,7 +3,10 @@
 // avsync-core public API. No MXL, NMOS, FFmpeg or GUI.
 // Time: positive av_offset_ms means audio is late (SPECIFICATION §3.2).
 
+#include "avsync/timecode.hpp"
 #include <cmath>
+#include <array>
+#include <deque>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -18,8 +21,8 @@ inline constexpr int kYWhite = 940;
 inline constexpr int kYBackground = 502;
 inline constexpr int kYNeutralChroma = 512;
 
-inline constexpr char kCoreVersion[] = "1.0.1";
-inline constexpr char kAppVersion[] = "1.0.1";
+inline constexpr char kCoreVersion[] = "2.0.0";
+inline constexpr char kAppVersion[] = "2.0.0";
 inline constexpr char kMxlRevision[] = "218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7";
 inline constexpr char kQrSchema[] = "mxl-avsync/1";
 inline constexpr char kManifestSchema[] = "mxl-avsync-manifest/1";
@@ -67,6 +70,8 @@ struct PlanConfig {
     double duration_ms = 60000;
     bool live = false;
     int chirp_ms = 30;
+    int timecode_baud = 0; // 0: legacy centre / alternating marker; 600 or 1200: v3 onset / flash
+    uint32_t source_id = 0;
     double chirp_low_hz = 700;
     double chirp_high_hz = 2500;
     double chirp_level_dbfs = -12;
@@ -87,6 +92,8 @@ struct PlannedEvent {
     double expected_av_offset_ms = 0;
     double rounding_residual_us = 0;
     int frame_in_period = 0;
+    bool timecode = false;
+    std::vector<uint8_t> audio_packet;
 };
 
 struct EventPlan {
@@ -193,6 +200,8 @@ struct FrameGeometry {
 };
 
 FrameGeometry frame_geometry(int width, int height);
+// AVS2: version-4 QR (33 modules + 4 quiet modules per side), then a 4-module gap and equal flash panel.
+FrameGeometry qr_flash_geometry(int width, int height);
 
 struct LumaView {
     uint16_t* data = nullptr;
@@ -220,6 +229,13 @@ struct SyncPlace {
     double position_ms = 0;
 };
 SyncPlace sync_place(int frame_in_period, int period_frames, double period_ms);
+struct SyncIndicator {
+    int x=0, y=0, side=0;
+    SyncDot kind=SyncDot::Zero;
+    uint16_t y10=940, cb10=512, cr10=512;
+};
+SyncIndicator sync_indicator(int width, int height, int frame, int period_frames, double period_ms, bool qr_flash = false);
+
 
 struct MarkerReading {
     enum class State { Black, White, Invalid };
@@ -259,6 +275,7 @@ struct LocatedMarker {
     std::vector<uint16_t> canonical;
 };
 LocatedMarker read_located_marker(const uint16_t* luma, int width, int height, int stride);
+LocatedMarker read_located_marker_at_pose(const uint16_t* luma, int width, int height, int stride, const PicturePose& pose, int canonical_width = 0);
 
 // Row time inside one rolling-shutter frame. readout_ms is the full-frame readout; 0 is global shutter.
 double marker_row_time_ms(double frame_start_ms, double readout_ms, int row, int height);
@@ -292,6 +309,10 @@ struct VideoObservation {
     bool strip_ok = false;
     bool have_arrival = false;
     double arrival_ms = 0;
+    bool timecode = false;
+    bool estimated_source = false;
+    uint32_t source_id = 0;
+    int64_t event_time_ns = 0;
     bool have_set_time = false;
     int64_t set_tai_ns = 0; // generator T_k from the QR, when that code names this event
     bool have_grain_time = false;
@@ -306,11 +327,14 @@ public:
     int drops() const { return drops_; }
     int duplicates() const { return duplicates_; }
     const Period& period() const { return period_; }
+    void configure(int event_rate, bool flash);
 
 private:
     VideoFormat format_;
     Period period_;
     bool have_prev_ = false;
+    bool flash_ = false;
+    uint64_t emitted_seq_ = ~uint64_t{0};
     MarkerReading::State prev_state_ = MarkerReading::State::Invalid;
     int64_t last_unwrapped_pos_ = -1;
     int last_low_ = 0;
@@ -341,10 +365,53 @@ struct QrPayload {
     double offset_ms = 0;
     int rate = 2;
     std::string format = "1080p50";
+    bool estimated_source = false; // QR clk=phone-utc
+    bool timecode = false;
+    bool qr_flash = false; // AVS2: QR names the current flash event, held for its full period.
+    uint32_t source_id = 0;
 };
 
+bool identify_video(VideoObservation& video, const QrPayload& payload);
+bool flash_white(int frame_in_period, double grain_ms);
 std::string qr_payload_json(const QrPayload& payload);
 std::optional<QrPayload> parse_qr_payload(std::string_view json);
+std::string qr_payload_text(const QrPayload& payload);
+
+// QR corners are normalized to the original captured image, TL/TR/BR/BL.
+struct QrDetection {
+    QrPayload payload;
+    std::array<double, 4> x{}, y{};
+};
+// Slow identified geometry/QR, fast sparse photometry. No raster rectification.
+class QrFlashTracker {
+public:
+    void reset();
+    void observe(const QrDetection& qr, double capture_ms);
+    void push(const uint16_t* luma, int width, int height, int stride, VideoObservation frame);
+    void push_u8(const uint8_t* luma, int width, int height, int stride, VideoObservation frame);
+    std::vector<VideoObservation> take_events();
+    const PicturePose& pose() const { return pose_; }
+    bool valid_frame() const { return valid_; }
+    bool active() const { return anchor_.has_value(); }
+    std::optional<uint64_t> sequence() const { return anchor_ ? std::optional<uint64_t>(anchor_->payload.k) : std::nullopt; }
+private:
+    struct Code { QrPayload payload; double time; std::array<uint8_t,1089> modules; };
+    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; std::vector<std::array<uint8_t,1089>> symbols; };
+    std::optional<QrDetection> anchor_;
+    double anchor_ms_ = -1e30, last_frame_ms_ = -1e30;
+    std::array<double, 9> transform_{};
+    std::deque<Code> codes_;
+    std::deque<Edge> edges_;
+    std::vector<VideoObservation> ready_;
+    std::optional<uint64_t> emitted_seq_;
+    PicturePose pose_;
+    MarkerReading::State phase_ = MarkerReading::State::Invalid;
+    int blacks_ = 0;
+    bool valid_ = false;
+    void match();
+    void push_pixels(const void* luma, bool eight_bit, int width, int height, int stride, VideoObservation frame);
+    double last_black_ms_ = -1e30;
+};
 
 // ---- pairing, grading, statistics, uncertainty (§4, §8) ------------------
 
@@ -356,6 +423,11 @@ struct ReferenceInfo {
 };
 
 struct AudioObservation {
+    bool timecode = false;
+    bool estimated_source = false;
+    uint32_t source_id = 0;
+    int64_t event_time_ns = 0;
+    int64_t audio_send_ns = 0;
     int chirp_id = 0;
     double time_ms = 0;
     int64_t tai_ns = 0;
@@ -371,7 +443,13 @@ struct AudioObservation {
     bool ambiguous = false;
 };
 
+AudioObservation audio_observation(const AudioTimecode& packet);
+
 struct Measurement {
+    bool latency_estimated = false;
+    bool audio_timecode = false;
+    uint32_t source_id = 0;
+    int64_t audio_send_ns = 0;
     std::string test_id;
     std::string event_id;
     uint64_t seq = 0;
@@ -441,6 +519,19 @@ OffsetWords describe_offset(double ms);
 // Phone measurement on one clock. Video frames may contain a scaled or offset test picture.
 struct PhoneReport {
     std::vector<Measurement> events;
+    std::vector<AudioHit> audio_hits;
+    std::vector<AudioTimecode> audio_timecodes;
+    size_t video_events = 0;
+    size_t audio_samples = 0;
+    double audio_peak_dbfs = -120;
+    int phase_rejected_frames = 0;
+    int sequence_rejected_frames = 0;
+    int timing_resets = 0;
+    int pending_frames = 0;
+    std::optional<uint32_t> decoded_seq;
+    std::optional<uint32_t> locked_seq;
+    double last_valid_frame_ms = -1e30;
+    double last_video_event_ms = -1e30;
     std::string calibration = "missing"; // valid, missing, expired
     bool show_grade_colour = false;
     double uncertainty_ms = 0;
@@ -449,20 +540,64 @@ struct PhoneReport {
 class PhoneSession {
 public:
     PhoneSession(int event_rate, GradeWindows windows);
+    void observe_signal(const QrPayload& payload);
+    void observe_qr(const QrDetection& detection, double capture_ms);
     void set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms);
     void push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms);
     void push_audio(const float* samples, size_t count, double start_ms, int sample_rate);
+    bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
+    void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms);
     PhoneReport finish(const std::string& test_id = "PHONE");
+    void trim_before(double time_ms);
+    int located_frames() const { return located_frames_; }
+    int valid_frames() const { return valid_frames_; }
+    const PicturePose& current_picture() const { return current_picture_; }
+    bool picture_code_confirmed() const { return picture_code_confirmed_; }
+    std::optional<uint32_t> confirmed_picture_seq() const { return confirmed_picture_seq_; }
+    double confirmed_picture_time_ms() const { return confirmed_picture_time_ms_; }
+    std::optional<VideoObservation> latest_video_event() const {
+        return videos_.empty() ? std::nullopt : std::optional<VideoObservation>(videos_.back());
+    }
 
 private:
+    QrFlashTracker qr_flash_;
+    void collect_qr_events();
+    void update_qr_picture(double frame_ms);
+    std::optional<QrPayload> signal_;
+    AudioTimecodeStream timecode_stream_;
+    std::vector<AudioTimecode> timecodes_;
+    PicturePose cached_pose_;
+    PicturePose current_picture_;
+    bool picture_code_confirmed_ = false;
+    std::optional<uint32_t> confirmed_picture_seq_;
+    double confirmed_picture_time_ms_ = -1e30;
+    double pose_time_ms_ = -1e30;
+    int located_frames_ = 0;
+    int valid_frames_ = 0;
+    int phase_rejected_frames_ = 0;
+    int sequence_rejected_frames_ = 0;
+    int timing_resets_ = 0;
+    std::optional<uint32_t> decoded_seq_;
+    double last_valid_frame_ms_ = -1e30;
     int event_rate_;
     GradeWindows windows_;
     CalibrationState calibration_state_ = CalibrationState::Missing;
     CalibrationRecord calibration_{};
-    bool tracker_ready_ = false;
-    int canonical_w_ = 0;
-    int canonical_h_ = 0;
-    std::optional<MarkerTracker> tracker_;
+    std::optional<uint32_t> locked_seq_;
+    uint64_t unwrapped_seq_ = 0;
+    uint32_t pending_seq_ = 0;
+    int pending_frames_ = 0;
+    double pending_time_ms_ = 0;
+    double pending_last_valid_ms_ = -1e30;
+    // Compact-code timing is the optical pulse edge, not a later barcode read.
+    MarkerReading::State marker_phase_ = MarkerReading::State::Invalid;
+    double marker_phase_ms_ = -1e30;
+    std::optional<double> white_onset_ms_;
+    PicturePose marker_phase_pose_;
+
+    double last_seen_ms_ = -1e30;
+    double last_transition_ms_ = 0;
+    bool have_transition_ = false;
     std::vector<VideoObservation> videos_;
     std::vector<float> audio_;
     double audio_origin_ms_ = 0;

@@ -15,7 +15,7 @@ function app(fetch) {
   return instance;
 }
 function server() {
-  const state = {generator:{offset_ms:0, level_dbfs:-12, title:'Saved', source:'', subtitle:'', muted:false}, config:{AVSYNC_TITLE:'Saved', LOG_LEVEL:'info'}};
+  const state = {generator:{offset_ms:0, level_dbfs:-12, title:'Saved', source:'', subtitle:'', event_rate:2, audio_timecode:'1200', muted:false}, config:{AVSYNC_TITLE:'Saved', LOG_LEVEL:'info'}};
   const calls=[];
   const fetch = async (url, init={}) => {
     calls.push({url, ...init});
@@ -74,6 +74,16 @@ test('edits typed during Apply survive its response and remain unsaved', async (
   assert.equal(a.signalDirty,true); assert.equal(a.settingsDirty,true);
 });
 
+test('event-rate and modem selections survive polling and persist on Apply', async () => {
+  const backend=server(), a=app(backend.fetch); a.info={role:'generator'};
+  await a.refresh(); a.eventRate=1; a.audioTimecode='600';
+  for(let i=0;i<4;i++)await a.refresh();
+  assert.equal(a.eventRate,1); assert.equal(a.audioTimecode,'600'); assert.equal(a.signalDirty,true);
+  await a.saveGenerator();
+  assert.equal(backend.state.generator.event_rate,1); assert.equal(backend.state.generator.audio_timecode,'600');
+  assert.equal(a.signalDirty,false);
+});
+
 test('image-only selection makes the form dirty and uploads bytes on Apply', async () => {
   const backend=server(), a=app(backend.fetch); a.info={role:'generator'};
   await a.refresh();
@@ -123,4 +133,16 @@ test('preview slots match the role and normal generator activity is green', () =
   a.audioOn=false; assert.equal(a.generatorSignal.kind,''); assert.equal(a.generatorSignal.label,'Test signal muted');
   a.stopped=true; assert.equal(a.generatorSignal.kind,''); assert.equal(a.generatorSignal.label,'Test signal stopped');
   a.info={role:'analyzer'}; assert.deepEqual(Array.from(a.previewSlots,p=>p.slot),['input','generated']);
+});
+
+test('one Title control edits the persisted source caption through refresh and Apply', async () => {
+  const html=fs.readFileSync(path.join(__dirname,'../../web/index.html'),'utf8');
+  assert.match(html,/<label>Title <input v-model="source"/);
+  assert.doesNotMatch(html,/<label>Source name|<label>Title <input v-model="title"/);
+  const backend=server(),a=app(backend.fetch);a.info={role:'generator'};
+  backend.state.generator.source='Saved caption';await a.refresh();
+  assert.equal(a.source,'Saved caption');a.source='New title';
+  for(let i=0;i<4;i++)await a.refresh();assert.equal(a.source,'New title');
+  await a.saveGenerator();assert.equal(backend.state.generator.source,'New title');
+  assert.equal(a.signalDirty,false);
 });
