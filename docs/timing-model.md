@@ -9,3 +9,7 @@ Live event `k` is at grain `k × period`, counted from the SMPTE ST 2059 epoch w
 Pairing uses the Gray-strip sequence and the chirp id (`seq mod 4`). A match is accepted inside ±2 periods. Beyond that the result is `out_of_range`, not a small wrong offset.
 
 Grades apply to the offset when the expected offset is 0, and to the deviation otherwise. Boundaries belong to the better grade: −5 ms is pass, +60 ms is warn.
+
+## Live write timing
+
+MXL indexes grains and samples by timestamp, so the generator commits ahead of time and readers still read each grain at its own index. Video grain `k` is rendered right after grain `k − 1` is committed and committed at `T_k − AVSYNC_VIDEO_LEAD_MS` (default 20 ms). A render that runs late commits at once; the grain keeps its index. Only when the writer is more than four grains behind does it skip ahead, and the skipped grains are counted as missed. Audio is committed every 10 ms block, between `AVSYNC_AUDIO_LEAD_MS` and that lead plus one block before its timestamp. On a direct MXL path the analyzer therefore sees arrival before `T_k` for both essences (latency negative by about the leads).

@@ -82,10 +82,15 @@ A `serve` process has exactly one role. One generator can feed any number of ana
 
 | Thread | Job | Never waits for |
 | --- | --- | --- |
-| Video writer | One grain per output index from TAI. Copies the static layer and draws the changing parts (§5.4). Commits with `validSlices = totalSlices` | HTTP, NMOS |
-| Audio writer | Writes the chirp signal in blocks (default 10 ms) ahead of TAI by `AVSYNC_AUDIO_LEAD_MS`; every sample is a pure function of its index (§6.1) | video writer |
+| Video writer | One grain per output index from TAI. Renders grain `k` right after grain `k − 1` is committed and commits it at `T_k − AVSYNC_VIDEO_LEAD_MS` (below). Copies the static layer and draws the changing parts (§5.4). Commits with `validSlices = totalSlices` | HTTP, NMOS |
+| Audio writer | Wakes every 10 ms block and writes the chirp signal up to one block past `AVSYNC_AUDIO_LEAD_MS` ahead of TAI; every sample is a pure function of its index (§6.1) | video writer |
 | QR renderer | Draws the next QR code ahead of time (once per QR period) | writers |
 | HTTP, WebSocket, NMOS | nmos-cpp and the web server threads | media threads |
+
+**Writer timing.** MXL indexes grains and samples by timestamp, so a grain committed before its time is read at its own index; readers that ask for it earlier wait (`OUT_OF_RANGE_TOO_EARLY`). The generator uses this:
+
+- Video grain `k` is committed at `T_k − AVSYNC_VIDEO_LEAD_MS` (default 20 ms), or at once when its render ends later. The render has a whole grain period, because it starts right after the previous commit. A grain is skipped only when its render would start more than one grain after its own timestamp; the writer then continues at the first grain whose commit time is still ahead and counts the skipped grains in `output_frames_missed_total{essence="video"}`. `output_frames_late_total{essence="video"}` counts grains committed after their own timestamp.
+- Audio is committed between `AVSYNC_AUDIO_LEAD_MS` and that lead plus one 10 ms block before its timestamp. The audio wake-ups lie half a block off the video grid, so the two writers do not wake together.
 
 ### 2.3 Analyzer threads
 
@@ -503,6 +508,7 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_CHIRP_LEVEL_DBFS` | −12 | live | −40…−1 |
 | `AVSYNC_AUDIO_ENABLE` | `true` | live | `false` mutes the chirps (silence, flows keep running) |
 | `AVSYNC_AUDIO_LEAD_MS` | 20 | restart | how far ahead of TAI audio is written |
+| `AVSYNC_VIDEO_LEAD_MS` | 20 | restart | 0–100; how far ahead of its timestamp each video grain is committed (§2.2) |
 | `AVSYNC_QR_PERIOD_MS` | 1000 | live | 500–5000 |
 | `AVSYNC_TEST_ID` | the NMOS seed | live | in the QR and the results |
 | `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES` | empty | live | free text on the picture (each ≤ 80 characters) |
@@ -760,7 +766,7 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `generator_active` | gauge 0/1 | | gen |
 | `generator_audio_muted` | gauge 0/1 | | gen |
 | `generator_events_total` | counter | | gen |
-| `output_frames_total`, `output_frames_late_total`, `output_frames_missed_total` | counter | `essence` | both; `missed` counts generator video grains that were never written (audio stays 0) |
+| `output_frames_total`, `output_frames_late_total`, `output_frames_missed_total` | counter | `essence` | both; `missed` counts generator video grains that were never written (audio stays 0); `late` counts generator video grains committed after their own timestamp and audio writes that failed |
 | `input_state` | gauge 1 for the state | `essence`, `state` | ana |
 | `input_resyncs_total` | counter | `essence` | ana |
 | `events_total` | counter | `result` (`paired`, `missing_audio`, `missing_video`, `duplicate`, `ambiguous`, `out_of_range`) | ana |

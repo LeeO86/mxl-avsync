@@ -38,6 +38,18 @@ struct Rate {
 int64_t index_to_ns(Rate rate, uint64_t index);
 uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns);
 
+// Live video writer schedule. Grain k is committed at T_k - lead_ns. After grain last_index the next
+// one is last_index + 1 (a late grain is still read at its own index), unless its render would start
+// more than kVideoMaxLagGrains after its own timestamp
+// (or the clock stepped back by more than a second): then it is the first grain whose commit time is
+// not yet past, and skipped counts the grains in between. last_index 0 means nothing written yet.
+inline constexpr uint64_t kVideoMaxLagGrains = 4;
+struct VideoSlot {
+    uint64_t index = 0;
+    uint64_t skipped = 0;
+};
+VideoSlot next_video_slot(Rate rate, uint64_t last_index, uint64_t now_ns, uint64_t lead_ns);
+
 struct VideoFormat {
     std::string token;
     int width = 1920;

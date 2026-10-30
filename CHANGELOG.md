@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.2 (unreleased)
+
+- The live generator no longer drops video grains under CPU load. It wrote grain `k` only after `T_k` (render, then commit about one render time late), took the grain index from `mxlGetCurrentIndex`, which rounds to the nearest grain, and so skipped a whole grain whenever the loop woke more than half a grain late. A skipped event grain showed as a single event one frame off (−20 ms at 50p, `video_content_vs_grain_ms` −20). Now grain `k` is rendered right after grain `k − 1` is committed and committed at `T_k − AVSYNC_VIDEO_LEAD_MS` (new, default 20 ms, restart, 0–100); a late grain is still written, and grains are skipped only when the writer is more than four grains behind. Lab, generator and analyzer sharing two CPUs with a bursty load (5 min): missed grains 44/min → 0, events one frame off 10 of 605 → 0 of 605, video commit vs `T_k` median +13.5 ms → −18.6 ms.
+- Audio is written by its own thread (as SPECIFICATION §2.2 describes) every 10 ms block, between `AVSYNC_AUDIO_LEAD_MS` and that lead plus one block ahead of its timestamp. Before, it was written once per video grain after the video render, so a slow render also shortened the audio lead.
+- `mxl_avsync_output_frames_late_total{essence="video"}` now counts generator grains committed after their own timestamp (before: a loop that woke more than one grain late). With the default lead it stays 0 unless the generator falls more than 20 ms behind.
+
 ## 2.0.1 (2026-10-30)
 
 - `AVSYNC_EVENT_RATE` and `AVSYNC_AUDIO_TIMECODE` are live settings: when set in the environment they are start values, and the Signal API/UI change them on the running generator (before, the change was silently ignored with `ok:true`).

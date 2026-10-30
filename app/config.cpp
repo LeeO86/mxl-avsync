@@ -82,7 +82,7 @@ int event_rate_value(const std::string& value) {
 
 bool is_restart_key(const std::string& key)
 {
-    return key == "AVSYNC_ROLE" || key == "AVSYNC_STATE_DIR" || key == "AVSYNC_CONFIG_FILE" || key == "AVSYNC_AUDIO_LEAD_MS"
+    return key == "AVSYNC_ROLE" || key == "AVSYNC_STATE_DIR" || key == "AVSYNC_CONFIG_FILE" || key == "AVSYNC_AUDIO_LEAD_MS" || key == "AVSYNC_VIDEO_LEAD_MS"
         || key == "AVSYNC_AUDIO_WINDOW_MS" || key == "AVSYNC_PTP_STATUS_URL" || key == "AVSYNC_PTP_SOCKET" || key == "AVSYNC_CLOCK_MAX_ERROR_US" || key.rfind("MXL_", 0) == 0 || key.rfind("NMOS_", 0) == 0
         || key.rfind("WEB_", 0) == 0 || key == "HOST_ID" || key == "WIDGET_FRAME_ANCESTORS" || key == "LOG_FORMAT" || key == "SHUTDOWN_TIMEOUT_S";
 }
@@ -148,6 +148,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.chirp_level_dbfs = num(pick("AVSYNC_CHIRP_LEVEL_DBFS", "-12"), "AVSYNC_CHIRP_LEVEL_DBFS");
     config.audio_enable = parse_bool(pick("AVSYNC_AUDIO_ENABLE", "true"));
     config.audio_lead_ms = static_cast<int>(num(pick("AVSYNC_AUDIO_LEAD_MS", "20"), "AVSYNC_AUDIO_LEAD_MS"));
+    config.video_lead_ms = static_cast<int>(num(pick("AVSYNC_VIDEO_LEAD_MS", "20"), "AVSYNC_VIDEO_LEAD_MS"));
     config.qr_period_ms = static_cast<int>(num(pick("AVSYNC_QR_PERIOD_MS", "1000"), "AVSYNC_QR_PERIOD_MS"));
     config.host_id = short_host(pick("HOST_ID", config.host_id));
     config.nmos_seed = pick("NMOS_SEED", config.host_id + "-avsync");
@@ -207,6 +208,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     require(config.audio_channels >= 1 && config.audio_channels <= 16, "AVSYNC_AUDIO_CHANNELS");
     require(config.offset_ms >= -500 && config.offset_ms <= 500, "AVSYNC_AV_OFFSET_MS");
     require(config.chirp_level_dbfs >= -40 && config.chirp_level_dbfs <= -1, "AVSYNC_CHIRP_LEVEL_DBFS");
+    require(config.video_lead_ms >= 0 && config.video_lead_ms <= 100, "AVSYNC_VIDEO_LEAD_MS must be 0-100");
     require(config.qr_period_ms >= 500 && config.qr_period_ms <= 5000, "AVSYNC_QR_PERIOD_MS");
     require(config.title.size() <= 80 && config.source.size() <= 80 && config.subtitle.size() <= 80 && config.notes.size() <= 80, "free text longer than 80");
     GradeWindows windows{config.pass_min_ms, config.pass_max_ms, config.warn_min_ms, config.warn_max_ms};
