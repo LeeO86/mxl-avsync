@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.3 (unreleased)
+# mxl-avsync 2.0.3
 
 Fixes the audio correlation of the AVS2 signal. The signal, timing, ports,
 metric names, NMOS resources and dependency pins are unchanged from 2.0.2.
