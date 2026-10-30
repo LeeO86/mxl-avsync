@@ -90,6 +90,7 @@ bool is_restart_key(const std::string& key)
 bool is_live_key(const std::string& key)
 {
     return key == "AVSYNC_AV_OFFSET_MS" || key == "AVSYNC_CHIRP_LEVEL_DBFS" || key == "AVSYNC_AUDIO_ENABLE"
+        || key == "AVSYNC_EVENT_RATE" || key == "AVSYNC_AUDIO_TIMECODE"
         || key == "AVSYNC_TEST_ID" || key == "AVSYNC_TITLE" || key == "AVSYNC_SOURCE" || key == "AVSYNC_SUBTITLE" || key == "AVSYNC_NOTES"
         || key == "AVSYNC_AUDIO_CHANNEL" || key == "AVSYNC_AUDIO_THRESHOLD" || key == "AVSYNC_QR_RATE"
         || key == "AVSYNC_PASS_MIN_MS" || key == "AVSYNC_PASS_MAX_MS" || key == "AVSYNC_WARN_MIN_MS" || key == "AVSYNC_WARN_MAX_MS"

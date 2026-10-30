@@ -486,8 +486,8 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | Key | Default | Apply | Meaning |
 | --- | --- | --- | --- |
 | `AVSYNC_ROLE` | — (required for `serve`) | restart | `generator` or `analyzer` |
-| `AVSYNC_EVENT_RATE` | 2 | flow (gen) / live (ana) | 1 or 2/s for timecode; legacy also supports 4/s. 600 baud requires 1/s. Analyzer adopts QR rate |
-| `AVSYNC_AUDIO_TIMECODE` | 1200 | flow | `1200`, `600`, or `legacy`; timecode has fixed 30-ms / 700–2500-Hz prefix, onset reference and one white pulse/event |
+| `AVSYNC_EVENT_RATE` | 2 | live | 1 or 2/s for timecode; legacy also supports 4/s. 600 baud requires 1/s. Analyzer adopts QR rate |
+| `AVSYNC_AUDIO_TIMECODE` | 1200 | live | `1200`, `600`, or `legacy`; timecode has fixed 30-ms / 700–2500-Hz prefix, onset reference and one white pulse/event |
 | `AVSYNC_CHIRP_MS` | 30 | flow / live | 10–100 |
 | `AVSYNC_CHIRP_LOW_HZ`, `AVSYNC_CHIRP_HIGH_HZ` | 700, 2500 | flow / live | band, 100–20000, low < high |
 | `AVSYNC_STATE_DIR` | `/config` | restart | `config.json`, `routes.json`, `events/` |
