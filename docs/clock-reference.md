@@ -44,7 +44,7 @@ For Docker use the host network, mount the socket read-only, and add the permitt
 
 ## Kernel PTP and NTP
 
-Kernel lock needs `STA_UNSYNC` clear and TAI−UTC greater than zero. If `esterror` **and** `maxerror` are both at least 16000000 µs (the kernel default phase limit), the error is not reported: accuracy is unknown (`accuracy_ns=-1`, serialized as the string `"-1"` in the existing string-valued API field), and the reason says `error not reported (PTP discipline)`. This supports a host disciplined by ptp4l/phc2sys without treating the default 16-second estimate as a measured error. It does not turn unknown accuracy into a numerical guarantee.
+Kernel lock needs `STA_UNSYNC` clear and TAI−UTC greater than zero. If `esterror` is at least 16000000 µs (the kernel default phase limit), the error is not reported, whatever `maxerror` says (phc2sys keeps `maxerror` low, often 0, and leaves `esterror` at the default): accuracy is unknown (`accuracy_ns=-1`, serialized as the string `"-1"` in the existing string-valued API field), and the reason says `error not reported (PTP discipline)`. This supports a host disciplined by ptp4l/phc2sys without treating the default 16-second estimate as a measured error. It does not turn unknown accuracy into a numerical guarantee.
 
 When the kernel reports a real estimated error, such as with chrony or ntpd, the configured `AVSYNC_CLOCK_MAX_ERROR_US` limit is enforced. An unsynchronized kernel or missing TAI offset is unlocked with an explicit reason. Kernel state alone cannot identify the disciplining daemon.
 

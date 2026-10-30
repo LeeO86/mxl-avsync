@@ -28,10 +28,11 @@ inline ClockState classify_kernel_clock(const KernelClock& clock, long max_error
     if (!clock.read_ok) {
         return state;
     }
-    // Linux initializes both errors to NTP_PHASE_LIMIT when they are not reported.
-    // phc2sys/PTP discipline may leave them there; do not treat that sentinel as
-    // a measured 16-second error, or claim a numeric accuracy from it.
-    const bool not_reported = clock.esterror_us >= 16000000 && clock.maxerror_us >= 16000000;
+    // Linux initializes esterror to NTP_PHASE_LIMIT (16 s) and only NTP daemons update it.
+    // phc2sys clears STA_UNSYNC and keeps maxerror low (often 0) but leaves esterror at
+    // that default, so esterror alone identifies an unreported error. Do not treat the
+    // sentinel as a measured 16-second error, or claim a numeric accuracy from it.
+    const bool not_reported = clock.esterror_us >= 16000000;
     if (!not_reported && clock.esterror_us >= 0) {
         state.accuracy_ns = clock.esterror_us <= std::numeric_limits<long>::max() / 1000
             ? clock.esterror_us * 1000 : std::numeric_limits<long>::max();
