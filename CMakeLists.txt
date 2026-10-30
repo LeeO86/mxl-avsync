@@ -130,6 +130,8 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
     target_link_libraries(avsync-picture-tests PRIVATE avsync-file)
     target_compile_options(avsync-picture-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
     add_test(NAME picture COMMAND avsync-picture-tests)
+    add_executable(avsync-render-bench tests/tools/render_bench.cpp)
+    target_link_libraries(avsync-render-bench PRIVATE avsync-file)
     target_compile_options(avsync-file PRIVATE -Wall -Wextra -Wno-unused-parameter)
     add_executable(mxl-avsync
         app/main.cpp

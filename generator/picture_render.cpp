@@ -489,34 +489,83 @@ void draw_source_ident(Yuv422p10& frame, const PictureInfo& info, int left, int 
     }
 }
 
+enum { kAvs2Qr, kAvs2Marker, kAvs2Event, kAvs2Sync, kAvs2Ident, kAvs2Parts };
+
+struct Avs2Layout {
+    FrameGeometry g;
+    int unit = 1, scale = 1, gap = 8, icon_px = 32, icon_y = 0, icon_x = 0;
+    int ident_left = 0, ident_right = 0, ident_top = 0, ident_bottom = 0;
+};
+
+Avs2Layout avs2_layout(int width, int height)
+{
+    Avs2Layout l;
+    l.g = qr_flash_geometry(width, height);
+    l.unit = l.g.qr_size / 41;
+    l.scale = std::max(1, height / 270);
+    l.gap = std::max(8, width / 160);
+    l.icon_px = std::max(32, height / 10);
+    l.icon_y = height / 40;
+    l.icon_x = (width - l.icon_px) / 2;
+    l.ident_left = width / 25;
+    l.ident_right = width - width / 25;
+    l.ident_top = std::max(int(height * .79), l.g.qr_y + l.g.qr_size + text_px_height(l.scale) + l.gap * 2);
+    l.ident_bottom = height - height / 30;
+    return l;
+}
+
+// AVS2 parts that do not change while the picture settings stay the same.
+void avs2_static(Yuv422p10& frame, const PictureInfo& info, const Avs2Layout& l)
+{
+    if (const SourceStill* icon = info.app_icon ? info.app_icon : cached_app_icon())
+        blit_rgba(frame, l.icon_x, l.icon_y, l.icon_px, *icon);
+    else
+        draw_app_icon(frame, l.icon_x, l.icon_y, l.icon_px);
+    const int title_pad = std::max(2, l.scale);
+    const int title_width = text_px_width("AVsync", l.scale) + 2 * title_pad;
+    draw_text_box(frame, (frame.width - title_width) / 2, l.icon_y + l.icon_px + l.gap, "AVsync", l.scale);
+    draw_text_box(frame, l.g.qr_x, l.g.qr_y - text_px_height(l.scale) - l.gap, "QR + FLASH / " + info.format_line, l.scale);
+}
+
+// AVS2 parts that change per event or per grain, drawn in this order.
+void avs2_part(Yuv422p10& frame, int part, const PictureInfo& info, const Avs2Layout& l, uint64_t seq, int frame_in_period, int period_frames,
+    bool marker_white)
+{
+    const auto& g = l.g;
+    switch (part) {
+    case kAvs2Qr: {
+        const auto code = qrcodegen::QrCode::encodeSegments(
+            qrcodegen::QrSegment::makeSegments(info.qr_json.c_str()), qrcodegen::QrCode::Ecc::QUARTILE, 4, 4, -1, false);
+        fill_yuv(frame, g.qr_x, g.qr_y, g.qr_size, g.qr_size, {kYWhite, kYNeutralChroma, kYNeutralChroma});
+        for (int y = 0; y < 33; ++y)
+            for (int x = 0; x < 33; ++x)
+                if (code.getModule(x, y))
+                    fill_yuv(frame, g.qr_x + (x + 4) * l.unit, g.qr_y + (y + 4) * l.unit, l.unit, l.unit, {kYBlack, kYNeutralChroma, kYNeutralChroma});
+        break;
+    }
+    case kAvs2Marker:
+        fill_yuv(frame, g.marker_x, g.marker_y, g.marker_side, g.marker_side, {uint16_t(marker_white ? kYWhite : kYBlack), kYNeutralChroma, kYNeutralChroma});
+        break;
+    case kAvs2Event:
+        draw_text_box(frame, g.qr_x, g.qr_y + g.qr_size + l.gap, "Event " + std::to_string(seq) + " / " + info.offset_line, l.scale);
+        break;
+    case kAvs2Sync:
+        draw_sync_scale(frame, frame_in_period, period_frames, info.period_ms, info.show_sync_indicator, true);
+        break;
+    case kAvs2Ident:
+        draw_source_ident(frame, info, l.ident_left, l.ident_right, l.ident_top, l.ident_bottom);
+        break;
+    }
+}
+
 void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int frame_in_period, int period_frames, bool marker_white)
 {
     draw_smpte_eg1(frame);
     LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
     if(info.qr_json.starts_with("AVS2:")) {
-        const auto g=qr_flash_geometry(frame.width,frame.height);
-        const int unit=g.qr_size/41;
-        const auto code=qrcodegen::QrCode::encodeSegments(
-            qrcodegen::QrSegment::makeSegments(info.qr_json.c_str()),qrcodegen::QrCode::Ecc::QUARTILE,4,4,-1,false);
-        fill_yuv(frame,g.qr_x,g.qr_y,g.qr_size,g.qr_size,{kYWhite,kYNeutralChroma,kYNeutralChroma});
-        for(int y=0;y<33;++y)for(int x=0;x<33;++x)if(code.getModule(x,y))
-            fill_yuv(frame,g.qr_x+(x+4)*unit,g.qr_y+(y+4)*unit,unit,unit,{kYBlack,kYNeutralChroma,kYNeutralChroma});
-        fill_yuv(frame,g.marker_x,g.marker_y,g.marker_side,g.marker_side,
-            {uint16_t(marker_white?kYWhite:kYBlack),kYNeutralChroma,kYNeutralChroma});
-        const int scale=std::max(1,frame.height/270),gap=std::max(8,frame.width/160);
-        const int icon_px=std::max(32,frame.height/10),icon_y=frame.height/40;
-        const int icon_x=(frame.width-icon_px)/2;
-        if(const SourceStill* icon=info.app_icon?info.app_icon:cached_app_icon())
-            blit_rgba(frame,icon_x,icon_y,icon_px,*icon);
-        else draw_app_icon(frame,icon_x,icon_y,icon_px);
-        const int title_pad=std::max(2,scale);
-        const int title_width=text_px_width("AVsync",scale)+2*title_pad;
-        draw_text_box(frame,(frame.width-title_width)/2,icon_y+icon_px+gap,"AVsync",scale);
-        draw_text_box(frame,g.qr_x,g.qr_y-text_px_height(scale)-gap,"QR + FLASH / "+info.format_line,scale);
-        draw_text_box(frame,g.qr_x,g.qr_y+g.qr_size+gap,"Event "+std::to_string(seq)+" / "+info.offset_line,scale);
-        draw_sync_scale(frame,frame_in_period,period_frames,info.period_ms,info.show_sync_indicator,true);
-        draw_source_ident(frame,info,frame.width/25,frame.width-frame.width/25,
-            std::max(int(frame.height*.79),g.qr_y+g.qr_size+text_px_height(scale)+gap*2),frame.height-frame.height/30);
+        const auto layout=avs2_layout(frame.width,frame.height);
+        avs2_static(frame,info,layout);
+        for(int part=0;part<kAvs2Parts;++part)avs2_part(frame,part,info,layout,seq,frame_in_period,period_frames,marker_white);
         return;
     }
     draw_static_layer(view);
@@ -589,6 +638,129 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
     draw_sync_scale(frame, frame_in_period, period_frames, info.period_ms, info.show_sync_indicator);
 }
 
+
+namespace {
+
+std::string live_key(int width, int rows, const PictureInfo& info, int period_frames)
+{
+    const bool image = info.source_image != nullptr && info.source_image->width > 0 && info.source_image->height > 0;
+    std::string key = std::to_string(width) + "x" + std::to_string(rows) + "|" + std::to_string(period_frames) + "|" + std::to_string(info.period_ms) + "|"
+        + (info.show_sync_indicator ? "1" : "0") + (image ? "1" : "0") + "|" + info.format_line + "|" + info.source + "|" + info.subtitle + "|"
+        + std::to_string(reinterpret_cast<uintptr_t>(info.app_icon));
+    return key;
+}
+
+} // namespace
+
+const std::vector<uint8_t>& LivePicture::render(int width, int rows, const PictureInfo& info, uint64_t seq, int frame_in_period, int period_frames,
+    bool marker_white)
+{
+    packed_.resize(v210_line_bytes(width) * static_cast<size_t>(rows));
+    if (!info.qr_json.starts_with("AVS2:")) {
+        key_.clear();
+        if (frame_.width != width || frame_.height != rows) frame_.resize(width, rows);
+        render_picture(frame_, info, seq, frame_in_period, period_frames, marker_white);
+        pack_v210(frame_.y.data(), frame_.cb.data(), frame_.cr.data(), width, rows, width, packed_.data());
+        return packed_;
+    }
+    const Avs2Layout layout = avs2_layout(width, rows);
+    const Inputs now{info.qr_json, info.offset_line, seq, frame_in_period, marker_white, info.source_image};
+    const std::string key = live_key(width, rows, info, period_frames);
+    if (key != key_) {
+        key_ = key;
+        base_.resize(width, rows);
+        draw_smpte_eg1(base_);
+        avs2_static(base_, info, layout);
+        // Where each part can draw: paint it on a sentinel frame (no drawn sample is 0xFFFF) in every
+        // state that moves it, and take the bounding box. Text and the source picture get their whole
+        // band, because their width (and a GIF's opaque pixels) changes without a settings change.
+        Yuv422p10 probe;
+        rects_.assign(kAvs2Parts, Rect{});
+        for (int part = 0; part < kAvs2Parts; ++part) {
+            probe.resize(width, rows);
+            std::fill(probe.y.begin(), probe.y.end(), 0xFFFF);
+            std::fill(probe.cb.begin(), probe.cb.end(), 0xFFFF);
+            std::fill(probe.cr.begin(), probe.cr.end(), 0xFFFF);
+            const int states = part == kAvs2Sync ? std::max(1, period_frames) : 2;
+            for (int state = 0; state < states; ++state) {
+                avs2_part(probe, part, info, layout, seq, part == kAvs2Sync ? state : frame_in_period, period_frames, state == 0);
+            }
+            Rect r{width, rows, 0, 0};
+            for (int yy = 0; yy < rows; ++yy) {
+                const size_t row = static_cast<size_t>(yy);
+                for (int xx = 0; xx < width; ++xx) {
+                    const size_t c = row * static_cast<size_t>(width / 2) + static_cast<size_t>(std::min(xx / 2, width / 2 - 1));
+                    if (probe.y[row * static_cast<size_t>(width) + static_cast<size_t>(xx)] != 0xFFFF || probe.cb[c] != 0xFFFF || probe.cr[c] != 0xFFFF) {
+                        r.x0 = std::min(r.x0, xx); r.x1 = std::max(r.x1, xx + 1);
+                        r.y0 = std::min(r.y0, yy); r.y1 = std::max(r.y1, yy + 1);
+                    }
+                }
+            }
+            if (part == kAvs2Event && r.y1 > r.y0) {
+                r.x0 = 0;
+                r.x1 = width;
+            }
+            if (part == kAvs2Ident) {
+                const Rect band{layout.ident_left, layout.ident_top, layout.ident_right, layout.ident_bottom};
+                if (r.y1 <= r.y0) {
+                    r = band;
+                } else {
+                    r = {std::min(r.x0, band.x0), std::min(r.y0, band.y0), std::max(r.x1, band.x1), std::max(r.y1, band.y1)};
+                }
+            }
+            r.x0 = std::max(0, r.x0 / 6 * 6);
+            r.x1 = std::min(width, (r.x1 + 5) / 6 * 6);
+            r.y0 = std::max(0, r.y0);
+            r.y1 = std::min(rows, r.y1);
+            if (r.x1 <= r.x0 || r.y1 <= r.y0) r = Rect{};
+            rects_[static_cast<size_t>(part)] = r;
+        }
+        frame_ = base_;
+        for (int part = 0; part < kAvs2Parts; ++part) avs2_part(frame_, part, info, layout, seq, frame_in_period, period_frames, marker_white);
+        pack_v210(frame_.y.data(), frame_.cb.data(), frame_.cr.data(), width, rows, width, packed_.data());
+        last_ = now;
+        return packed_;
+    }
+    bool dirty[kAvs2Parts] = {};
+    dirty[kAvs2Qr] = now.qr_json != last_.qr_json;
+    dirty[kAvs2Marker] = now.marker_white != last_.marker_white;
+    dirty[kAvs2Event] = now.seq != last_.seq || now.offset_line != last_.offset_line;
+    dirty[kAvs2Sync] = now.frame_in_period != last_.frame_in_period;
+    dirty[kAvs2Ident] = now.source_image != last_.source_image;
+    // Restoring one part's box from the static base also clears any part it overlaps: redraw those too.
+    auto overlap = [](const Rect& a, const Rect& b) { return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; };
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (int a = 0; a < kAvs2Parts; ++a) {
+            if (!dirty[a]) continue;
+            for (int b = 0; b < kAvs2Parts; ++b) {
+                if (!dirty[b] && overlap(rects_[static_cast<size_t>(a)], rects_[static_cast<size_t>(b)])) dirty[b] = grew = true;
+            }
+        }
+    }
+    for (int part = 0; part < kAvs2Parts; ++part) {
+        if (!dirty[part]) continue;
+        const Rect& r = rects_[static_cast<size_t>(part)];
+        for (int yy = r.y0; yy < r.y1; ++yy) {
+            const size_t row = static_cast<size_t>(yy);
+            std::copy_n(base_.y.begin() + static_cast<std::ptrdiff_t>(row * static_cast<size_t>(width) + static_cast<size_t>(r.x0)), r.x1 - r.x0,
+                frame_.y.begin() + static_cast<std::ptrdiff_t>(row * static_cast<size_t>(width) + static_cast<size_t>(r.x0)));
+            const size_t c0 = row * static_cast<size_t>(width / 2) + static_cast<size_t>(r.x0 / 2);
+            const int cn = (r.x1 + 1) / 2 - r.x0 / 2;
+            std::copy_n(base_.cb.begin() + static_cast<std::ptrdiff_t>(c0), cn, frame_.cb.begin() + static_cast<std::ptrdiff_t>(c0));
+            std::copy_n(base_.cr.begin() + static_cast<std::ptrdiff_t>(c0), cn, frame_.cr.begin() + static_cast<std::ptrdiff_t>(c0));
+        }
+    }
+    for (int part = 0; part < kAvs2Parts; ++part)
+        if (dirty[part]) avs2_part(frame_, part, info, layout, seq, frame_in_period, period_frames, marker_white);
+    for (int part = 0; part < kAvs2Parts; ++part) {
+        if (!dirty[part]) continue;
+        const Rect& r = rects_[static_cast<size_t>(part)];
+        pack_v210_region(frame_.y.data(), frame_.cb.data(), frame_.cr.data(), width, width, r.x0, r.x1, r.y0, r.y1, packed_.data());
+    }
+    last_ = now;
+    return packed_;
+}
 
 namespace {
 

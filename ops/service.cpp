@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <array>
+#include <map>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -68,6 +70,8 @@ struct Runtime {
     double missed_video = 0;
     double late_audio = 0;
     double resyncs = 0;
+    double input_skipped = 0;
+    std::map<std::string, double> event_results; // events_total{result}: counted when an event closes
     std::string media_detail;
     std::string video_flow;
     std::string audio_flow;
@@ -87,12 +91,30 @@ struct Runtime {
     double clock_esterror_s = 0;
     long clock_tai_offset_s = 0;
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
+    // generator: per-grain picture render + pack time (histogram, cumulative buckets)
+    std::array<double, 8> render_bucket_count{};
+    double render_count = 0;
+    double render_sum_s = 0;
     std::vector<double> video_commit_ms; // generator: last grains, commit time - grain timestamp
     size_t video_commit_next = 0;
     SourceEmitOffsets source_emit; // analyzer: from the NMOS Query API tags of the flows it reads
     std::string source_emit_video_flow;
     std::string source_emit_audio_flow;
 };
+
+// Every closed event is counted once under one result. "quality": paired but a part was invalid.
+constexpr const char* kEventResults[] = {"paired", "missing_audio", "missing_video", "duplicate", "ambiguous", "out_of_range", "quality", "other"};
+
+std::string event_result(const Measurement& event)
+{
+    if (event.av_offset_ms && event.grade != "invalid") return "paired";
+    for (const char* result : kEventResults) {
+        if (event.reason == result) return result;
+    }
+    return "other";
+}
+
+constexpr std::array<double, 8> kRenderBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08, 0.16};
 
 constexpr const char* kAvSyncLabel = "AV sync (what MXL consumers see)";
 constexpr const char* kArrivalLabel = "arrival vs timestamp";
@@ -225,26 +247,29 @@ std::string metrics_text(Runtime& rt)
     os << "# TYPE mxl_avsync_output_frames_missed_total counter\n";
     os << "mxl_avsync_output_frames_missed_total{essence=\"video\"} " << rt.missed_video << "\n";
     os << "mxl_avsync_output_frames_missed_total{essence=\"audio\"} 0\n";
+    os << "# HELP mxl_avsync_generator_render_seconds Generator picture render and v210 pack time per video grain\n";
+    os << "# TYPE mxl_avsync_generator_render_seconds histogram\n";
+    for (size_t i = 0; i < kRenderBuckets.size(); ++i) {
+        os << "mxl_avsync_generator_render_seconds_bucket{le=\"" << kRenderBuckets[i] << "\"} " << rt.render_bucket_count[i] << "\n";
+    }
+    os << "mxl_avsync_generator_render_seconds_bucket{le=\"+Inf\"} " << rt.render_count << "\n";
+    os << "mxl_avsync_generator_render_seconds_sum " << rt.render_sum_s << "\n";
+    os << "mxl_avsync_generator_render_seconds_count " << rt.render_count << "\n";
     os << "# TYPE mxl_avsync_input_state gauge\n";
     for (const char* state : {"waiting", "no_signal", "not_routed", "running", "format_mismatch"}) {
         const int on = ana && rt.input_state == state ? 1 : 0;
         os << "mxl_avsync_input_state{essence=\"video\",state=\"" << state << "\"} " << on << "\n";
         os << "mxl_avsync_input_state{essence=\"audio\",state=\"" << state << "\"} " << on << "\n";
     }
+    os << "# HELP mxl_avsync_input_grains_skipped_total Input video grains the analyzer did not analyse (written invalid, overwritten, or jumped over after a long stall)\n";
+    os << "# TYPE mxl_avsync_input_grains_skipped_total counter\n";
+    os << "mxl_avsync_input_grains_skipped_total{essence=\"video\"} " << rt.input_skipped << "\n";
     os << "# TYPE mxl_avsync_input_resyncs_total counter\n";
     os << "mxl_avsync_input_resyncs_total{essence=\"video\"} " << rt.resyncs << "\nmxl_avsync_input_resyncs_total{essence=\"audio\"} " << rt.resyncs << "\n";
     os << "# TYPE mxl_avsync_events_total counter\n";
-    for (const char* result : {"paired", "missing_audio", "missing_video", "duplicate", "ambiguous", "out_of_range"}) {
-        int count = 0;
-        if (ana) {
-            for (const auto& event : rt.events) {
-                if ((result == std::string("paired") && event.av_offset_ms && event.grade != "invalid")
-                    || event.reason == result) {
-                    ++count;
-                }
-            }
-        }
-        os << "mxl_avsync_events_total{result=\"" << result << "\"} " << count << "\n";
+    for (const char* result : kEventResults) {
+        const auto it = rt.event_results.find(result);
+        os << "mxl_avsync_events_total{result=\"" << result << "\"} " << (ana && it != rt.event_results.end() ? it->second : 0.0) << "\n";
     }
     std::string grade = "invalid";
     if (ana) {
@@ -1103,6 +1128,7 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             rt.events.push_back(event);
             apply_source_emit(rt.events.back(), rt.source_emit);
+            rt.event_results[event_result(event)] += 1;
             if (rt.events.size() > 1000) {
                 rt.events.erase(rt.events.begin(), rt.events.begin() + static_cast<std::ptrdiff_t>(rt.events.size() - 1000));
             }
@@ -1131,6 +1157,14 @@ int run_service(Config config)
                 rt.late_audio += 1;
             }
         };
+        callbacks.video_render = [&](double seconds) {
+            std::lock_guard lock(rt.mu);
+            for (size_t i = 0; i < kRenderBuckets.size(); ++i) {
+                if (seconds <= kRenderBuckets[i]) rt.render_bucket_count[i] += 1;
+            }
+            rt.render_count += 1;
+            rt.render_sum_s += seconds;
+        };
         callbacks.video_commit = [&](double ms) {
             std::lock_guard lock(rt.mu);
             constexpr size_t keep = 500;
@@ -1140,6 +1174,10 @@ int run_service(Config config)
                 rt.video_commit_ms[rt.video_commit_next] = ms;
             }
             rt.video_commit_next = (rt.video_commit_next + 1) % keep;
+        };
+        callbacks.count_input_skipped = [&](uint64_t grains) {
+            std::lock_guard lock(rt.mu);
+            rt.input_skipped += static_cast<double>(grains);
         };
         callbacks.count_resync = [&] {
             std::lock_guard lock(rt.mu);

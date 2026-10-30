@@ -391,6 +391,9 @@ uint32_t gray_to_binary(uint32_t gray);
 size_t v210_line_bytes(int width);
 void pack_v210(const uint16_t* y, const uint16_t* cb, const uint16_t* cr, int width, int height, int y_stride,
     uint8_t* dst);
+// Packs only the 6-pixel groups touching columns [x0, x1) of rows [y0, y1) into a full-frame v210 buffer.
+void pack_v210_region(const uint16_t* y, const uint16_t* cb, const uint16_t* cr, int width, int y_stride, int x0, int x1, int y0, int y1,
+    uint8_t* dst);
 void unpack_v210_luma(const uint8_t* src, int width, int height, uint16_t* y, int y_stride);
 
 // ---- QR payload (§5.6) ---------------------------------------------------
@@ -704,6 +707,9 @@ public:
     Pairer(double period_ms, GradeWindows windows, ReferenceInfo reference, std::string mode, std::string test_id);
     void set_expected_offset(double ms) { default_offset_ms_ = ms; }
     void set_reference(ReferenceInfo reference) { reference_ = std::move(reference); }
+    // Live: also report audio events no video claimed ("missing_video"), and drop closed events and
+    // old observations instead of keeping the whole history (results() then stays empty).
+    void set_live_stream(bool on) { live_stream_ = on; }
     void observe_video(const VideoObservation& video, double expected_offset_ms);
     void observe_audio(const AudioObservation& audio);
     // Close events whose audio window has ended (now_ms on the same timeline).
@@ -727,7 +733,11 @@ private:
     double default_offset_ms_ = 0;
     std::vector<PendingVideo> videos_;
     std::vector<AudioObservation> audios_;
+    std::vector<bool> audio_used_;
     std::vector<Measurement> done_;
+    bool live_stream_ = false;
+    double first_poll_ms_ = -1;
+    Measurement make_missing_video(const AudioObservation& audio);
 };
 
 std::string current_grade(const std::vector<Measurement>& events, int last_n, const GradeWindows& windows, double now_ms,

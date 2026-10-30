@@ -96,7 +96,7 @@ A `serve` process has exactly one role. One generator can feed any number of ana
 
 | Thread | Job | Never waits for |
 | --- | --- | --- |
-| Video reader | Follows the routed video flow, waits for each grain, stamps its arrival time (§3.3), runs the marker detector on the marker regions only (§5.5), hands detections to the pairer. Handles `waiting`, `no_signal`, resync, flow re-creation, format change (as mxl-scopes §2) | pairer, result writer |
+| Video reader | Follows the routed video flow, reads every grain in order (a short stall is caught up; it jumps to the head only when more than half the flow history behind, counting the grains passed over; 2.0.4), waits for each grain, stamps its arrival time (§3.3), runs the marker detector on the marker regions only (§5.5), hands detections to the pairer. Handles `waiting`, `no_signal`, resync, flow re-creation, format change (as mxl-scopes §2) | pairer, result writer |
 | Audio reader | Follows the routed audio flow in windows of `AVSYNC_AUDIO_WINDOW_MS`, stamps arrival, runs the chirp detector on one channel (default: the first) | video reader |
 | QR worker | Decodes the QR region of a grain at most `AVSYNC_QR_RATE` times per second, off the media threads | readers |
 | Pairer | Pairs video and audio events by event id (§8), grades, keeps the statistics | readers |
@@ -239,6 +239,7 @@ Events are paired by identity, not by nearest neighbour:
 
 - A static layer (fiducials, labels, frame of the marker, free text) is drawn with Blend2D on a change only, converted to v210 once.
 - Per grain the writer copies the static layer and overwrites the marker block, the strip, the sweep dot, the counter texts (pre-rendered digit glyphs) and, once per QR period, the QR block. Target: < 1 ms per 1080p grain and < 0.1 core at 1080p50 (measured in M2).
+- AVS2 (2.0.4): the live writer draws the colour bars, icon and title lines once per settings change. Each grain it restores from that base and redraws, then repacks to v210, only the parts whose inputs changed: the sync scale every grain, the flash panel on its edges, QR and event line once per event, the source picture when its GIF frame changes. The result is byte-identical to a full render (unit tested). 1080p50 on an idle lab core: 0.84 ms p50 and 3.7 ms p99 (event grains), against 7.9 ms for a full render and pack; 2160p50 drops from 34 ms (more than a grain) to 3.3 ms. A settings change costs one full render (about 60 ms at 1080p). The legacy layout is still drawn in full. `generator_render_seconds` exports the time per grain.
 
 ### 5.4 Video formats
 
@@ -774,7 +775,9 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `output_frames_total`, `output_frames_late_total`, `output_frames_missed_total` | counter | `essence` | both; `missed` counts generator video grains that were never written (audio stays 0); `late` counts generator video grains committed after their own timestamp and audio writes that failed |
 | `input_state` | gauge 1 for the state | `essence`, `state` | ana |
 | `input_resyncs_total` | counter | `essence` | ana |
-| `events_total` | counter | `result` (`paired`, `missing_audio`, `missing_video`, `duplicate`, `ambiguous`, `out_of_range`) | ana |
+| `input_grains_skipped_total` | counter | `essence` (`video`) | ana; input grains not analysed: written invalid by the source (a missed grain), overwritten, or jumped over after a stall longer than half the flow history (2.0.4) |
+| `events_total` | counter | `result` (`paired`, `missing_audio`, `missing_video`, `duplicate`, `ambiguous`, `out_of_range`, `quality`, `other`) | ana; every closed event counted once (2.0.4: a real counter; before it counted the last 1000 retained events). `missing_video`: an audio event (AVS2 packet or chirp) no video event claimed within its window; `quality`: paired but a part was invalid |
+| `generator_render_seconds` | histogram (buckets 1, 2, 5, 10, 20, 40, 80, 160 ms, +Inf) | | gen; picture render and v210 pack per video grain (2.0.4) |
 | `grade` | gauge 1 for the grade | `grade` (`pass`, `warn`, `fail`, `invalid`) | ana |
 | `av_offset_ms` | gauge (median of the grade window) | | ana |
 | `av_offset_deviation_ms` | gauge | | ana |

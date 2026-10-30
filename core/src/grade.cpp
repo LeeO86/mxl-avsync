@@ -275,6 +275,35 @@ AudioObservation audio_observation(const AudioTimecode& p) {
 void Pairer::observe_audio(const AudioObservation& audio)
 {
     audios_.push_back(audio);
+    audio_used_.push_back(false);
+}
+
+Measurement Pairer::make_missing_video(const AudioObservation& audio)
+{
+    Measurement m;
+    m.test_id = test_id_;
+    const double event_ms = audio.timecode ? static_cast<double>(audio.event_time_ns) / 1e6 : audio.time_ms;
+    m.seq = period_ms_ > 0 ? static_cast<uint64_t>(std::llround(std::max(0.0, event_ms) / period_ms_)) : 0;
+    m.event_id = event_id_for(m.seq);
+    m.mode = mode_;
+    m.have_audio = true;
+    m.audio_timecode = audio.timecode;
+    m.source_id = audio.source_id;
+    m.audio_send_ns = audio.audio_send_ns;
+    m.audio_time_ms = audio.time_ms;
+    m.audio_tai_ns = audio.tai_ns;
+    m.video_time_ms = event_ms; // no video was found; the event's nominal time keeps the log in order
+    m.correlation = audio.correlation;
+    m.audio_level_dbfs = audio.level_dbfs;
+    m.clipped = audio.clipped;
+    m.grade = "invalid";
+    m.video_quality = "invalid";
+    m.audio_quality = audio.quality;
+    m.reason = audio.duplicate ? "duplicate" : "missing_video";
+    m.flags = {m.reason};
+    m.reference = reference_;
+    m.uncertainty_status = "unknown";
+    return m;
 }
 
 Measurement Pairer::make_invalid(const PendingVideo& pending, const std::string& reason, const std::vector<std::string>& flags)
@@ -455,6 +484,7 @@ std::vector<Measurement> Pairer::poll(double now_ms)
         }
         const bool window_closed = now_ms > target + (pending.video.timecode ? 10000.0 : 2.0 * period_ms_);
         if (best != nullptr) {
+            audio_used_[static_cast<size_t>(best - audios_.data())] = true;
             auto measured = pair_one(pending, best, {});
             pending.resolved = true;
             done_.push_back(measured);
@@ -466,6 +496,33 @@ std::vector<Measurement> Pairer::poll(double now_ms)
             done_.push_back(measured);
             fresh.push_back(measured);
         }
+    }
+    if (live_stream_) {
+        if (first_poll_ms_ < 0) first_poll_ms_ = now_ms;
+        // An audio event no video claimed within its window is reported, never dropped silently.
+        for (size_t i = 0; i < audios_.size(); ++i) {
+            const auto& audio = audios_[i];
+            const double horizon = audio.time_ms + (audio.timecode ? 10000.0 : 4.0 * period_ms_);
+            if (!audio_used_[i] && now_ms > horizon && audio.time_ms >= first_poll_ms_ - 2.0 * period_ms_) {
+                audio_used_[i] = true;
+                auto measured = make_missing_video(audio);
+                fresh.push_back(measured);
+            }
+        }
+        // Keep only what can still pair: unresolved videos and audio inside the longest window.
+        const double keep_from = now_ms - 10000.0 - 4.0 * period_ms_;
+        videos_.erase(std::remove_if(videos_.begin(), videos_.end(), [](const PendingVideo& v) { return v.resolved; }), videos_.end());
+        size_t w = 0;
+        for (size_t i = 0; i < audios_.size(); ++i) {
+            if (!(audio_used_[i] && audios_[i].time_ms < keep_from) && audios_[i].time_ms >= keep_from - 10000.0) {
+                audios_[w] = audios_[i];
+                audio_used_[w] = audio_used_[i];
+                ++w;
+            }
+        }
+        audios_.resize(w);
+        audio_used_.resize(w);
+        done_.clear();
     }
     return fresh;
 }

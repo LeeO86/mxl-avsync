@@ -585,3 +585,97 @@ TEST_CASE("AVS2 brand is centered and the moving box passes below white foregrou
         const auto decoded=decode_qr_signal(frame.y.data(),1280,720,1280);REQUIRE(decoded);CHECK(decoded->payload.qr_flash);
     }
 }
+
+TEST_CASE("live picture gives the same v210 as a full render on every grain")
+{
+    std::string error;
+    SourceClip gif;
+    REQUIRE(gif.load(fixture("blink.gif"), error));
+    SourceClip png;
+    REQUIRE(png.load(fixture("transparent.png"), error));
+    struct Case {
+        const char* format;
+        int grains;
+    };
+    for (const Case c : {Case{"1080p50", 160}, Case{"1080i25", 120}, Case{"720p50", 80}, Case{"1080p59.94", 80}}) {
+        const auto format = parse_video_format(c.format);
+        REQUIRE(format);
+        const Rate pace = format->grain_rate();
+        const int rows = format->grain_height();
+        const Period period = plan_period(*format, 2);
+        LivePicture live;
+        Yuv422p10 full;
+        full.resize(format->width, rows);
+        std::vector<uint8_t> packed(v210_line_bytes(format->width) * static_cast<size_t>(rows));
+        int checked = 0;
+        for (int n = 0; n < c.grains; ++n) {
+            const uint64_t index = 90000000000ULL + static_cast<uint64_t>(n);
+            const int fip = static_cast<int>(index % static_cast<uint64_t>(period.grains));
+            const uint64_t seq = index / static_cast<uint64_t>(period.grains);
+            const double ms = static_cast<double>(index_to_ns(pace, index)) / 1e6;
+            PictureInfo info;
+            info.format_line = format->token;
+            info.period_ms = period.period_ms;
+            // Settings change on the way: offset, title, subtitle, a PNG, then an animated GIF.
+            info.offset_line = n < c.grains / 2 ? "offset 0 ms" : "offset 35 ms";
+            if (n >= c.grains / 4) info.source = "Studio 3";
+            if (n >= c.grains / 3) info.subtitle = "phone 1234";
+            if (n >= c.grains / 2 && n < c.grains * 3 / 4) info.source_image = png.at(ms);
+            if (n >= c.grains * 3 / 4) info.source_image = gif.at(ms);
+            QrPayload payload;
+            payload.timecode = payload.qr_flash = true;
+            payload.mode = "LIVE";
+            payload.test_id = "live-picture";
+            payload.k = seq;
+            payload.tk = index_to_ns(pace, seq * static_cast<uint64_t>(period.grains));
+            payload.offset_ms = n < c.grains / 2 ? 0 : 35;
+            payload.format = format->token;
+            info.qr_json = qr_payload_text(payload);
+            const bool white = flash_white(fip, period.period_ms / period.grains);
+            render_picture(full, info, seq, fip, period.grains, white);
+            pack_v210(full.y.data(), full.cb.data(), full.cr.data(), format->width, rows, format->width, packed.data());
+            const auto& incremental = live.render(format->width, rows, info, seq, fip, period.grains, white);
+            CHECK_MESSAGE(incremental == packed, c.format << " grain " << n);
+            ++checked;
+        }
+        CHECK(checked == c.grains);
+    }
+    // The legacy layout is drawn in full and must match too.
+    const auto format = parse_video_format("1080p50");
+    LivePicture live;
+    Yuv422p10 full;
+    full.resize(format->width, format->height);
+    std::vector<uint8_t> packed(v210_line_bytes(format->width) * static_cast<size_t>(format->height));
+    PictureInfo info;
+    info.format_line = "1080p50";
+    info.qr_json = "{\"s\":\"mxl-avsync/1\",\"k\":7}";
+    for (int fip = 0; fip < 3; ++fip) {
+        render_picture(full, info, 7, fip, 25, fip == 0);
+        pack_v210(full.y.data(), full.cb.data(), full.cr.data(), format->width, format->height, format->width, packed.data());
+        CHECK(live.render(format->width, format->height, info, 7, fip, 25, fip == 0) == packed);
+    }
+}
+
+TEST_CASE("v210 region packing matches the full packer and touches only its groups")
+{
+    for (int width : {1920, 1280, 720, 1366, 64}) {
+        const int height = 9;
+        std::vector<uint16_t> y(static_cast<size_t>(width * height)), cb(static_cast<size_t>(width / 2 * height)), cr(cb.size());
+        uint32_t seed = 3;
+        auto next = [&] { seed = seed * 1103515245u + 12345u; return static_cast<uint16_t>((seed >> 8) & 0x3FF); };
+        for (auto* plane : {&y, &cb, &cr})
+            for (auto& v : *plane) v = next();
+        std::vector<uint8_t> full(v210_line_bytes(width) * height, 0xAB), region(full.size(), 0xAB);
+        pack_v210(y.data(), cb.data(), cr.data(), width, height, width, full.data());
+        pack_v210_region(y.data(), cb.data(), cr.data(), width, width, 0, width, 0, height, region.data());
+        CHECK(full == region);
+        std::vector<uint8_t> part(full.size(), 0xAB);
+        pack_v210_region(y.data(), cb.data(), cr.data(), width, width, 12, 30, 2, 5, part.data());
+        for (int row = 0; row < height; ++row)
+            for (size_t b = 0; b < v210_line_bytes(width); ++b) {
+                const size_t i = static_cast<size_t>(row) * v210_line_bytes(width) + b;
+                const bool inside = row >= 2 && row < 5 && b >= 2 * 16 && b < 5 * 16 && b < static_cast<size_t>((width + 5) / 6 * 16);
+                CHECK((inside ? part[i] == full[i] : part[i] == 0xAB));
+            }
+    }
+}

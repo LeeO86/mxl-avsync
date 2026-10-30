@@ -379,38 +379,49 @@ size_t v210_line_bytes(int width)
 
 void pack_v210(const uint16_t* y, const uint16_t* cb, const uint16_t* cr, int width, int height, int y_stride, uint8_t* dst)
 {
+    pack_v210_region(y, cb, cr, width, y_stride, 0, width, 0, height, dst);
+}
+
+void pack_v210_region(const uint16_t* y, const uint16_t* cb, const uint16_t* cr, int width, int y_stride, int x0, int x1, int y0, int y1,
+    uint8_t* dst)
+{
     const size_t stride = v210_line_bytes(width);
-    for (int row = 0; row < height; ++row) {
+    const int c_stride = y_stride / 2;
+    const int last_y = width - 1;
+    const int last_c = width / 2 - 1;
+    const int g0 = std::max(0, x0) / 6;
+    const int g1 = (std::min(x1, width) + 5) / 6;
+    // Groups whose six samples and three chroma pairs are all inside the line need no clamping.
+    const int g_fast = std::min(g1, std::max(g0, width / 6));
+    for (int row = std::max(0, y0); row < y1; ++row) {
         uint32_t* out = reinterpret_cast<uint32_t*>(dst + static_cast<size_t>(row) * stride);
-        const uint16_t* yline = y + static_cast<size_t>(row) * static_cast<size_t>(y_stride);
-        int word = 0;
-        for (int x = 0; x < width; x += 6) {
-            auto Y = [&](int i) { return static_cast<uint32_t>(yline[std::min(i, width - 1)] & 0x3FF); };
-            auto C = [&](const uint16_t* plane, int i) {
-                if (plane == nullptr) {
-                    return static_cast<uint32_t>(kYNeutralChroma);
-                }
-                const int cx = std::min(i / 2, width / 2 - 1);
-                return static_cast<uint32_t>(plane[static_cast<size_t>(row) * static_cast<size_t>(y_stride) / 2 + cx] & 0x3FF);
+        const uint16_t* yl = y + static_cast<size_t>(row) * static_cast<size_t>(y_stride);
+        const uint16_t* cbl = cb ? cb + static_cast<size_t>(row) * static_cast<size_t>(c_stride) : nullptr;
+        const uint16_t* crl = cr ? cr + static_cast<size_t>(row) * static_cast<size_t>(c_stride) : nullptr;
+        int g = g0;
+        if (cbl && crl && width / 2 >= 3) {
+            for (; g < g_fast; ++g) {
+                const uint16_t* py = yl + g * 6;
+                const uint16_t* pb = cbl + g * 3;
+                const uint16_t* pr = crl + g * 3;
+                uint32_t* w = out + g * 4;
+                w[0] = (pb[0] & 0x3FFu) | (uint32_t(py[0] & 0x3FFu) << 10) | (uint32_t(pr[0] & 0x3FFu) << 20);
+                w[1] = (py[1] & 0x3FFu) | (uint32_t(pb[1] & 0x3FFu) << 10) | (uint32_t(py[2] & 0x3FFu) << 20);
+                w[2] = (pr[1] & 0x3FFu) | (uint32_t(py[3] & 0x3FFu) << 10) | (uint32_t(pb[2] & 0x3FFu) << 20);
+                w[3] = (py[4] & 0x3FFu) | (uint32_t(pr[2] & 0x3FFu) << 10) | (uint32_t(py[5] & 0x3FFu) << 20);
+            }
+        }
+        for (; g < g1; ++g) {
+            const int x = g * 6;
+            auto Y = [&](int i) { return static_cast<uint32_t>(yl[std::min(i, last_y)] & 0x3FF); };
+            auto C = [&](const uint16_t* line, int i) {
+                return line ? static_cast<uint32_t>(line[std::min(i / 2, last_c)] & 0x3FF) : static_cast<uint32_t>(kYNeutralChroma);
             };
-            // chroma planes are stored at half width with their own stride = y_stride/2 when non-null.
-            const uint32_t cb0 = cb ? static_cast<uint32_t>(cb[static_cast<size_t>(row) * (y_stride / 2) + std::min(x / 2, width / 2 - 1)] & 0x3FF)
-                                    : kYNeutralChroma;
-            const uint32_t cr0 = cr ? static_cast<uint32_t>(cr[static_cast<size_t>(row) * (y_stride / 2) + std::min(x / 2, width / 2 - 1)] & 0x3FF)
-                                    : kYNeutralChroma;
-            const uint32_t cb1 = cb ? static_cast<uint32_t>(cb[static_cast<size_t>(row) * (y_stride / 2) + std::min((x + 2) / 2, width / 2 - 1)] & 0x3FF)
-                                    : kYNeutralChroma;
-            const uint32_t cr1 = cr ? static_cast<uint32_t>(cr[static_cast<size_t>(row) * (y_stride / 2) + std::min((x + 2) / 2, width / 2 - 1)] & 0x3FF)
-                                    : kYNeutralChroma;
-            const uint32_t cb2 = cb ? static_cast<uint32_t>(cb[static_cast<size_t>(row) * (y_stride / 2) + std::min((x + 4) / 2, width / 2 - 1)] & 0x3FF)
-                                    : kYNeutralChroma;
-            const uint32_t cr2 = cr ? static_cast<uint32_t>(cr[static_cast<size_t>(row) * (y_stride / 2) + std::min((x + 4) / 2, width / 2 - 1)] & 0x3FF)
-                                    : kYNeutralChroma;
-            out[word++] = (cb0) | (Y(x) << 10) | (cr0 << 20);
-            out[word++] = (Y(x + 1)) | (cb1 << 10) | (Y(x + 2) << 20);
-            out[word++] = (cr1) | (Y(x + 3) << 10) | (cb2 << 20);
-            out[word++] = (Y(x + 4)) | (cr2 << 10) | (Y(x + 5) << 20);
-            (void)C;
+            uint32_t* w = out + g * 4;
+            w[0] = C(cbl, x) | (Y(x) << 10) | (C(crl, x) << 20);
+            w[1] = Y(x + 1) | (C(cbl, x + 2) << 10) | (Y(x + 2) << 20);
+            w[2] = C(crl, x + 2) | (Y(x + 3) << 10) | (C(cbl, x + 4) << 20);
+            w[3] = Y(x + 4) | (C(crl, x + 4) << 10) | (Y(x + 5) << 20);
         }
     }
 }
