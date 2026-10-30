@@ -132,6 +132,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     uint64_t packets_skipped = 0;
     int writer_rate = config.event_rate;
     std::string writer_profile = config.audio_timecode;
+    uint64_t last_video_index = 0; // 0: nothing written yet
 
     while (!stop.load()) {
         config = callbacks.copy_config();
@@ -151,6 +152,10 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             callbacks.count_late(true);
             index = index_now(pace);
         }
+        if (last_video_index != 0 && index > last_video_index + 1 && callbacks.count_missed) {
+            callbacks.count_missed(true, index - last_video_index - 1); // grains never written
+        }
+        if (index > last_video_index) last_video_index = index;
         if (halted) {
             domain.write_silence_grain(index);
         } else {

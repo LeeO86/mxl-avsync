@@ -56,6 +56,7 @@ struct LiveCallbacks {
     std::function<void()> count_video_grain;
     std::function<void()> count_audio_grain;
     std::function<void(bool video)> count_late;
+    std::function<void(bool video, uint64_t grains)> count_missed; // grain indices skipped, never written
     std::function<void()> count_resync;
 };
 

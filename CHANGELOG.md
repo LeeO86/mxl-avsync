@@ -2,7 +2,7 @@
 
 ## 2.0.1 (unreleased)
 
-- The live MXL generator draws the uploaded source picture next to the Title (decoded once per upload, replaced by a new upload, restored from the state directory after a restart); before, only file output showed it.
+- The live MXL generator draws the uploaded source picture next to the Title, replaced by a new upload and restored after a container restart (not a new pod: `/config` is an emptyDir); before, only file output showed it. Pictures are decoded once, outside the lock the generator uses, and scaled at load to at most 256 px per side; uploads above 16 MiB, 600 frames or 64 MiB decoded are refused with 413, a failed upload keeps the previous picture, and a broken stored picture is skipped with a `source_image_skipped` warning. `mxl_avsync_output_frames_missed_total{essence="video"}` now counts generator grains never written (it was always 0).
 
 ## 2.0.0 (2026-10-29)
 

@@ -71,11 +71,31 @@ print(n)
 PY
 }
 
+# upload <file> [expected http code]
 upload() {
   local code
   code=$(curl -s -o "$WORK/upload.json" -w '%{http_code}' -X POST -H 'Content-Type: image/png' --data-binary @"$1" "$API/api/v1/generator/source-image")
-  [[ "$code" == "200" ]] || { cat "$WORK/upload.json" >&2; echo "upload $1: $code" >&2; exit 1; }
+  [[ "$code" == "${2:-200}" ]] || { cat "$WORK/upload.json" >&2; echo "upload $1: $code, expected ${2:-200}" >&2; exit 1; }
 }
+
+# gif <width> <height> <frames> <file>: tiny file, many full-canvas frames (1x1 pixel changes).
+gif() {
+  python3 - "$@" <<'PY'
+import struct, sys
+w, h, n, out = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+b = bytearray(b'GIF89a' + struct.pack('<HHBBB', w, h, 0, 0, 0))
+b += b'\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00'
+for i in range(n):
+    b += b'\x21\xf9\x04\x00' + struct.pack('<H', 10) + b'\x00\x00'
+    b += b'\x2c' + struct.pack('<HHHHB', i % w, 0, 1, 1, 0x80) + bytes((255, 0, 0, 0, 0, 255))
+    b += b'\x02\x02\x44\x01\x00'
+b += b'\x3b'
+open(out, 'wb').write(b)
+PY
+}
+
+rss_mib() { awk '/^VmRSS/ {print int($2 / 1024)}' "/proc/$PID/status"; }
+alive() { kill -0 "$PID" 2>/dev/null && [[ "$(curl -s -o /dev/null -w '%{http_code}' "$API/readyz" || true)" == "200" ]]; }
 
 mkdir -p "$WORK/state"
 solid 255 0 0 "$WORK/red.png"
@@ -93,4 +113,27 @@ stop_gen
 start_gen
 restored=$(count blue)
 [[ "$restored" -ge 500 ]] || { echo "stored picture not drawn after restart: $restored" >&2; exit 1; }
-echo "source-image.sh ok (red $before -> $red, blue $blue, after restart $restored)"
+
+# Small files that expand to many full-canvas frames are scaled at load and capped in decoded bytes.
+gif 1920 1080 60 "$WORK/many.gif"
+upload "$WORK/many.gif"
+frames=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["frames"])' "$WORK/upload.json")
+[[ "$frames" == "60" ]] || { echo "60-frame GIF reported $frames frames" >&2; exit 1; }
+alive || { echo "generator died after a 60-frame 1080p GIF" >&2; exit 1; }
+rss=$(rss_mib)
+[[ "$rss" -lt 300 ]] || { echo "60-frame 1080p GIF: RSS $rss MiB" >&2; exit 1; }
+gif 4096 4096 600 "$WORK/bomb.gif"
+upload "$WORK/bomb.gif" 413
+alive || { echo "generator died after an oversized GIF" >&2; exit 1; }
+rss_bomb=$(rss_mib)
+[[ "$rss_bomb" -lt 400 ]] || { echo "oversized GIF: RSS $rss_bomb MiB" >&2; exit 1; }
+# A refused upload keeps the previous picture: same bytes served, same picture drawn.
+cmp -s <(curl -sf "$API/api/v1/generator/source-image") "$WORK/many.gif" || { echo "refused upload replaced the stored picture" >&2; exit 1; }
+[[ "$(curl -sf "$API/api/v1/generator" | python3 -c 'import json,sys; print(json.load(sys.stdin)["source_image_frames"])')" == "60" ]] \
+  || { echo "refused upload changed the frame count" >&2; exit 1; }
+# A broken stored picture is skipped with a warning at start; the generator still becomes ready.
+stop_gen
+printf 'GIF89a broken' > "$WORK/state/source-ident.gif"
+start_gen
+grep -q source_image_skipped "$WORK/gen.log" || { echo "no warning for a broken stored picture" >&2; exit 1; }
+echo "source-image.sh ok (red $before -> $red, blue $blue, after restart $restored, 60-frame GIF RSS $rss MiB, oversized GIF 413 at RSS $rss_bomb MiB)"

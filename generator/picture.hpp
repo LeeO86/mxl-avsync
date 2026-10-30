@@ -33,10 +33,20 @@ struct SourceStill {
     std::vector<uint8_t> rgba;
 };
 
+// Decoded source pictures are kept small: each frame is scaled down at load to fit
+// kSourceStillMaxSide (the drawn box is about frame height / 12, 90 px at 1080 lines), and the
+// whole clip may hold at most kSourceClipMaxBytes of RGBA, so a tiny file cannot expand to GiB.
+constexpr int kSourceStillMaxSide = 256;
+constexpr size_t kSourceClipMaxBytes = 64u * 1024u * 1024u;
+constexpr int kSourceClipMaxFrames = 600;
+constexpr size_t kSourceImageMaxFileBytes = 16u * 1024u * 1024u;
+
 struct SourceClip {
     std::vector<SourceStill> frames;
     std::vector<double> start_ms;
     double loop_ms = 0;
+    bool over_limit = false; // load() refused the picture for its size, frame count or decoded bytes
+    size_t decoded_bytes = 0;
     bool load(const std::string& path, std::string& error);
     // Frame of an animated GIF at this media time. A still always returns its only picture.
     const SourceStill* at(double media_ms) const;
