@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.1 (unreleased)
+# mxl-avsync 2.0.1
 
 Fixes for the 2.0.0 deployment and operations notes for the AVS2 signal. The
 signal, ports, NMOS resources and dependency pins are unchanged from 2.0.0.
