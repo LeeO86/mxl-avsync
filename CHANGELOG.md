@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+- `AVSYNC_EVENT_RATE` and `AVSYNC_AUDIO_TIMECODE` are live settings: when set in the environment they are start values, and the Signal API/UI change them on the running generator (before, the change was silently ignored with `ok:true`).
+
 ## 2.0.0 (2026-10-29)
 
 - Introduce the shared AVS2 QR + flash picture in file, MXL and iPhone sources
