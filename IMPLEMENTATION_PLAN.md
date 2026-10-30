@@ -1073,3 +1073,10 @@ not claimed. Public screenshots come from the actual native shared renderer.
 The user reported both optical tests successful and markedly steadier, with
 10–30-ms video variation on the SRT/browser path; no new accuracy validation
 or attribution to WebRTC alone follows from that observation.
+
+
+## Live writer timing (2.0.2, 2026-10-30)
+
+The generator used one thread for video and audio: it slept until `T_k`, took the index from `mxlGetCurrentIndex` (rounds to the nearest grain), rendered, committed, then wrote audio up to `T_{k+1} + AVSYNC_AUDIO_LEAD_MS`. On a busy node the render took most of a grain, video arrived about one render time after `T_k`, and a wake-up more than half a grain late skipped the grain (platform: 8–9 missed grains per minute; a missed event grain gave a −20 ms event).
+
+Now video grain `k` is rendered right after grain `k − 1` and committed at `T_k − AVSYNC_VIDEO_LEAD_MS` (`next_video_slot` in core, unit tested). Late grains are still written; the writer skips only when more than four grains behind. Audio has its own thread, as §2.2 always said, with 10 ms blocks half a block off the video grid. Default video lead 20 ms: one grain at 50p, so a reader that asks for the current index (rounded, from `T_k −` half a grain) finds the grain present at 50p and slower; a render up to 20 ms over its budget still lands before `T_k`; and it equals the audio lead, so both essences leave the generator about equally early. Real-time scheduling (`SCHED_FIFO`) was not added: the image has no `CAP_SYS_NICE`, and with the lead and catch-up no grain was missed at a platform-like load in the lab.

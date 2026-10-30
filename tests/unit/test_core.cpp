@@ -279,6 +279,45 @@ TEST_CASE("gray code, marker, drops and a half-transition frame")
     CHECK(drops.drops() >= 2);
 }
 
+TEST_CASE("live video schedule commits ahead and skips only after four grains")
+{
+    const Rate rate{50, 1};
+    const auto at = [&](uint64_t k) { return static_cast<uint64_t>(index_to_ns(rate, k)); };
+    const uint64_t ms = 1000000ULL;
+    const uint64_t lead = 20 * ms;
+    // Start: the first grain whose commit time (T_k - lead) is still ahead.
+    auto slot = next_video_slot(rate, 0, at(100) + 3 * ms, lead);
+    CHECK(slot.index == 102);
+    CHECK(slot.skipped == 0);
+    // On time: the next grain, rendered a whole grain ahead of its commit time.
+    slot = next_video_slot(rate, 101, at(101) - lead + 12 * ms, lead);
+    CHECK(slot.index == 102);
+    CHECK(slot.skipped == 0);
+    // A 35 ms scheduling delay (past half a grain, which rounding to the current index lost) loses no grain.
+    slot = next_video_slot(rate, 101, at(102) + 15 * ms, lead);
+    CHECK(slot.index == 102);
+    CHECK(slot.skipped == 0);
+    // Up to four grains behind its timestamp the writer catches up without skipping.
+    slot = next_video_slot(rate, 101, at(105) + 19 * ms, lead);
+    CHECK(slot.index == 102);
+    CHECK(slot.skipped == 0);
+    // More than four grains behind: continue at the first grain whose commit time is ahead.
+    slot = next_video_slot(rate, 101, at(106) + 1 * ms, lead);
+    CHECK(slot.index == 108);
+    CHECK(slot.skipped == 6);
+    // Lead 0 commits at T_k.
+    slot = next_video_slot(rate, 0, at(100) + 3 * ms, 0);
+    CHECK(slot.index == 101);
+    // The clock stepped back: start again, nothing counted as skipped.
+    slot = next_video_slot(rate, 1000, at(100), lead);
+    CHECK(slot.index == 101);
+    CHECK(slot.skipped == 0);
+    // 59.94: the same rule on a fractional grid.
+    const Rate ntsc{60000, 1001};
+    slot = next_video_slot(ntsc, 0, static_cast<uint64_t>(index_to_ns(ntsc, 500)), 0);
+    CHECK(slot.index == 500);
+}
+
 TEST_CASE("qr payload schema bounds")
 {
     QrPayload payload;

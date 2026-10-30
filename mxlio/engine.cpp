@@ -49,6 +49,9 @@ ChirpSpec chirp_from(const Config& config)
     return spec;
 }
 
+// Audio writer block (SPECIFICATION §2.2: blocks of 10 ms).
+constexpr uint64_t kAudioBlockNs = 10000000ULL;
+
 void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 {
     Config config = callbacks.copy_config();
@@ -119,46 +122,114 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     status.rate_fps = static_cast<double>(format->frame.num) / static_cast<double>(format->frame.den);
     callbacks.set_status(status);
 
-    const Rate audio_rate{48000, 1};
-    uint64_t audio_written = 0;
-    bool audio_started = false;
+    // Audio has its own writer thread (SPECIFICATION §2.2), so a slow video render never delays it.
+    // It wakes every 10 ms block and fills the flow up to one block past AVSYNC_AUDIO_LEAD_MS:
+    // every sample is committed between the lead and the lead plus one block before its timestamp.
+    std::atomic<bool> audio_stop{false};
+    std::thread audio_thread([&, status] () mutable {
+        const Rate audio_rate{48000, 1};
+        const uint64_t block_ns = kAudioBlockNs;
+        uint64_t audio_written = 0;
+        bool audio_started = false;
+        std::vector<float> samples;
+        AudioTimecodeWriter timecode_writer;
+        uint64_t packets_skipped = 0;
+        Config audio_config = callbacks.copy_config();
+        int writer_rate = audio_config.event_rate;
+        std::string writer_profile = audio_config.audio_timecode;
+        while (!stop.load() && !audio_stop.load()) {
+            audio_config = callbacks.copy_config();
+            if (writer_rate != audio_config.event_rate || writer_profile != audio_config.audio_timecode) {
+                timecode_writer = AudioTimecodeWriter{};
+                writer_rate = audio_config.event_rate; writer_profile = audio_config.audio_timecode;
+            }
+            const bool halted = callbacks.stopped();
+            const uint64_t lead_ns = static_cast<uint64_t>(std::max(0, audio_config.audio_lead_ms)) * 1000000ULL;
+            const uint64_t now = tai_now();
+            // Half a block off the video grid, so this thread and the video commit do not wake together.
+            uint64_t next_wake = (now / block_ns) * block_ns + block_ns / 2;
+            if (next_wake <= now) {
+                next_wake += block_ns;
+            }
+            const uint64_t target = index_at(audio_rate, next_wake + lead_ns);
+            if (!audio_started) {
+                audio_written = index_at(audio_rate, now + lead_ns);
+                audio_started = true;
+            }
+            if (target > audio_written && max_write > 0) {
+                const int frames = static_cast<int>(std::min<uint64_t>(target - audio_written, 48000));
+                samples.assign(static_cast<size_t>(frames * audio_config.audio_channels), 0.f);
+                if (!halted && audio_config.audio_enable) {
+                    PlanConfig plan = plan_from(audio_config, *format);
+                    const Period period = plan_period(*format, audio_config.event_rate);
+                    const uint64_t centre_grain = index_at(pace, time_of_index(audio_rate, audio_written));
+                    uint64_t seq = centre_grain / static_cast<uint64_t>(std::max(1, period.grains));
+                    if (seq > 2) {
+                        seq -= 2;
+                    } else {
+                        seq = 0;
+                    }
+                    std::vector<PlannedEvent> events;
+                    for (int extra = 0; extra < 6; ++extra) {
+                        events.push_back(live_event(plan, seq + static_cast<uint64_t>(extra)));
+                    }
+                    std::vector<float> mono(static_cast<size_t>(frames));
+                    if (plan.timecode_baud) {
+                        const auto previous = timecode_writer.skipped();
+                        timecode_writer.write(events, audio_written, mono.data(), mono.size(), plan.timecode_baud, audio_config.chirp_level_dbfs);
+                        if (timecode_writer.skipped() != previous) {
+                            packets_skipped += timecode_writer.skipped() - previous;
+                            status.timecode_skipped = packets_skipped;
+                            callbacks.set_status(status);
+                        }
+                    } else synthesise_block(chirp_from(audio_config), events, audio_written, mono.data(), mono.size());
+                    for (int frame = 0; frame < frames; ++frame) {
+                        for (int channel = 0; channel < audio_config.audio_channels; ++channel) {
+                            samples[static_cast<size_t>(frame * audio_config.audio_channels + channel)] = mono[static_cast<size_t>(frame)];
+                        }
+                    }
+                }
+                if (domain.write_samples(audio_written + static_cast<uint64_t>(frames), samples.data(), frames, audio_config.audio_channels, max_write)) {
+                    audio_written += static_cast<uint64_t>(frames);
+                    if (callbacks.count_audio_grain) {
+                        callbacks.count_audio_grain();
+                    }
+                } else {
+                    callbacks.count_late(false);
+                }
+            }
+            sleep_until_tai(next_wake);
+        }
+    });
+
     Yuv422p10 picture;
     picture.resize(format->width, grain_rows);
     std::vector<uint8_t> packed(v210_line_bytes(format->width) * static_cast<size_t>(grain_rows));
-    std::vector<float> samples;
     uint64_t qr_seq = ~0ULL;
     std::string qr_cached;
-    AudioTimecodeWriter timecode_writer;
-    uint64_t packets_skipped = 0;
     int writer_rate = config.event_rate;
     std::string writer_profile = config.audio_timecode;
     uint64_t last_video_index = 0; // 0: nothing written yet
+    // AVSYNC_VIDEO_LEAD_MS is a restart key: grain k is committed at T_k - lead.
+    const uint64_t video_lead_ns = static_cast<uint64_t>(std::max(0, config.video_lead_ms)) * 1000000ULL;
 
+    // Grain k is rendered right after grain k-1 is committed (a whole grain period ahead) and committed
+    // at T_k - lead, or at once when the render ends later. A scheduling delay therefore costs no grain
+    // until the next render would start more than four grains after its own timestamp; only then the
+    // writer skips ahead to the first grain whose commit time is still ahead, and counts the skipped ones.
     while (!stop.load()) {
         config = callbacks.copy_config();
         if (writer_rate != config.event_rate || writer_profile != config.audio_timecode) {
-            timecode_writer = AudioTimecodeWriter{};
             writer_rate = config.event_rate; writer_profile = config.audio_timecode;
             qr_seq = ~0ULL;
         }
         const bool halted = callbacks.stopped();
-        const uint64_t now = tai_now();
-        uint64_t index = index_now(pace);
-        const uint64_t when = time_of_index(pace, index);
-        if (now + 1000000 < when) {
-            sleep_until_tai(when);
+        const VideoSlot slot = next_video_slot(pace, last_video_index, tai_now(), video_lead_ns);
+        const uint64_t index = slot.index;
+        if (slot.skipped > 0 && callbacks.count_missed) {
+            callbacks.count_missed(true, slot.skipped); // grains never written
         }
-        if (tai_now() > time_of_index(pace, index + 1)) {
-            callbacks.count_late(true);
-            index = index_now(pace);
-        }
-        if (last_video_index != 0 && index > last_video_index + 1 && callbacks.count_missed) {
-            callbacks.count_missed(true, index - last_video_index - 1); // grains never written
-        }
-        if (index > last_video_index) last_video_index = index;
-        if (halted) {
-            domain.write_silence_grain(index);
-        } else {
+        if (!halted) {
             const Period period = plan_period(*format, config.event_rate);
             const uint64_t seq = index / static_cast<uint64_t>(std::max(1, period.grains));
             const int frame_in_period = static_cast<int>(index % static_cast<uint64_t>(std::max(1, period.grains)));
@@ -204,67 +275,38 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             info.source_image = source_clip ? source_clip->at(ms) : nullptr;
             render_picture(picture, info, seq, frame_in_period, period.grains, config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
             pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format->width, grain_rows, format->width, packed.data());
+        }
+        const uint64_t stamp = time_of_index(pace, index);
+        const uint64_t due = stamp - video_lead_ns;
+        if (tai_now() < due) {
+            sleep_until_tai(due);
+        }
+        if (stop.load()) {
+            break;
+        }
+        if (halted) {
+            domain.write_silence_grain(index);
+        } else {
             const bool wrote = domain.write_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {
                 std::memcpy(dst, packed.data(), std::min(size, packed.size()));
             });
             if (wrote) {
                 callbacks.count_video_grain();
                 note_preview_v210("generated", packed.data(), format->width, grain_rows);
-                if (frame_in_period == 0) {
+                const Period period = plan_period(*format, config.event_rate);
+                if (index % static_cast<uint64_t>(std::max(1, period.grains)) == 0) {
                     callbacks.count_generator_event();
                 }
             }
         }
-
-        const uint64_t target_ns = time_of_index(pace, index + 1) + static_cast<uint64_t>(std::max(0, config.audio_lead_ms)) * 1000000ULL;
-        uint64_t target = index_at(audio_rate, target_ns);
-        if (!audio_started) {
-            audio_written = target;
-            audio_started = true;
+        if (tai_now() > stamp) {
+            callbacks.count_late(true); // committed after its own timestamp
         }
-        if (target > audio_written && max_write > 0) {
-            const int frames = static_cast<int>(std::min<uint64_t>(target - audio_written, 48000));
-            samples.assign(static_cast<size_t>(frames * config.audio_channels), 0.f);
-            if (!halted && config.audio_enable) {
-                PlanConfig plan = plan_from(config, *format);
-                const Period period = plan_period(*format, config.event_rate);
-                const uint64_t centre_grain = index_at(pace, time_of_index(audio_rate, audio_written));
-                uint64_t seq = centre_grain / static_cast<uint64_t>(std::max(1, period.grains));
-                if (seq > 2) {
-                    seq -= 2;
-                } else {
-                    seq = 0;
-                }
-                std::vector<PlannedEvent> events;
-                for (int extra = 0; extra < 6; ++extra) {
-                    events.push_back(live_event(plan, seq + static_cast<uint64_t>(extra)));
-                }
-                std::vector<float> mono(static_cast<size_t>(frames));
-                if (plan.timecode_baud) {
-                    const auto previous = timecode_writer.skipped();
-                    timecode_writer.write(events, audio_written, mono.data(), mono.size(), plan.timecode_baud, config.chirp_level_dbfs);
-                    if (timecode_writer.skipped() != previous) {
-                        packets_skipped += timecode_writer.skipped() - previous;
-                        status.timecode_skipped = packets_skipped;
-                        callbacks.set_status(status);
-                    }
-                } else synthesise_block(chirp_from(config), events, audio_written, mono.data(), mono.size());
-                for (int frame = 0; frame < frames; ++frame) {
-                    for (int channel = 0; channel < config.audio_channels; ++channel) {
-                        samples[static_cast<size_t>(frame * config.audio_channels + channel)] = mono[static_cast<size_t>(frame)];
-                    }
-                }
-            }
-            if (domain.write_samples(audio_written + static_cast<uint64_t>(frames), samples.data(), frames, config.audio_channels, max_write)) {
-                audio_written += static_cast<uint64_t>(frames);
-                if (callbacks.count_audio_grain) {
-                    callbacks.count_audio_grain();
-                }
-            } else {
-                callbacks.count_late(false);
-            }
-        }
-        sleep_until_tai(time_of_index(pace, index + 1));
+        last_video_index = index;
+    }
+    audio_stop.store(true);
+    if (audio_thread.joinable()) {
+        audio_thread.join();
     }
     domain.close();
     if (config.mxl_cleanup_on_exit && created_domain) {

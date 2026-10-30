@@ -34,6 +34,25 @@ uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns)
     return static_cast<uint64_t>((static_cast<__int128>(timestamp_ns) * n + 500000000 * d) / (1000000000 * d));
 }
 
+VideoSlot next_video_slot(Rate rate, uint64_t last_index, uint64_t now_ns, uint64_t lead_ns)
+{
+    VideoSlot slot;
+    slot.index = last_index + 1;
+    const auto at = [&](uint64_t index) { return static_cast<uint64_t>(index_to_ns(rate, index)); };
+    if (last_index != 0 && now_ns <= at(slot.index + kVideoMaxLagGrains) && at(slot.index) <= now_ns + lead_ns + 1000000000ULL) {
+        return slot;
+    }
+    uint64_t next = ns_to_index(rate, now_ns + lead_ns);
+    while (at(next) < now_ns + lead_ns) {
+        ++next;
+    }
+    if (last_index != 0 && next > slot.index) {
+        slot.skipped = next - slot.index;
+    }
+    slot.index = next;
+    return slot;
+}
+
 Rate VideoFormat::grain_rate() const
 {
     if (!interlaced) {

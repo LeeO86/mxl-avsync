@@ -23,6 +23,7 @@ struct Config {
     double chirp_level_dbfs = -12;
     bool audio_enable = true;
     int audio_lead_ms = 20;
+    int video_lead_ms = 20;
     int qr_period_ms = 1000;
     std::string test_id;
     std::string title;
