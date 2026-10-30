@@ -49,9 +49,6 @@ ChirpSpec chirp_from(const Config& config)
     return spec;
 }
 
-// Audio writer block (SPECIFICATION §2.2: blocks of 10 ms).
-constexpr uint64_t kAudioBlockNs = 10000000ULL;
-
 void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 {
     Config config = callbacks.copy_config();
@@ -128,7 +125,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     std::atomic<bool> audio_stop{false};
     std::thread audio_thread([&, status] () mutable {
         const Rate audio_rate{48000, 1};
-        const uint64_t block_ns = kAudioBlockNs;
+        const uint64_t block_ns = static_cast<uint64_t>(kAudioBlockMs) * 1000000ULL;
         uint64_t audio_written = 0;
         bool audio_started = false;
         std::vector<float> samples;
@@ -299,8 +296,12 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 }
             }
         }
-        if (tai_now() > stamp) {
+        const uint64_t committed = tai_now();
+        if (committed > stamp) {
             callbacks.count_late(true); // committed after its own timestamp
+        }
+        if (callbacks.video_commit) {
+            callbacks.video_commit((static_cast<double>(committed) - static_cast<double>(stamp)) / 1e6);
         }
         last_video_index = index;
     }

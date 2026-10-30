@@ -81,8 +81,8 @@
         <p class="note">{{ grade }} · {{ measurement.reason || measurement.input_state || 'NO EVENTS' }}</p>
       </section>
       <div class="grid cards" style="margin-top:.9rem">
-        <div class="card"><h3>Offset</h3><dl class="kv">
-          <dt>Offset</dt><dd>{{ signedMs(measurement.offset_ms) }}</dd>
+        <div class="card"><h3>AV sync (what MXL consumers see)</h3><dl class="kv">
+          <dt>AV sync</dt><dd>{{ signedMs(measurement.offset_ms) }}</dd>
           <dt>Grade</dt><dd><span class="pill" :class="gradeKind">{{ grade }}</span></dd>
           <dt>Uncertainty</dt><dd>{{ last.uncertainty_ms != null ? '± ' + formatOffset(last.uncertainty_ms) + ' ms' : (last.uncertainty_status || '–') }}</dd>
           <dt>Paired events</dt><dd>{{ metric('mxl_avsync_events_total{result="paired"}') }}</dd>
@@ -96,12 +96,21 @@
           <dt>Audio level</dt><dd>{{ last.audio_level_dbfs != null ? last.audio_level_dbfs + ' dBFS' : '–' }}</dd>
           <dt>Flags</dt><dd>{{ flagText(last) || '–' }}</dd>
         </dl></div>
-        <div class="card"><h3>{{ measurement.latency_estimated ? 'Estimated latency' : 'Latency' }}</h3>
+        <div class="card"><h3>{{ measurement.latency_estimated ? 'Estimated latency' : 'Arrival vs timestamp' }}</h3>
+          <p v-if="!measurement.latency_estimated" class="note">{{ measurement.labels?.arrival_vs_timestamp_note || 'Arrival time minus the content timestamp.' }}</p>
           <p v-if="measurement.latency_estimated" class="note">Phone clock and scheduled output; display/speaker accuracy unknown. AV sync includes the whole source/camera path.</p>
           <p v-if="!ptpLocked && !measurement.latency_estimated" class="note">needs clock lock (sync_state {{ syncState }})</p>
           <dl v-else class="kv">
-            <dt>Video latency</dt><dd>{{ ms1(measurement.video_latency_ms) }}</dd>
-            <dt>Audio latency</dt><dd>{{ ms1(measurement.audio_latency_ms) }}</dd>
+            <dt>{{ measurement.latency_estimated ? 'Video latency' : 'Video arrival vs timestamp' }}</dt><dd>{{ ms1(measurement.video_latency_ms) }}</dd>
+            <dt>{{ measurement.latency_estimated ? 'Audio latency' : 'Audio arrival vs timestamp' }}</dt><dd>{{ ms1(measurement.audio_latency_ms) }}</dd>
+            <template v-if="measurement.video_chain_latency_ms != null || measurement.audio_chain_latency_ms != null">
+              <dt>Video chain latency</dt><dd>{{ ms1(measurement.video_chain_latency_ms) }}</dd>
+              <dt>Audio chain latency</dt><dd>{{ ms1(measurement.audio_chain_latency_ms) }}</dd>
+              <dt>Source emit offsets</dt><dd>video {{ ms1(measurement.source_emit_offsets?.video_ms) }} · audio {{ ms1(measurement.source_emit_offsets?.audio_ms) }}</dd>
+            </template>
+            <template v-else-if="!measurement.latency_estimated">
+              <dt>Chain latency</dt><dd class="note">unknown: the routed flows carry no source emit offset (NMOS tag)</dd>
+            </template>
           </dl>
           <dl class="kv"><dt>sync_state</dt><dd>{{ syncState }}</dd>
             <dt>Clock source</dt><dd>{{ status.ptp?.sync_source || 'unknown' }}</dd>
@@ -157,6 +166,15 @@
         <button @click="discardGenerator" :disabled="!generatorBaseline || signalSaving">Discard</button>
         <button @click="mute">{{ audioOn ? 'Mute' : 'Unmute' }}</button>
         <button @click="toggleRun">{{ stopped ? 'Start' : 'Stop' }}</button>
+      </div>
+      <div v-if="role=='generator' && status.emit_offsets" class="card" style="margin-top:.9rem" data-testid="emit-offsets">
+        <h3>Emit offsets (commit time vs timestamp)</h3>
+        <p class="note">MXL readers read by timestamp, so the generator commits early. Analyzers subtract these to show chain latency.</p>
+        <dl class="kv">
+          <dt>Video</dt><dd>{{ ms1(status.emit_offsets.video_ms) }} (lead {{ status.emit_offsets.video_lead_ms }} ms)</dd>
+          <dt>Video measured p50 / max</dt><dd>{{ ms1(status.emit_offsets.video_commit_vs_timestamp_ms?.p50) }} / {{ ms1(status.emit_offsets.video_commit_vs_timestamp_ms?.max) }}</dd>
+          <dt>Audio</dt><dd>{{ ms1(status.emit_offsets.audio_ms) }} (lead {{ status.emit_offsets.audio_lead_ms }} ms + up to one {{ status.emit_offsets.audio_block_ms }} ms block)</dd>
+        </dl>
       </div>
     </section>
     <section v-if="tab=='Input'">

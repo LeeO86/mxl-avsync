@@ -21,7 +21,18 @@ struct PtpReading {
     int64_t master_offset_ns = 0;
     std::string port_state = "unknown";
     std::string socket_error;
+    // Status URL extras, when the page sends them (ptp4l / phc2sys offsets and mean path delay).
+    std::optional<int64_t> ptp4l_offset_ns;
+    std::optional<int64_t> phc2sys_offset_ns;
+    std::optional<int64_t> path_delay_ns;
 };
+
+// Body of a status URL: required sync_state and accuracy_ns; optional grandmaster, port_state,
+// ptp4l_offset_ns, phc2sys_offset_ns and path_delay_ns. Anything invalid leaves that field as it was.
+PtpReading parse_ptp_status(const std::string& body);
+
+// Plain HTTP/1.0 GET; true and the body on a 200 answer.
+bool http_get(const std::string& host, const std::string& port, const std::string& path, std::string* body, int timeout_ms);
 
 // GET the URL and read {"sync_state","accuracy_ns"}. Any failure leaves sync_state unknown.
 // Only http:// is accepted. Empty url does not contact anything.

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <chrono>
 #include <cerrno>
 #include <climits>
@@ -20,7 +21,6 @@
 #include <sstream>
 
 namespace avsync {
-namespace {
 
 bool http_get(const std::string& host, const std::string& port, const std::string& path, std::string* body, int timeout_ms)
 {
@@ -75,8 +75,6 @@ bool http_get(const std::string& host, const std::string& port, const std::strin
     return true;
 }
 
-} // namespace
-
 KernelClock read_kernel_clock()
 {
     KernelClock clock;
@@ -91,6 +89,53 @@ KernelClock read_kernel_clock()
     clock.maxerror_us = tx.maxerror;
     clock.tai_offset_s = tx.tai;
     return clock;
+}
+
+PtpReading parse_ptp_status(const std::string& body)
+{
+    PtpReading reading;
+    reading.sync_source = "url";
+    reading.reason = "status URL unavailable or invalid";
+    const auto json = nlohmann::json::parse(body, nullptr, false);
+    if (!json.is_object()) {
+        return reading;
+    }
+    if (json.contains("sync_state") && json["sync_state"].is_string()) {
+        const auto state = json["sync_state"].get<std::string>();
+        if (state == "locked" || state == "unlocked" || state == "unknown") {
+            reading.sync_state = state;
+            reading.reason = "explicit status URL";
+        }
+    }
+    if (json.contains("accuracy_ns") && !json["accuracy_ns"].is_null()) {
+        if (json["accuracy_ns"].is_string()) {
+            reading.accuracy_ns = json["accuracy_ns"].get<std::string>();
+        } else if (json["accuracy_ns"].is_number()) {
+            reading.accuracy_ns = json["accuracy_ns"].dump();
+        }
+    }
+    if (json.contains("grandmaster") && json["grandmaster"].is_string()) {
+        std::string identity;
+        for (char c : json["grandmaster"].get<std::string>()) {
+            if (std::isxdigit(static_cast<unsigned char>(c))) identity += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (identity.size() == 16) {
+            reading.gm_identity = identity;
+            reading.gm_present = true;
+        }
+    }
+    if (json.contains("port_state") && json["port_state"].is_string() && !json["port_state"].get<std::string>().empty()) {
+        reading.port_state = json["port_state"].get<std::string>();
+    }
+    auto integer = [&](const char* key) -> std::optional<int64_t> {
+        if (json.contains(key) && json[key].is_number_integer()) return json[key].get<int64_t>();
+        return std::nullopt;
+    };
+    reading.ptp4l_offset_ns = integer("ptp4l_offset_ns");
+    reading.phc2sys_offset_ns = integer("phc2sys_offset_ns");
+    reading.path_delay_ns = integer("path_delay_ns");
+    if (reading.ptp4l_offset_ns) reading.master_offset_ns = *reading.ptp4l_offset_ns;
+    return reading;
 }
 
 PtpReading read_ptp_status(const std::string& url, int timeout_ms)
@@ -116,25 +161,7 @@ PtpReading read_ptp_status(const std::string& url, int timeout_ms)
     if (!http_get(host, port, path, &body, timeout_ms)) {
         return reading;
     }
-    const auto json = nlohmann::json::parse(body, nullptr, false);
-    if (!json.is_object()) {
-        return reading;
-    }
-    if (json.contains("sync_state") && json["sync_state"].is_string()) {
-        const auto state = json["sync_state"].get<std::string>();
-        if (state == "locked" || state == "unlocked" || state == "unknown") {
-            reading.sync_state = state;
-            reading.reason = "explicit status URL";
-        }
-    }
-    if (json.contains("accuracy_ns") && !json["accuracy_ns"].is_null()) {
-        if (json["accuracy_ns"].is_string()) {
-            reading.accuracy_ns = json["accuracy_ns"].get<std::string>();
-        } else if (json["accuracy_ns"].is_number()) {
-            reading.accuracy_ns = json["accuracy_ns"].dump();
-        }
-    }
-    return reading;
+    return parse_ptp_status(body);
 }
 
 namespace {
