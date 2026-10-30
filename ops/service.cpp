@@ -569,8 +569,16 @@ void install_web(HttpServer& http, Runtime& rt)
             }
             env_set += entry.first;
         }
-        auto response = json_response(config_settings(rt.config));
+        const auto settings = config_settings(rt.config);
+        std::string live_keys;
+        for (auto it = settings.begin(); it != settings.end(); ++it) {
+            if (!is_live_key(it.key())) continue;
+            if (!live_keys.empty()) live_keys += ",";
+            live_keys += it.key();
+        }
+        auto response = json_response(settings);
         response.headers["X-Env-Set"] = env_set;
+        response.headers["X-Live-Keys"] = live_keys;
         return response;
     });
     http.add("PUT", "/api/v1/config", [&](const HttpRequest& request) {
