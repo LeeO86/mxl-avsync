@@ -34,6 +34,31 @@ uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns)
     return static_cast<uint64_t>((static_cast<__int128>(timestamp_ns) * n + 500000000 * d) / (1000000000 * d));
 }
 
+double video_emit_offset_ms(int video_lead_ms)
+{
+    return -static_cast<double>(std::max(0, video_lead_ms));
+}
+
+double audio_emit_offset_ms(int audio_lead_ms)
+{
+    return -(static_cast<double>(std::max(0, audio_lead_ms)) + kAudioBlockMs / 2.0);
+}
+
+void apply_source_emit(Measurement& m, const SourceEmitOffsets& emit)
+{
+    if (m.latency_estimated) {
+        return;
+    }
+    if (emit.video_ms && m.video_latency_ms) {
+        m.video_source_emit_offset_ms = emit.video_ms;
+        m.video_chain_latency_ms = *m.video_latency_ms - *emit.video_ms;
+    }
+    if (emit.audio_ms && m.audio_latency_ms) {
+        m.audio_source_emit_offset_ms = emit.audio_ms;
+        m.audio_chain_latency_ms = *m.audio_latency_ms - *emit.audio_ms;
+    }
+}
+
 VideoSlot next_video_slot(Rate rate, uint64_t last_index, uint64_t now_ns, uint64_t lead_ns)
 {
     VideoSlot slot;

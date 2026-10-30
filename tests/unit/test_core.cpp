@@ -455,6 +455,39 @@ TEST_CASE("locked ptp fills latency and an unknown clock does not")
     CHECK(!dark.av_offset_arrival_ms);
 }
 
+TEST_CASE("chain latency subtracts the source emit offsets")
+{
+    CHECK(video_emit_offset_ms(20) == doctest::Approx(-20.0));
+    CHECK(video_emit_offset_ms(-3) == doctest::Approx(0.0));
+    CHECK(audio_emit_offset_ms(20) == doctest::Approx(-25.0));
+    Measurement m;
+    m.video_latency_ms = -16.0;
+    m.audio_latency_ms = -24.0;
+    SourceEmitOffsets emit;
+    apply_source_emit(m, emit);
+    CHECK(!m.video_chain_latency_ms);
+    CHECK(!m.audio_chain_latency_ms);
+    emit.video_ms = -20.0;
+    emit.audio_ms = -25.0;
+    apply_source_emit(m, emit);
+    REQUIRE(m.video_chain_latency_ms);
+    REQUIRE(m.audio_chain_latency_ms);
+    CHECK(*m.video_chain_latency_ms == doctest::Approx(4.0));
+    CHECK(*m.audio_chain_latency_ms == doctest::Approx(1.0));
+    CHECK(*m.video_source_emit_offset_ms == doctest::Approx(-20.0));
+    // No latency (clock not locked): nothing to subtract from.
+    Measurement dark;
+    apply_source_emit(dark, emit);
+    CHECK(!dark.video_chain_latency_ms);
+    CHECK(!dark.video_source_emit_offset_ms);
+    // Estimated (phone) latency is never turned into a chain latency.
+    Measurement phone;
+    phone.latency_estimated = true;
+    phone.video_latency_ms = 80.0;
+    apply_source_emit(phone, emit);
+    CHECK(!phone.video_chain_latency_ms);
+}
+
 TEST_CASE("content versus grain does not need a locked clock")
 {
     GradeWindows windows;

@@ -132,6 +132,7 @@ jobs:
           ./tests/integration/source-image.sh
           ./tests/integration/ptp.sh
           ./tests/integration/clock.sh
+          ./tests/integration/chain-latency.sh
           ./tests/integration/nmos.sh
           ./tests/integration/nmos-registry.sh
       - uses: actions/setup-python@v5

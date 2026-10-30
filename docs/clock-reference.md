@@ -4,7 +4,12 @@ AV offset can be measured without a shared clock. Absolute arrival latency needs
 
 ## Source selection
 
-1. `AVSYNC_PTP_STATUS_URL`, when set, is an explicit override: `sync_source=url`. It accepts `http://` JSON with `sync_state` and `accuracy_ns`. Failure reports unknown; it does not silently choose another reference.
+1. `AVSYNC_PTP_STATUS_URL`, when set, is an explicit override: `sync_source=url`. It accepts `http://` JSON with `sync_state` and `accuracy_ns`. Failure reports unknown; it does not silently choose another reference. Optional keys (2.0.2) fill the PTP details when present: `grandmaster` (16 hex digits, separators such as `ec4670.fffe.00fe77` are dropped; reported as `ec4670fffe00fe77`, with `gm_present` true), `port_state` (string, as given, for example `SLAVE`), and the integers `ptp4l_offset_ns` (also `master_offset_ns`), `phc2sys_offset_ns` and `path_delay_ns`, shown in the status `ptp` object. A key that is missing or of the wrong type is left out; the minimal two-key page still works:
+
+   ```json
+   {"sync_state":"locked","accuracy_ns":"4048","grandmaster":"ec4670.fffe.00fe77","port_state":"SLAVE",
+    "ptp4l_offset_ns":-126,"phc2sys_offset_ns":-96,"path_delay_ns":7670}
+   ```
 2. Otherwise, `AVSYNC_PTP_SOCKET` optionally selects a ptp4l management socket, for example `/var/run/ptp4l`: `sync_source=ptp4l`. Only GET management requests are sent, for `TIME_STATUS_NP` and `PORT_DATA_SET`, using management domain 0. A daemon using another management domain is not supported by this subset and falls back on query failure. A valid but unlocked response stays on this source. Socket/access/protocol failure logs once and falls back to the kernel.
 3. Without a usable socket, read-only `adjtimex(2)` supplies `sync_source=kernel`. No clock-setting capability is required.
 

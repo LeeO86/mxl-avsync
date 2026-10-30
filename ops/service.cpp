@@ -18,6 +18,9 @@
 #include "route.hpp"
 #endif
 
+#include <algorithm>
+#include <cmath>
+#include <optional>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -84,16 +87,76 @@ struct Runtime {
     double clock_esterror_s = 0;
     long clock_tai_offset_s = 0;
     std::chrono::steady_clock::time_point heartbeat = std::chrono::steady_clock::now();
+    std::vector<double> video_commit_ms; // generator: last grains, commit time - grain timestamp
+    size_t video_commit_next = 0;
+    SourceEmitOffsets source_emit; // analyzer: from the NMOS Query API tags of the flows it reads
+    std::string source_emit_video_flow;
+    std::string source_emit_audio_flow;
 };
+
+constexpr const char* kAvSyncLabel = "AV sync (what MXL consumers see)";
+constexpr const char* kArrivalLabel = "arrival vs timestamp";
+constexpr const char* kArrivalNote = "Arrival time minus the content timestamp. Directly behind the generator this is its own write timing: it writes audio early by the audio lead and video at its write time (by default 20 ms early).";
+constexpr const char* kChainLabel = "chain latency";
+
+double percentile(std::vector<double> values, double p)
+{
+    if (values.empty()) return 0;
+    std::sort(values.begin(), values.end());
+    return values[static_cast<size_t>(p * static_cast<double>(values.size() - 1) + 0.5)];
+}
+
+// Generator: what it publishes as its emit offsets (also the NMOS flow tags).
+nlohmann::json emit_offsets_json(const Runtime& rt)
+{
+    nlohmann::json body = {{"video_ms", video_emit_offset_ms(rt.config.video_lead_ms)}, {"audio_ms", audio_emit_offset_ms(rt.config.audio_lead_ms)},
+        {"video_lead_ms", rt.config.video_lead_ms}, {"audio_lead_ms", rt.config.audio_lead_ms}, {"audio_block_ms", kAudioBlockMs},
+        {"nmos_tag", kEmitOffsetTag}};
+    if (!rt.video_commit_ms.empty()) {
+        body["video_commit_vs_timestamp_ms"] = {{"grains", rt.video_commit_ms.size()}, {"p50", percentile(rt.video_commit_ms, 0.5)},
+            {"p99", percentile(rt.video_commit_ms, 0.99)}, {"max", percentile(rt.video_commit_ms, 1.0)}};
+    }
+    return body;
+}
+
+nlohmann::json source_emit_json(const Runtime& rt)
+{
+    nlohmann::json body = {{"source", "nmos-query"}};
+    body["video_ms"] = rt.source_emit.video_ms ? nlohmann::json(*rt.source_emit.video_ms) : nlohmann::json(nullptr);
+    body["audio_ms"] = rt.source_emit.audio_ms ? nlohmann::json(*rt.source_emit.audio_ms) : nlohmann::json(nullptr);
+    return body;
+}
+
+// The emit offset tag of one IS-04 flow, or nothing.
+std::optional<double> emit_tag_of(const std::string& flow_json)
+{
+    const auto doc = nlohmann::json::parse(flow_json, nullptr, false);
+    if (!doc.is_object() || !doc.contains("tags") || !doc["tags"].is_object() || !doc["tags"].contains(kEmitOffsetTag)) return std::nullopt;
+    const auto& values = doc["tags"][kEmitOffsetTag];
+    if (!values.is_array() || values.empty() || !values[0].is_string()) return std::nullopt;
+    try {
+        size_t used = 0;
+        const std::string text = values[0].get<std::string>();
+        const double value = std::stod(text, &used);
+        if (used != text.size() || !std::isfinite(value)) return std::nullopt;
+        return value;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
 
 nlohmann::json clock_status_json(const Runtime& rt)
 {
     const auto& clock = rt.clock_status;
-    return {{"sync_state", clock.sync_state}, {"accuracy_ns", clock.accuracy_ns},
+    nlohmann::json body = {{"sync_state", clock.sync_state}, {"accuracy_ns", clock.accuracy_ns},
         {"sync_source", clock.sync_source}, {"reason", clock.reason},
         {"gm_present", clock.gm_present}, {"gm_identity", clock.gm_identity},
         {"master_offset_ns", clock.master_offset_ns}, {"port_state", clock.port_state},
         {"clock_synchronized", rt.clock_synchronized}, {"tai_offset_s", rt.clock_tai_offset_s}};
+    if (clock.ptp4l_offset_ns) body["ptp4l_offset_ns"] = *clock.ptp4l_offset_ns;
+    if (clock.phc2sys_offset_ns) body["phc2sys_offset_ns"] = *clock.phc2sys_offset_ns;
+    if (clock.path_delay_ns) body["path_delay_ns"] = *clock.path_delay_ns;
+    return body;
 }
 
 HttpResponse http_status_alias(Runtime& rt);
@@ -331,7 +394,8 @@ void install_web(HttpServer& http, Runtime& rt)
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
             {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps},
-            {"ptp", clock_status_json(rt)}});
+            {"ptp", clock_status_json(rt)}, {rt.config.role == "generator" ? "emit_offsets" : "source_emit_offsets",
+                rt.config.role == "generator" ? emit_offsets_json(rt) : source_emit_json(rt)}});
     });
     auto preview_response = [](const std::string& slot) {
 #ifdef AVSYNC_WITH_MXL
@@ -505,7 +569,15 @@ void install_web(HttpServer& http, Runtime& rt)
             if (last->audio_latency_ms) {
                 body["audio_latency_ms"] = *last->audio_latency_ms;
             }
+            body["av_sync_ms"] = *last->av_offset_ms;
+            if (last->video_latency_ms) body["video_arrival_vs_timestamp_ms"] = *last->video_latency_ms;
+            if (last->audio_latency_ms) body["audio_arrival_vs_timestamp_ms"] = *last->audio_latency_ms;
+            if (last->video_chain_latency_ms) body["video_chain_latency_ms"] = *last->video_chain_latency_ms;
+            if (last->audio_chain_latency_ms) body["audio_chain_latency_ms"] = *last->audio_chain_latency_ms;
         }
+        body["source_emit_offsets"] = source_emit_json(rt);
+        body["labels"] = {{"av_sync_ms", kAvSyncLabel}, {"arrival_vs_timestamp", kArrivalLabel}, {"arrival_vs_timestamp_note", kArrivalNote},
+            {"chain_latency", kChainLabel}};
         return json_response(body);
     });
     http.add("GET", "/api/v1/events", [&](const HttpRequest& request) {
@@ -728,7 +800,8 @@ std::string widget_html(Runtime& rt, const std::string& id, bool latency, bool t
             "document.body.style.background=colours[grade]||colours.invalid;"
             "let line=grade==='invalid'?'<div>'+(m.sentence||m.reason||'no measurement')+'</div>':'<div class=\"offset\">'+(m.sentence||'')+'</div>';"
             "if(latency&&grade!=='invalid'&&(m.video_latency_ms!=null||m.audio_latency_ms!=null)){"
-            "line+='<div>'+(m.latency_estimated?'estimated ':'')+'video '+(m.video_latency_ms==null?'–':m.video_latency_ms)+' ms · audio '+(m.audio_latency_ms==null?'–':m.audio_latency_ms)+' ms</div>';}"
+            "const f=v=>v==null?'–':Number(v).toFixed(1);const chain=m.video_chain_latency_ms!=null||m.audio_chain_latency_ms!=null;"
+            "line+='<div>'+(m.latency_estimated?'estimated ':'')+(chain?'chain latency':'arrival vs timestamp')+': video '+f(chain?m.video_chain_latency_ms:m.video_latency_ms)+' ms · audio '+f(chain?m.audio_chain_latency_ms:m.audio_latency_ms)+' ms</div>';}"
             "document.getElementById('view').innerHTML=line;"
             "const canvas=document.getElementById('trend');"
             "if(!trend||grade==='invalid'){canvas.style.display='none';return;}"
@@ -914,6 +987,44 @@ int run_service(Config config)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     });
+    // Analyzer: the emit offsets of the flows it reads, from their NMOS tags in the Query API (a direct
+    // generator publishes them; behind a gateway the tag is absent and chain latency stays absent).
+    std::thread emit([&] {
+        int ticks = 0;
+        while (!g_stop) {
+            std::string host, video_flow, audio_flow, known_video, known_audio;
+            int port = 0;
+            {
+                std::lock_guard lock(rt.mu);
+                if (rt.config.role == "analyzer") {
+                    host = rt.config.nmos_query_address;
+                    port = rt.config.nmos_query_port;
+                }
+                video_flow = rt.video_flow;
+                audio_flow = rt.audio_flow;
+                known_video = rt.source_emit_video_flow;
+                known_audio = rt.source_emit_audio_flow;
+            }
+            if (!host.empty() && port > 0 && (video_flow != known_video || audio_flow != known_audio || ++ticks >= 30)) {
+                ticks = 0;
+                auto lookup = [&](const std::string& flow) -> std::optional<double> {
+                    std::string body;
+                    if (flow.empty() || !http_get(host, std::to_string(port), "/x-nmos/query/v1.3/flows/" + flow, &body, 500)) return std::nullopt;
+                    return emit_tag_of(body);
+                };
+                SourceEmitOffsets found;
+                found.video_ms = lookup(video_flow);
+                found.audio_ms = lookup(audio_flow);
+                std::lock_guard lock(rt.mu);
+                rt.source_emit = found;
+                rt.source_emit_video_flow = video_flow;
+                rt.source_emit_audio_flow = audio_flow;
+            }
+            for (int i = 0; i < 10 && !g_stop; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    });
     std::thread ptp([&] {
         bool socket_error_logged = false;
         while (!g_stop) {
@@ -991,6 +1102,7 @@ int run_service(Config config)
         callbacks.add_event = [&](const Measurement& event) {
             std::lock_guard lock(rt.mu);
             rt.events.push_back(event);
+            apply_source_emit(rt.events.back(), rt.source_emit);
             if (rt.events.size() > 1000) {
                 rt.events.erase(rt.events.begin(), rt.events.begin() + static_cast<std::ptrdiff_t>(rt.events.size() - 1000));
             }
@@ -1018,6 +1130,16 @@ int run_service(Config config)
             } else {
                 rt.late_audio += 1;
             }
+        };
+        callbacks.video_commit = [&](double ms) {
+            std::lock_guard lock(rt.mu);
+            constexpr size_t keep = 500;
+            if (rt.video_commit_ms.size() < keep) {
+                rt.video_commit_ms.push_back(ms);
+            } else {
+                rt.video_commit_ms[rt.video_commit_next] = ms;
+            }
+            rt.video_commit_next = (rt.video_commit_next + 1) % keep;
         };
         callbacks.count_resync = [&] {
             std::lock_guard lock(rt.mu);
@@ -1058,6 +1180,7 @@ int run_service(Config config)
     if (nmos_thread.joinable()) nmos_thread.join();
     if (beat.joinable()) beat.join();
     if (ptp.joinable()) ptp.join();
+    if (emit.joinable()) emit.join();
 #ifdef AVSYNC_WITH_MXL
     if (media.joinable()) media.join();
 #endif

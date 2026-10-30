@@ -329,6 +329,42 @@ TEST_CASE("successful explicit URL and malformed JSON values remain authoritativ
     CHECK(daemon.requests == 0);
 }
 
+TEST_CASE("status URL extras fill grandmaster, port state and offsets; the minimal format still works")
+{
+    auto full = parse_ptp_status(R"({"sync_state":"locked","accuracy_ns":"4048","grandmaster":"ec4670.fffe.00fe77","port_state":"SLAVE","ptp4l_offset_ns":-126,"phc2sys_offset_ns":-96,"path_delay_ns":7670})");
+    CHECK(full.sync_source == "url");
+    CHECK(full.sync_state == "locked");
+    CHECK(full.accuracy_ns == "4048");
+    CHECK(full.gm_present);
+    CHECK(full.gm_identity == "ec4670fffe00fe77");
+    CHECK(full.port_state == "SLAVE");
+    REQUIRE(full.ptp4l_offset_ns);
+    CHECK(*full.ptp4l_offset_ns == -126);
+    CHECK(full.master_offset_ns == -126);
+    REQUIRE(full.phc2sys_offset_ns);
+    CHECK(*full.phc2sys_offset_ns == -96);
+    REQUIRE(full.path_delay_ns);
+    CHECK(*full.path_delay_ns == 7670);
+    auto minimal = parse_ptp_status(R"({"sync_state":"locked","accuracy_ns":"80"})");
+    CHECK(minimal.sync_state == "locked");
+    CHECK(minimal.accuracy_ns == "80");
+    CHECK(!minimal.gm_present);
+    CHECK(minimal.gm_identity.empty());
+    CHECK(minimal.port_state == "unknown");
+    CHECK(!minimal.ptp4l_offset_ns);
+    CHECK(!minimal.path_delay_ns);
+    auto odd = parse_ptp_status(R"({"sync_state":"locked","accuracy_ns":"80","grandmaster":"xyz","port_state":7,"path_delay_ns":"7670"})");
+    CHECK(odd.sync_state == "locked");
+    CHECK(!odd.gm_present);
+    CHECK(odd.port_state == "unknown");
+    CHECK(!odd.path_delay_ns);
+    FakeDaemon daemon;
+    FakeHttp server(R"({"sync_state":"locked","accuracy_ns":"4048","grandmaster":"ec4670.fffe.00fe77","port_state":"SLAVE"})");
+    auto result = read_clock_status(server.url, daemon.path, 0, KernelClock{}, 100);
+    CHECK(result.gm_identity == "ec4670fffe00fe77");
+    CHECK(result.port_state == "SLAVE");
+}
+
 TEST_CASE("recorded linuxptp 4.2 replies interoperate with the native codec")
 {
     std::ifstream stream(std::string(AVSYNC_FIXTURE_DIR) + "/ptp4l-4.2-management.json");

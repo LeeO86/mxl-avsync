@@ -38,6 +38,23 @@ struct Rate {
 int64_t index_to_ns(Rate rate, uint64_t index);
 uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns);
 
+// Live audio writer block (SPECIFICATION §2.2).
+inline constexpr int kAudioBlockMs = 10;
+// NMOS flow tag with the generator's emit offset for that flow, in ms, as a decimal string.
+inline constexpr char kEmitOffsetTag[] = "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0";
+// Emit offset = commit time - content timestamp. Video: every grain at T_k - lead. Audio: each sample
+// between lead and lead + one block early, so the mean is -(lead + block / 2).
+double video_emit_offset_ms(int video_lead_ms);
+double audio_emit_offset_ms(int audio_lead_ms);
+
+struct SourceEmitOffsets {
+    std::optional<double> video_ms;
+    std::optional<double> audio_ms;
+};
+struct Measurement;
+// Copies known emit offsets into m and fills chain latency where m has a measured, not estimated, latency.
+void apply_source_emit(Measurement& m, const SourceEmitOffsets& emit);
+
 // Live video writer schedule. Grain k is committed at T_k - lead_ns. After grain last_index the next
 // one is last_index + 1 (a late grain is still read at its own index), unless its render would start
 // more than kVideoMaxLagGrains after its own timestamp
@@ -495,6 +512,12 @@ struct Measurement {
     std::optional<double> video_content_vs_grain_vs_index_shift_ms;
     std::optional<double> audio_content_vs_grain_vs_index_shift_ms;
     std::optional<double> content_vs_grain_av_vs_arrival_ms;
+    // The source's emit offsets (commit time - content timestamp) when the analyzer knows them, and
+    // chain latency = arrival - timestamp - source emit offset. Only next to a measured latency.
+    std::optional<double> video_source_emit_offset_ms;
+    std::optional<double> audio_source_emit_offset_ms;
+    std::optional<double> video_chain_latency_ms;
+    std::optional<double> audio_chain_latency_ms;
     std::string grade = "invalid";
     std::string graded_on = "offset";
     std::optional<double> uncertainty_ms;
