@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+- Operations (docs only): with AVS2, `mxl_avsync_audio_correlation` is about 0.80 (legacy about 0.99), so review alert thresholds near 0.9; `mxl_avsync_video_drops_total` and `mxl_avsync_video_duplicates_total` stay 0 because AVS2 has no frame counter; for a staggered upgrade run 2.0 generators with `AVSYNC_AUDIO_TIMECODE=legacy` until every analyzer runs 2.0.
+
 ## 2.0.0 (2026-10-29)
 
 - Introduce the shared AVS2 QR + flash picture in file, MXL and iPhone sources
