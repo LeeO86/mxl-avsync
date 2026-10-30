@@ -760,7 +760,7 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `generator_active` | gauge 0/1 | | gen |
 | `generator_audio_muted` | gauge 0/1 | | gen |
 | `generator_events_total` | counter | | gen |
-| `output_frames_total`, `output_frames_late_total`, `output_frames_missed_total` | counter | `essence` | both |
+| `output_frames_total`, `output_frames_late_total`, `output_frames_missed_total` | counter | `essence` | both; `missed` counts generator video grains that were never written (audio stays 0) |
 | `input_state` | gauge 1 for the state | `essence`, `state` | ana |
 | `input_resyncs_total` | counter | `essence` | ana |
 | `events_total` | counter | `result` (`paired`, `missing_audio`, `missing_video`, `duplicate`, `ambiguous`, `out_of_range`) | ana |
