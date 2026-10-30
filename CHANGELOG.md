@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.3 (unreleased)
+
+- Audio correlation is the best sub-sample match of the expected chirp. The AVS2 decoder correlates at 8 kHz, where the generator's chirp sits half a sample off the grid, and took the value at the integer lag: a bit-exact MXL path read 0.80, while a resampling path (x264 + AAC over SRT) read up to about 0.98. It is now the maximum over sub-sample shifts of the reference (±0.5 sample, 1/20 steps); the timecode is not in the 30 ms window. Bit-exact AVS2 0.796 → 1.000, AAC 128k 0.976 → 1.000, Opus 128k 0.796 → 1.000, legacy 0.994 → 1.000; added noise lowers it. Timing is unchanged (identical offsets in every case).
+- One quality rule: `good` needs a correlation of at least 0.85 and no clipping, for detector hits (analyzer, phone) and AVS2 packets alike (AVS2 packets were always `good`). AVS2 events on a clean path move from the 0.25 ms to the 0.05 ms audio uncertainty row.
+- The 2.0.1 operations note "about 0.80" for AVS2 is corrected: it was this measurement error, not a property of the signal. Alert thresholds near 0.9 work for AVS2 again.
+
 ## 2.0.2 (2026-10-30)
 
 - The live generator no longer drops video grains under CPU load. It wrote grain `k` only after `T_k` (render, then commit about one render time late), took the grain index from `mxlGetCurrentIndex`, which rounds to the nearest grain, and so skipped a whole grain whenever the loop woke more than half a grain late. A skipped event grain showed as a single event one frame off (−20 ms at 50p, `video_content_vs_grain_ms` −20). Now grain `k` is rendered right after grain `k − 1` is committed and committed at `T_k − AVSYNC_VIDEO_LEAD_MS` (new, default 20 ms, restart, 0–100); a late grain is still written, and grains are skipped only when the writer is more than four grains behind. Lab, generator and analyzer sharing two CPUs with a bursty load (5 min): missed grains 44/min → 0, events one frame off 10 of 605 → 0 of 605, video commit vs `T_k` median +13.5 ms → −18.6 ms.

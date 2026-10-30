@@ -9,6 +9,7 @@
 #include <deque>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -193,18 +194,28 @@ struct AudioDetectConfig {
     double timeline_origin_ms = 0; // time of sample 0
 };
 
+// Chirp quality from the reported correlation (best sub-sample match of the expected chirp):
+// "good" at 0.85 or more and not clipped, else "degraded". Used for detector hits and AVS2 packets.
+inline constexpr double kGoodCorrelation = 0.85;
+std::string chirp_quality(double correlation, bool clipped);
+
 class AudioDetector {
 public:
     explicit AudioDetector(AudioDetectConfig config);
     // samples are one channel, contiguous, starting at absolute sample `origin`.
     std::vector<AudioHit> detect(const float* samples, size_t count, uint64_t origin_sample) const;
     const AudioDetectConfig& config() const { return config_; }
+    struct Shifted; // sub-sample shifted references, shared between detectors with the same chirp
 
 private:
     AudioDetectConfig config_;
     int length_ = 0;
     double ref_norm_[4]{};
     std::vector<float> refs_[4];
+    // References shifted by -0.5 ... +0.5 sample in 1/20 steps, for the reported correlation.
+    // Shared between detectors with the same chirp (the analyzer builds one per audio block).
+    std::shared_ptr<const Shifted> shifted_;
+    double fractional_ncc(const float* samples, int lag, int id, const std::vector<double>& prefix) const;
 };
 
 // ---- picture geometry, marker draw and detect (§5) -----------------------

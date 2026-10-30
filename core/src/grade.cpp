@@ -268,7 +268,7 @@ AudioObservation audio_observation(const AudioTimecode& p) {
     a.audio_send_ns = p.audio_send_ns; a.time_ms = p.time_ms;
     a.arrival_ms = p.arrival_ms; a.have_arrival = true;
     a.tai_ns = int64_t(std::llround(p.time_ms * 1e6));
-    a.correlation = p.correlation; a.level_dbfs = p.level_dbfs; a.quality = "good";
+    a.correlation = p.correlation; a.level_dbfs = p.level_dbfs; a.quality = chirp_quality(p.correlation, false);
     return a;
 }
 

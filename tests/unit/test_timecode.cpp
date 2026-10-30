@@ -257,3 +257,47 @@ TEST_CASE("AVS2 compact payload preserves full identities and source clock seman
     CHECK(decoded->estimated_source);CHECK(decoded->format=="720p60");CHECK(decoded->rate==2);
     CHECK_FALSE(parse_qr_payload(text+"0"));text[5]='F';CHECK_FALSE(parse_qr_payload(text));
 }
+
+TEST_CASE("AVS2 chirp correlation is the best sub-sample match: bit exact is 1, noise lowers it") {
+    const auto wave = timecode_waveform(encode_timecode(123, 1700000037000000000LL, 0, true), 1200, 48000, -12);
+    uint32_t seed = 7;
+    auto noise = [&] { seed = seed * 1664525u + 1013904223u; return (double(seed >> 8) / double(1 << 24) - 0.5) * 2.0; };
+    for (double level : {0.0, 0.08}) {
+        // Every 48 kHz phase of the 8 kHz detector grid (2.0.2 reported 0.80 at phase 0).
+        for (int phase = 0; phase < 6; ++phase) {
+            std::vector<float> x(48000, 0.f);
+            const int start = 12000 + phase;
+            for (size_t i = 0; i < wave.size(); ++i) x[size_t(start) + i] = wave[i];
+            for (auto& v : x) v += float(level * noise());
+            const auto packets = decode_timecodes(x.data(), x.size(), 48000, 0);
+            REQUIRE(packets.size() == 1);
+            CHECK(std::abs(packets[0].time_ms - start / 48.0) < 0.03); // timing as before
+            if (level == 0.0) {
+                CHECK(packets[0].correlation >= 0.99);
+                CHECK(audio_observation(packets[0]).quality == "good");
+            } else {
+                CHECK(packets[0].correlation < 0.99);
+                CHECK(packets[0].correlation > 0.5);
+            }
+        }
+    }
+}
+
+TEST_CASE("legacy chirps keep their correlation and timing") {
+    AudioDetectConfig cfg;
+    cfg.period_ms = 500;
+    AudioDetector detector(cfg);
+    PlannedEvent event;
+    event.chirp_id = 2;
+    for (double centre : {24000.0, 24000.25, 24000.5}) {
+        event.audio_centre_sample = centre;
+        std::vector<float> x(48000);
+        synthesise_block(cfg.chirp, {event}, 0, x.data(), x.size());
+        const auto hits = detector.detect(x.data(), x.size(), 0);
+        REQUIRE(hits.size() == 1);
+        CHECK(hits[0].chirp_id == 2);
+        CHECK(hits[0].correlation >= 0.99);
+        CHECK(hits[0].quality == "good");
+        CHECK(std::abs(hits[0].sample_pos - centre) < 0.1);
+    }
+}
