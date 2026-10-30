@@ -242,15 +242,16 @@
       </table></div>
     </section>
     <section v-if="tab=='Settings'" data-testid="settings-form"
-      v-memo="[tab, config, draft, envSet, settingsDirty, settingsError, restartRequired, skipped, settingsSaving]">
+      v-memo="[tab, config, draft, envSet, liveKeys, settingsDirty, settingsError, restartRequired, skipped, settingsSaving]">
       <p v-if="settingsError" class="banner">{{ settingsError }}</p>
       <p v-if="restartRequired.length">Restart required: {{ restartRequired.join(', ') }}</p>
       <p v-if="skipped.length">Import skipped env-set keys: {{ skipped.join(', ') }}</p>
       <div v-for="group in settingGroups" :key="group.name">
         <h3>{{ group.name }}</h3>
         <label v-for="key in group.keys" :key="key">{{ key }}
-          <input v-model="draft[key]" :disabled="envSet.includes(key)"/>
-          <span v-if="envSet.includes(key)">env</span>
+          <input v-model="draft[key]" :disabled="envLocked(key)"/>
+          <span v-if="envLocked(key)">env</span>
+          <span v-else-if="envSet.includes(key)">env start value, live-changeable</span>
         </label>
       </div>
       <p v-if="settingsDirty" role="status">Unsaved changes</p>
@@ -264,7 +265,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], liveKeys:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
   computed: {
     role() { return this.info.role || ''; },
     previewSlots() {
@@ -276,7 +277,7 @@ createApp({
       return this.audioOn ? {label:'Test signal active', kind:'ok'} : {label:'Test signal muted', kind:''};
     },
     signalDirty() { return !!this.generatorBaseline && (this.imageFile !== null || !this.sameDraft(this.generatorDraft(), this.generatorBaseline)); },
-    settingsDirty() { return Object.keys(this.draft).some(key => !this.envSet.includes(key) && this.draft[key] !== this.config[key]); },
+    settingsDirty() { return Object.keys(this.draft).some(key => !this.envLocked(key) && this.draft[key] !== this.config[key]); },
     tabs() { return this.role === 'generator' ? ['Signal','NMOS','Status','Settings'] : ['Measurement','Input','Events','NMOS','Status','Settings']; },
     grade() { return (this.measurement.grade || 'invalid').toUpperCase(); },
     gradeKind() { return {pass:'ok', warn:'warn', fail:'bad'}[this.measurement.grade] || ''; },
@@ -328,6 +329,8 @@ createApp({
     this.timer = setInterval(() => this.refresh(), 1000);
   },
   methods: {
+    // Env-set keys are read-only unless they are live: then env is only the start value.
+    envLocked(key) { return this.envSet.includes(key) && !this.liveKeys.includes(key); },
     selectTab(name) {
       this.tab = name;
       location.hash = name;
@@ -490,6 +493,8 @@ createApp({
       if (accept) this.draft = Object.assign({}, this.config);
       const header = response.headers.get('X-Env-Set') || '';
       this.envSet = header ? header.split(',').filter(Boolean) : [];
+      const live = response.headers.get('X-Live-Keys') || '';
+      this.liveKeys = live ? live.split(',').filter(Boolean) : [];
     },
     async discardSettings() {
       try { await this.loadConfig(); this.settingsError = ''; }
@@ -501,7 +506,7 @@ createApp({
       const submitted = Object.assign({}, this.draft);
       const body = {};
       for (const key of Object.keys(submitted)) {
-        if (!this.envSet.includes(key) && submitted[key] !== this.config[key]) body[key] = submitted[key];
+        if (!this.envLocked(key) && submitted[key] !== this.config[key]) body[key] = submitted[key];
       }
       try {
         const response = await fetch('/api/v1/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
