@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.2 (unreleased)
+# mxl-avsync 2.0.2
 
 Fixes the generator's video timing under CPU load and makes the latency values
 readable. The signal (AVS2), ports, metric names and dependency pins are

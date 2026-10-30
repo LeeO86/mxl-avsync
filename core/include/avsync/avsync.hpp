@@ -21,8 +21,8 @@ inline constexpr int kYWhite = 940;
 inline constexpr int kYBackground = 502;
 inline constexpr int kYNeutralChroma = 512;
 
-inline constexpr char kCoreVersion[] = "2.0.1";
-inline constexpr char kAppVersion[] = "2.0.1";
+inline constexpr char kCoreVersion[] = "2.0.2";
+inline constexpr char kAppVersion[] = "2.0.2";
 inline constexpr char kMxlRevision[] = "218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7";
 inline constexpr char kQrSchema[] = "mxl-avsync/1";
 inline constexpr char kManifestSchema[] = "mxl-avsync-manifest/1";
