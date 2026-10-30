@@ -2,7 +2,7 @@
 
 ## 2.0.1 (unreleased)
 
-- Operations (docs only): with AVS2, `mxl_avsync_audio_correlation` is about 0.80 (legacy about 0.99), so review alert thresholds near 0.9; `mxl_avsync_video_drops_total` and `mxl_avsync_video_duplicates_total` stay 0 because AVS2 has no frame counter; for a staggered upgrade run 2.0 generators with `AVSYNC_AUDIO_TIMECODE=legacy` until every analyzer runs 2.0.
+- Operations (docs only): with AVS2, `mxl_avsync_audio_correlation` is about 0.80 (legacy about 0.99), so review alert thresholds near 0.9; AVS2 events no longer carry the per-event `video_drop` reason (no frame counter strip), while `mxl_avsync_video_drops_total` / `mxl_avsync_video_duplicates_total` are stubs that were always 0 in every version; for a staggered upgrade run 2.0 generators with `AVSYNC_AUDIO_TIMECODE=legacy` until every analyzer runs 2.0. SPECIFICATION no longer claims that `config.json` is written.
 
 ## 2.0.0 (2026-10-29)
 
