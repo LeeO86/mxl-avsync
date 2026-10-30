@@ -35,9 +35,12 @@ start_gen() {
   GEN_PID=$!
 }
 
+# The analyzer clock must not lock on any host: a ptp4l + phc2sys host locks in kernel mode, so an
+# unreachable status URL keeps sync_state unknown and latency fields absent.
 start_ana() {
   local offset="$1"
   AVSYNC_ROLE=analyzer AVSYNC_AV_OFFSET_MS="$offset" AVSYNC_EVENT_RATE=2 AVSYNC_CLOCK_MAX_ERROR_US=-1 \
+    AVSYNC_PTP_STATUS_URL=http://127.0.0.1:9/unreachable \
     AVSYNC_STATE_DIR="$WORK/astate" NMOS_ENABLE=false NMOS_SEED=live-ana \
     MXL_DOMAIN_SCAN_PATH="$WORK" WEB_PORT="$APORT" \
     "$BIN" serve >"$WORK/ana.log" 2>&1 &
