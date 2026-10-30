@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -75,6 +76,7 @@ struct Runtime {
     double frame_rate_fps = 0;
     std::string source_image_path;
     int source_image_frames = 0;
+    std::shared_ptr<const SourceClip> source_clip; // decoded once per upload, drawn by the live generator
     PtpReading clock_status;
     bool clock_synchronized = false;
     double clock_esterror_s = 0;
@@ -409,9 +411,9 @@ void install_web(HttpServer& http, Runtime& rt)
             out.write(body.data(), static_cast<std::streamsize>(body.size()));
             if (!out) return json_response({{"error", "could not store source image"}}, 500);
         }
-        SourceClip clip;
+        auto clip = std::make_shared<SourceClip>();
         std::string error;
-        if (!clip.load(path.string(), error)) {
+        if (!clip->load(path.string(), error)) {
             std::filesystem::remove(path);
             return json_response({{"error", error}}, 400);
         }
@@ -419,7 +421,8 @@ void install_web(HttpServer& http, Runtime& rt)
         std::error_code ec;
         std::filesystem::remove(other, ec);
         rt.source_image_path = path.string();
-        rt.source_image_frames = static_cast<int>(clip.frames.size());
+        rt.source_image_frames = static_cast<int>(clip->frames.size());
+        rt.source_clip = std::move(clip);
         return json_response({{"ok", true}, {"frames", rt.source_image_frames}, {"content_type", type}});
     });
     http.add("GET", "/api/v1/generator/source-image", [&](const HttpRequest&) {
@@ -805,6 +808,22 @@ int run_service(Config config)
     Runtime rt;
     rt.config = std::move(config);
     rt.input_state = rt.config.role == "analyzer" ? "not_routed" : "running";
+    if (rt.config.role == "generator") {
+        // A picture uploaded before a restart stays in the state directory; draw it again.
+        for (const char* name : {"source-ident.png", "source-ident.gif"}) {
+            const auto path = std::filesystem::path(rt.config.state_dir) / name;
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec)) continue;
+            auto clip = std::make_shared<SourceClip>();
+            std::string error;
+            if (clip->load(path.string(), error)) {
+                rt.source_image_path = path.string();
+                rt.source_image_frames = static_cast<int>(clip->frames.size());
+                rt.source_clip = std::move(clip);
+                break;
+            }
+        }
+    }
     std::signal(SIGTERM, on_signal);
     std::signal(SIGINT, on_signal);
     HttpServer web;
@@ -901,6 +920,10 @@ int run_service(Config config)
         callbacks.stopped = [&] {
             std::lock_guard lock(rt.mu);
             return rt.stopped;
+        };
+        callbacks.source_image = [&] {
+            std::lock_guard lock(rt.mu);
+            return rt.source_clip;
         };
         callbacks.set_result = [&](const std::string& flow, const std::string& domain) {
             std::lock_guard lock(rt.mu);

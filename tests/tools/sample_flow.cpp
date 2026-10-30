@@ -1,13 +1,15 @@
 #include "domain.hpp"
 
+#include <fstream>
 #include <iostream>
 #include <string>
 
 // Prints one grain of an MXL video flow: index, byte size, and whether it was valid.
+// With a third argument the grain payload (v210) is also written to that file.
 int main(int argc, char** argv)
 {
     if (argc < 3) {
-        std::cerr << "usage: avsync-sample-flow <domain-dir> <flow-id>\n";
+        std::cerr << "usage: avsync-sample-flow <domain-dir> <flow-id> [payload.v210]\n";
         return 78;
     }
     const std::string domain_path = argv[1];
@@ -38,5 +40,10 @@ int main(int argc, char** argv)
     const bool ok = domain.copy_grain(index, 200000000, grain_rows, desc.width, grain_count, &payload, &invalid);
     std::cout << "index=" << index << " bytes=" << payload.size() << " grain_rows=" << grain_rows << " width=" << desc.width
               << " height=" << desc.height << " interlaced=" << (desc.interlaced ? 1 : 0) << " valid=" << (ok ? 1 : 0) << "\n";
+    if (ok && argc > 3) {
+        std::ofstream out(argv[3], std::ios::binary);
+        out.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        if (!out) return 1;
+    }
     return ok ? 0 : 1;
 }

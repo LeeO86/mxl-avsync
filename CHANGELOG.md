@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+- The live MXL generator draws the uploaded source picture next to the Title (decoded once per upload, replaced by a new upload, restored from the state directory after a restart); before, only file output showed it.
+
 ## 2.0.0 (2026-10-29)
 
 - Introduce the shared AVS2 QR + flash picture in file, MXL and iPhone sources

@@ -195,6 +195,8 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 qr_seq = named_seq;
             }
             info.qr_json = qr_cached;
+            const auto source_clip = callbacks.source_image ? callbacks.source_image() : nullptr;
+            info.source_image = source_clip ? source_clip->at(ms) : nullptr;
             render_picture(picture, info, seq, frame_in_period, period.grains, config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
             pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format->width, grain_rows, format->width, packed.data());
             const bool wrote = domain.write_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {

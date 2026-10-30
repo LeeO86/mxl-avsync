@@ -5,9 +5,12 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace avsync {
+
+struct SourceClip;
 
 struct MediaStatus {
     uint64_t timecode_skipped = 0;
@@ -42,6 +45,8 @@ struct ClockReading {
 struct LiveCallbacks {
     std::function<Config()> copy_config;
     std::function<bool()> stopped;
+    // Uploaded source picture, already decoded; null when none. Returned per frame, never decoded per frame.
+    std::function<std::shared_ptr<const SourceClip>()> source_image;
     std::function<ClockReading()> clock_reading;
     std::function<void(const MediaStatus&)> set_status;
     std::function<void(const std::string& flow, const std::string& domain)> set_result;
