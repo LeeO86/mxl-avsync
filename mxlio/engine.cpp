@@ -132,6 +132,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     uint64_t packets_skipped = 0;
     int writer_rate = config.event_rate;
     std::string writer_profile = config.audio_timecode;
+    uint64_t last_video_index = 0; // 0: nothing written yet
 
     while (!stop.load()) {
         config = callbacks.copy_config();
@@ -151,6 +152,10 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             callbacks.count_late(true);
             index = index_now(pace);
         }
+        if (last_video_index != 0 && index > last_video_index + 1 && callbacks.count_missed) {
+            callbacks.count_missed(true, index - last_video_index - 1); // grains never written
+        }
+        if (index > last_video_index) last_video_index = index;
         if (halted) {
             domain.write_silence_grain(index);
         } else {
@@ -195,6 +200,8 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 qr_seq = named_seq;
             }
             info.qr_json = qr_cached;
+            const auto source_clip = callbacks.source_image ? callbacks.source_image() : nullptr;
+            info.source_image = source_clip ? source_clip->at(ms) : nullptr;
             render_picture(picture, info, seq, frame_in_period, period.grains, config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
             pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format->width, grain_rows, format->width, packed.data());
             const bool wrote = domain.write_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {

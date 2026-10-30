@@ -28,11 +28,17 @@ inline ClockState classify_kernel_clock(const KernelClock& clock, long max_error
     if (!clock.read_ok) {
         return state;
     }
-    // Linux initializes both errors to NTP_PHASE_LIMIT when they are not reported.
-    // phc2sys/PTP discipline may leave them there; do not treat that sentinel as
-    // a measured 16-second error, or claim a numeric accuracy from it.
-    const bool not_reported = clock.esterror_us >= 16000000 && clock.maxerror_us >= 16000000;
-    if (!not_reported && clock.esterror_us >= 0) {
+    // Linux initializes esterror to NTP_PHASE_LIMIT (16 s) and only NTP daemons update it.
+    // phc2sys clears STA_UNSYNC and keeps resetting maxerror (often 0) but leaves esterror at
+    // that default. Do not treat the sentinel as a measured 16-second error, or claim a numeric
+    // accuracy from it. The kernel adds 500 us/s to maxerror and sets STA_UNSYNC only at 16 s,
+    // so maxerror is the freshness check: above 1 s (about 33 min without a discipline update)
+    // the discipline is treated as stopped.
+    constexpr long kUnreportedEsterrorUs = 16000000;
+    constexpr long kFreshMaxerrorUs = 1000000;
+    const bool error_default = clock.esterror_us >= kUnreportedEsterrorUs;
+    const bool not_reported = error_default && clock.maxerror_us <= kFreshMaxerrorUs;
+    if (!error_default && clock.esterror_us >= 0) {
         state.accuracy_ns = clock.esterror_us <= std::numeric_limits<long>::max() / 1000
             ? clock.esterror_us * 1000 : std::numeric_limits<long>::max();
     }
@@ -42,6 +48,8 @@ inline ClockState classify_kernel_clock(const KernelClock& clock, long max_error
     else if (not_reported) {
         state.sync_state = "locked";
         state.reason = "error not reported (PTP discipline)";
+    } else if (error_default) {
+        state.reason = "error not reported and maxerror above 1 s (discipline stopped)";
     } else if (clock.esterror_us < 0 || clock.esterror_us > max_error_us) {
         state.reason = "estimated error exceeds clock limit";
     } else {

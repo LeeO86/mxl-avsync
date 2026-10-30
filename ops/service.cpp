@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -61,6 +62,7 @@ struct Runtime {
     double output_video = 0;
     double output_audio = 0;
     double late_video = 0;
+    double missed_video = 0;
     double late_audio = 0;
     double resyncs = 0;
     std::string media_detail;
@@ -75,6 +77,8 @@ struct Runtime {
     double frame_rate_fps = 0;
     std::string source_image_path;
     int source_image_frames = 0;
+    std::shared_ptr<const SourceClip> source_clip; // decoded once per upload, drawn by the live generator
+    std::mutex source_upload_mu; // serializes uploads; rt.mu is held only to swap source_clip
     PtpReading clock_status;
     bool clock_synchronized = false;
     double clock_esterror_s = 0;
@@ -156,7 +160,7 @@ std::string metrics_text(Runtime& rt)
     os << "mxl_avsync_output_frames_late_total{essence=\"video\"} " << rt.late_video << "\n";
     os << "mxl_avsync_output_frames_late_total{essence=\"audio\"} " << rt.late_audio << "\n";
     os << "# TYPE mxl_avsync_output_frames_missed_total counter\n";
-    os << "mxl_avsync_output_frames_missed_total{essence=\"video\"} 0\n";
+    os << "mxl_avsync_output_frames_missed_total{essence=\"video\"} " << rt.missed_video << "\n";
     os << "mxl_avsync_output_frames_missed_total{essence=\"audio\"} 0\n";
     os << "# TYPE mxl_avsync_input_state gauge\n";
     for (const char* state : {"waiting", "no_signal", "not_routed", "running", "format_mismatch"}) {
@@ -387,9 +391,19 @@ void install_web(HttpServer& http, Runtime& rt)
             {"source", rt.config.source}, {"subtitle", rt.config.subtitle}});
     });
     http.add("POST", "/api/v1/generator/source-image", [&](const HttpRequest& request) {
-        std::lock_guard lock(rt.mu);
-        if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
+        // Decode outside rt.mu (the generator takes it every frame); lock only to swap the result.
+        std::string role;
+        std::filesystem::path dir;
+        {
+            std::lock_guard lock(rt.mu);
+            role = rt.config.role;
+            dir = rt.config.state_dir;
+        }
+        if (role != "generator") return json_response({{"error", "not a generator"}}, 404);
         const std::string& body = request.body;
+        if (body.size() > kSourceImageMaxFileBytes) {
+            return json_response({{"error", "source image file is larger than " + std::to_string(kSourceImageMaxFileBytes >> 20) + " MiB"}}, 413);
+        }
         std::string ext;
         std::string type;
         if (body.size() >= 8 && static_cast<unsigned char>(body[0]) == 0x89 && body.compare(1, 3, "PNG") == 0) {
@@ -401,26 +415,39 @@ void install_web(HttpServer& http, Runtime& rt)
         } else {
             return json_response({{"error", "source image must be a PNG or a GIF"}}, 415);
         }
-        std::filesystem::create_directories(rt.config.state_dir);
-        const auto dir = std::filesystem::path(rt.config.state_dir);
-        const auto path = dir / ("source-ident" + ext);
-        {
-            std::ofstream out(path, std::ios::binary);
-            out.write(body.data(), static_cast<std::streamsize>(body.size()));
-            if (!out) return json_response({{"error", "could not store source image"}}, 500);
-        }
-        SourceClip clip;
-        std::string error;
-        if (!clip.load(path.string(), error)) {
-            std::filesystem::remove(path);
-            return json_response({{"error", error}}, 400);
-        }
-        const auto other = dir / (ext == ".png" ? "source-ident.gif" : "source-ident.png");
+        std::lock_guard upload(rt.source_upload_mu); // one upload at a time; never blocks the generator
         std::error_code ec;
-        std::filesystem::remove(other, ec);
-        rt.source_image_path = path.string();
-        rt.source_image_frames = static_cast<int>(clip.frames.size());
-        return json_response({{"ok", true}, {"frames", rt.source_image_frames}, {"content_type", type}});
+        std::filesystem::create_directories(dir, ec);
+        const auto path = dir / ("source-ident" + ext);
+        const auto temp = dir / ("source-ident.upload" + ext);
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            out.write(body.data(), static_cast<std::streamsize>(body.size()));
+            if (!out) {
+                std::filesystem::remove(temp, ec);
+                return json_response({{"error", "could not store source image"}}, 500);
+            }
+        }
+        auto clip = std::make_shared<SourceClip>();
+        std::string error;
+        if (!clip->load(temp.string(), error)) {
+            std::filesystem::remove(temp, ec);
+            return json_response({{"error", error}}, clip->over_limit ? 413 : 400);
+        }
+        std::filesystem::rename(temp, path, ec);
+        if (ec) {
+            std::filesystem::remove(temp, ec);
+            return json_response({{"error", "could not store source image"}}, 500);
+        }
+        std::filesystem::remove(dir / (ext == ".png" ? "source-ident.gif" : "source-ident.png"), ec);
+        const int frames = static_cast<int>(clip->frames.size());
+        {
+            std::lock_guard lock(rt.mu);
+            rt.source_image_path = path.string();
+            rt.source_image_frames = frames;
+            rt.source_clip = std::move(clip);
+        }
+        return json_response({{"ok", true}, {"frames", frames}, {"content_type", type}});
     });
     http.add("GET", "/api/v1/generator/source-image", [&](const HttpRequest&) {
         std::lock_guard lock(rt.mu);
@@ -542,8 +569,16 @@ void install_web(HttpServer& http, Runtime& rt)
             }
             env_set += entry.first;
         }
-        auto response = json_response(config_settings(rt.config));
+        const auto settings = config_settings(rt.config);
+        std::string live_keys;
+        for (auto it = settings.begin(); it != settings.end(); ++it) {
+            if (!is_live_key(it.key())) continue;
+            if (!live_keys.empty()) live_keys += ",";
+            live_keys += it.key();
+        }
+        auto response = json_response(settings);
         response.headers["X-Env-Set"] = env_set;
+        response.headers["X-Live-Keys"] = live_keys;
         return response;
     });
     http.add("PUT", "/api/v1/config", [&](const HttpRequest& request) {
@@ -805,6 +840,25 @@ int run_service(Config config)
     Runtime rt;
     rt.config = std::move(config);
     rt.input_state = rt.config.role == "analyzer" ? "not_routed" : "running";
+    if (rt.config.role == "generator") {
+        // A picture uploaded before a restart stays in the state directory; draw it again.
+        for (const char* name : {"source-ident.png", "source-ident.gif"}) {
+            const auto path = std::filesystem::path(rt.config.state_dir) / name;
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec)) continue;
+            auto clip = std::make_shared<SourceClip>();
+            std::string error;
+            if (clip->load(path.string(), error)) {
+                rt.source_image_path = path.string();
+                rt.source_image_frames = static_cast<int>(clip->frames.size());
+                rt.source_clip = std::move(clip);
+                break;
+            }
+            // Skip a broken or oversized stored picture instead of failing the start.
+            std::cerr << nlohmann::json{{"level", "warn"}, {"event", "source_image_skipped"},
+                {"path", path.string()}, {"reason", error}}.dump() << std::endl;
+        }
+    }
     std::signal(SIGTERM, on_signal);
     std::signal(SIGINT, on_signal);
     HttpServer web;
@@ -902,6 +956,10 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             return rt.stopped;
         };
+        callbacks.source_image = [&] {
+            std::lock_guard lock(rt.mu);
+            return rt.source_clip;
+        };
         callbacks.set_result = [&](const std::string& flow, const std::string& domain) {
             std::lock_guard lock(rt.mu);
             rt.result_flow = flow;
@@ -948,6 +1006,10 @@ int run_service(Config config)
         callbacks.count_audio_grain = [&] {
             std::lock_guard lock(rt.mu);
             rt.output_audio += 1;
+        };
+        callbacks.count_missed = [&](bool video, uint64_t grains) {
+            std::lock_guard lock(rt.mu);
+            if (video) rt.missed_video += static_cast<double>(grains);
         };
         callbacks.count_late = [&](bool video) {
             std::lock_guard lock(rt.mu);

@@ -2,6 +2,9 @@
 
 ## 2.0.1 (unreleased)
 
+- `AVSYNC_EVENT_RATE` and `AVSYNC_AUDIO_TIMECODE` are live settings: when set in the environment they are start values, and the Signal API/UI change them on the running generator (before, the change was silently ignored with `ok:true`).
+- Kernel clock: `esterror` at the 16-s kernel default is "not reported" even when `maxerror` is low, so ptp4l + phc2sys hosts (esterror 16 s, maxerror 0) lock with unknown accuracy instead of "estimated error exceeds clock limit". `maxerror` above 1 s (about 33 min without a discipline update, e.g. phc2sys stopped) unlocks.
+- The live MXL generator draws the uploaded source picture next to the Title, replaced by a new upload and restored after a container restart (not a new pod: `/config` is an emptyDir); before, only file output showed it. Pictures are decoded once, outside the lock the generator uses, and scaled at load to at most 256 px per side; uploads above 16 MiB, 600 frames or 64 MiB decoded are refused with 413, a failed upload keeps the previous picture, and a broken stored picture is skipped with a `source_image_skipped` warning. `mxl_avsync_output_frames_missed_total{essence="video"}` now counts generator grains never written (it was always 0).
 - Operations (docs only): with AVS2, `mxl_avsync_audio_correlation` is about 0.80 (legacy about 0.99), so review alert thresholds near 0.9; AVS2 events no longer carry the per-event `video_drop` reason (no frame counter strip), while `mxl_avsync_video_drops_total` / `mxl_avsync_video_duplicates_total` are stubs that were always 0 in every version; for a staggered upgrade run 2.0 generators with `AVSYNC_AUDIO_TIMECODE=legacy` until every analyzer runs 2.0. SPECIFICATION no longer claims that `config.json` is written.
 
 ## 2.0.0 (2026-10-29)

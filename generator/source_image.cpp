@@ -30,14 +30,19 @@ struct DecodeSession {
     }
 };
 
-bool copy_frame(const AVFrame* frame, SourceStill& still, std::string& error)
+// Copies one decoded frame as RGBA, scaled down (never up) to fit kSourceStillMaxSide.
+bool copy_frame(const AVFrame* frame, SourceStill& still, std::string& error, bool& over_limit)
 {
-    still.width = frame->width;
-    still.height = frame->height;
-    if (still.width <= 0 || still.height <= 0 || still.width > 4096 || still.height > 4096) {
+    const int src_w = frame->width;
+    const int src_h = frame->height;
+    if (src_w <= 0 || src_h <= 0 || src_w > 4096 || src_h > 4096) {
         error = "source image is too large";
+        over_limit = src_w > 4096 || src_h > 4096;
         return false;
     }
+    const double scale = std::min(1.0, static_cast<double>(kSourceStillMaxSide) / std::max(src_w, src_h));
+    still.width = std::max(1, static_cast<int>(std::lround(src_w * scale)));
+    still.height = std::max(1, static_cast<int>(std::lround(src_h * scale)));
     still.rgba.assign(static_cast<size_t>(still.width * still.height * 4), 0);
     if (frame->format == AV_PIX_FMT_PAL8) {
         const uint8_t* palette = frame->data[1];
@@ -46,10 +51,12 @@ bool copy_frame(const AVFrame* frame, SourceStill& still, std::string& error)
             return false;
         }
         for (int y = 0; y < still.height; ++y) {
-            const uint8_t* row = frame->data[0] + static_cast<size_t>(y) * static_cast<size_t>(frame->linesize[0]);
+            const int sy = std::min(src_h - 1, static_cast<int>(y * static_cast<double>(src_h) / still.height));
+            const uint8_t* row = frame->data[0] + static_cast<size_t>(sy) * static_cast<size_t>(frame->linesize[0]);
             uint8_t* dst = still.rgba.data() + static_cast<size_t>(y * still.width * 4);
             for (int x = 0; x < still.width; ++x) {
-                const uint8_t* entry = palette + static_cast<size_t>(row[x]) * 4;
+                const int sx = std::min(src_w - 1, static_cast<int>(x * static_cast<double>(src_w) / still.width));
+                const uint8_t* entry = palette + static_cast<size_t>(row[sx]) * 4;
                 dst[x * 4 + 0] = entry[0];
                 dst[x * 4 + 1] = entry[1];
                 dst[x * 4 + 2] = entry[2];
@@ -58,15 +65,15 @@ bool copy_frame(const AVFrame* frame, SourceStill& still, std::string& error)
         }
         return true;
     }
-    SwsContext* sws = sws_getContext(still.width, still.height, static_cast<AVPixelFormat>(frame->format), still.width, still.height,
-        AV_PIX_FMT_RGBA, SWS_POINT, nullptr, nullptr, nullptr);
+    SwsContext* sws = sws_getContext(src_w, src_h, static_cast<AVPixelFormat>(frame->format), still.width, still.height,
+        AV_PIX_FMT_RGBA, scale < 1.0 ? SWS_AREA : SWS_POINT, nullptr, nullptr, nullptr);
     if (sws == nullptr) {
         error = "cannot convert source image";
         return false;
     }
     uint8_t* dst_data[1] = {still.rgba.data()};
     int dst_stride[1] = {still.width * 4};
-    sws_scale(sws, frame->data, frame->linesize, 0, still.height, dst_data, dst_stride);
+    sws_scale(sws, frame->data, frame->linesize, 0, src_h, dst_data, dst_stride);
     sws_freeContext(sws);
     return true;
 }
@@ -78,6 +85,8 @@ bool SourceClip::load(const std::string& path, std::string& error)
     frames.clear();
     start_ms.clear();
     loop_ms = 0;
+    over_limit = false;
+    decoded_bytes = 0;
     DecodeSession session;
     if (avformat_open_input(&session.fmt, path.c_str(), nullptr, nullptr) < 0) {
         error = "cannot open source image";
@@ -107,8 +116,19 @@ bool SourceClip::load(const std::string& path, std::string& error)
     session.frame = av_frame_alloc();
     double cursor = 0;
     auto take = [&](const AVFrame* decoded, const AVPacket* packet) {
+        if (frames.size() >= static_cast<size_t>(kSourceClipMaxFrames)) {
+            error = "source image has too many frames (at most " + std::to_string(kSourceClipMaxFrames) + ")";
+            over_limit = true;
+            return false;
+        }
         SourceStill still;
-        if (!copy_frame(decoded, still, error)) {
+        if (!copy_frame(decoded, still, error, over_limit)) {
+            return false;
+        }
+        decoded_bytes += still.rgba.size();
+        if (decoded_bytes > kSourceClipMaxBytes) {
+            error = "source image decodes to more than " + std::to_string(kSourceClipMaxBytes >> 20) + " MiB";
+            over_limit = true;
             return false;
         }
         double duration_ms = 0;
@@ -141,11 +161,6 @@ bool SourceClip::load(const std::string& path, std::string& error)
         }
         while (avcodec_receive_frame(session.ctx, session.frame) == 0) {
             if (!take(session.frame, session.packet)) {
-                av_packet_unref(session.packet);
-                return false;
-            }
-            if (frames.size() > 600) {
-                error = "source image has too many frames";
                 av_packet_unref(session.packet);
                 return false;
             }

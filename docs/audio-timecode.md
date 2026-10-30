@@ -8,7 +8,8 @@ There is one white pulse per event. Positive source offset still means audio lat
 
 Choose **1 or 2 events/s** in the web **Signal** panel and press Apply. Both
 selectors retain drafts across polling and support Discard. The equivalent
-settings are `AVSYNC_EVENT_RATE=1|2` and `AVSYNC_AUDIO_TIMECODE=1200`.
+settings are `AVSYNC_EVENT_RATE=1|2` and `AVSYNC_AUDIO_TIMECODE=1200`. Both are live:
+set in the environment they are start values, and Signal/API changes apply to the running generator.
 `AVSYNC_AUDIO_TIMECODE=600` is an optional slower profile requiring 1 event/s.
 `legacy` retains the original four chirp shapes, centre reference, alternating
 marker and 1/2/4 events/s. Old recordings/QRs do not silently acquire a new reference.
