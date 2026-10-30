@@ -39,6 +39,7 @@ request = urllib.request.Request(base + "/api/v1/config")
 with urllib.request.urlopen(request) as response:
     body = json.load(response)
     env = set(filter(None, (response.headers.get("X-Env-Set") or "").split(",")))
+    live = set(filter(None, (response.headers.get("X-Live-Keys") or "").split(",")))
 if "AVSYNC_AV_OFFSET_MS" not in body or "AVSYNC_PASS_MIN_MS" not in body:
     sys.exit("config missing grouped keys")
 if "AVSYNC_ROLE" not in env or "AVSYNC_AV_OFFSET_MS" not in env:
@@ -95,6 +96,8 @@ def patch_generator(body):
         return json.load(response)
 if "AVSYNC_EVENT_RATE" not in env or "AVSYNC_AUDIO_TIMECODE" not in env:
     sys.exit("signal keys not env-set " + ",".join(sorted(env)))
+if not {"AVSYNC_EVENT_RATE", "AVSYNC_AUDIO_TIMECODE", "AVSYNC_AV_OFFSET_MS"} <= live or "AVSYNC_ROLE" in live:
+    sys.exit("live-keys header " + ",".join(sorted(live)))
 patch_generator({"event_rate": 1, "audio_timecode": "600"})
 signal = json.load(urllib.request.urlopen(base + "/api/v1/generator"))
 if signal["event_rate"] != 1 or signal["audio_timecode"] != "600":
