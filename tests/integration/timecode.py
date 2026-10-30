@@ -60,7 +60,33 @@ def main():
                 assert abs(b['received_ms']-a['received_ms']-3217)<0.2,(a,b)
             assert all('audio_latency_ms' not in e for e in only['events'])
             print('PASS',stem,'pairs',len(values),'median',statistics.median(values),'audio-only',len(only['audio_timecodes']))
-    print('PASS: full render/encode/analyze, white-onset alignment, 1/2 Hz, 59.94 grid, 600 fallback, legacy, G.711 +3217 ms, audio-only')
+        # AVS2 chirp correlation is the best sub-sample match of the expected chirp: a bit-exact path
+        # gives >= 0.99, AAC/Opus at 128 kbit/s stay "good" with an unchanged spread, noise lowers it.
+        base=folder/'corr.mkv'
+        run(binary,'generate','--audio-timecode','1200','--event-rate',2,'--format','1080p25','--duration',10,'--offset',0,
+            '--container','mkv','--allow-container-shift','--video-codec','h264','--audio-codec','pcm16','--out',base)
+        variants={'pcm':base}
+        for name,args in [('aac',['-c:a','aac','-b:a','128k']),('opus',['-c:a','libopus','-b:a','128k'])]:
+            variants[name]=folder/f'corr-{name}.mkv'
+            run('ffmpeg','-v','error','-y','-i',base,'-c:v','copy',*args,variants[name])
+        variants['noise']=folder/'corr-noise.mkv'
+        run('ffmpeg','-v','error','-y','-i',base,'-filter_complex',
+            '[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a];anoisesrc=a=0.3:c=white:r=48000:d=10,aformat=sample_fmts=fltp:channel_layouts=stereo[n];[a][n]amix=inputs=2:normalize=0[o]',
+            '-map','0:v','-map','[o]','-c:v','copy','-c:a','pcm_s16le',variants['noise'])
+        corr={}
+        for name,path in variants.items():
+            report=analyze(path,'corr-'+name)
+            events=[e for e in report['events'] if e.get('correlation') is not None and e.get('av_offset_ms') is not None]
+            assert len(events)>=15,(name,report)
+            offsets=[e['av_offset_ms'] for e in events]
+            spread=max(offsets)-min(offsets)
+            corr[name]=statistics.median(e['correlation'] for e in events)
+            if name!='noise':
+                assert all(e['audio_quality']=='good' and e['correlation']>0.85 for e in events),(name,events[0])
+                assert spread<0.05,(name,spread)
+            print('correlation',name,round(corr[name],4),'offset spread',round(spread,4))
+        assert corr['pcm']>=0.99 and corr['noise']<corr['pcm'],corr
+    print('PASS: full render/encode/analyze, white-onset alignment, 1/2 Hz, 59.94 grid, 600 fallback, legacy, G.711 +3217 ms, audio-only, AVS2 correlation pcm/AAC/Opus/noise')
 
 
 if __name__=='__main__':main()

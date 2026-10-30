@@ -4,6 +4,10 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <memory>
+#include <tuple>
+#include <mutex>
+#include <map>
 
 #define POCKETFFT_NO_MULTITHREADING 1
 #include "pocketfft_hdronly.h"
@@ -51,6 +55,50 @@ std::vector<double> correlate(const float* x, int nx, const float* ref, int m)
 
 } // namespace
 
+struct AudioDetector::Shifted {
+    std::vector<std::vector<float>> refs[4];
+    std::vector<double> norms[4];
+};
+
+namespace {
+
+std::shared_ptr<const AudioDetector::Shifted> make_shifted(const ChirpSpec& spec, int length)
+{
+    static std::mutex mu;
+    static std::map<std::tuple<int, double, double, double, double>, std::shared_ptr<const AudioDetector::Shifted>> cache;
+    const auto key = std::make_tuple(spec.sample_rate, spec.duration_ms, spec.low_hz, spec.high_hz, spec.level_dbfs);
+    std::lock_guard lock(mu);
+    if (auto it = cache.find(key); it != cache.end()) {
+        return it->second;
+    }
+    auto shifted = std::make_shared<AudioDetector::Shifted>();
+    const double centre = (length - 1) * 0.5;
+    for (int id = 0; id < 4; ++id) {
+        for (int step = -10; step <= 10; ++step) {
+            std::vector<float> r(static_cast<size_t>(length));
+            double norm = 0;
+            for (int i = 0; i < length; ++i) {
+                r[static_cast<size_t>(i)] = chirp_sample(spec, id, centre + step * 0.05, static_cast<double>(i));
+                norm += static_cast<double>(r[static_cast<size_t>(i)]) * r[static_cast<size_t>(i)];
+            }
+            shifted->refs[id].push_back(std::move(r));
+            shifted->norms[id].push_back(std::sqrt(std::max(norm, 1e-18)));
+        }
+    }
+    if (cache.size() > 16) {
+        cache.clear();
+    }
+    cache.emplace(key, shifted);
+    return shifted;
+}
+
+} // namespace
+
+std::string chirp_quality(double correlation, bool clipped)
+{
+    return correlation >= kGoodCorrelation && !clipped ? "good" : "degraded";
+}
+
 AudioDetector::AudioDetector(AudioDetectConfig config)
     : config_(std::move(config))
 {
@@ -65,6 +113,26 @@ AudioDetector::AudioDetector(AudioDetectConfig config)
         }
         ref_norm_[id] = std::sqrt(std::max(sum, 1e-18));
     }
+    shifted_ = make_shifted(config_.chirp, length_);
+}
+
+double AudioDetector::fractional_ncc(const float* samples, int lag, int id, const std::vector<double>& prefix) const
+{
+    const int m = length_;
+    const double energy = prefix[static_cast<size_t>(lag + m)] - prefix[static_cast<size_t>(lag)];
+    if (energy <= 1e-10 * static_cast<double>(m)) {
+        return 0;
+    }
+    double best = 0;
+    for (size_t n = 0; n < shifted_->refs[id].size(); ++n) {
+        const auto& r = shifted_->refs[id][n];
+        double dot = 0;
+        for (int k = 0; k < m; ++k) {
+            dot += static_cast<double>(r[static_cast<size_t>(k)]) * samples[lag + k];
+        }
+        best = std::max(best, dot / (std::sqrt(energy) * shifted_->norms[id][n]));
+    }
+    return best;
 }
 
 std::vector<AudioHit> AudioDetector::detect(const float* samples, size_t count, uint64_t origin_sample) const
@@ -158,7 +226,10 @@ std::vector<AudioHit> AudioDetector::detect(const float* samples, size_t count, 
             Peak peak;
             peak.lag = static_cast<double>(i) + delta;
             peak.id = id;
-            peak.ncc = v;
+            // The integer-lag value understates a chirp that sits between samples (at 8 kHz a half
+            // sample costs about 0.2). Report the best match over sub-sample shifts of the reference;
+            // the timing above is unchanged.
+            peak.ncc = std::max(v, fractional_ncc(samples, i, id, prefix));
             const int a = std::max(0, i);
             const int b = std::min(nx, i + m);
             double peak_abs = 0;
@@ -213,7 +284,7 @@ std::vector<AudioHit> AudioDetector::detect(const float* samples, size_t count, 
         hit.level_dbfs = kept[i].level;
         hit.clipped = kept[i].clipped;
         hit.ambiguous = rival > 0 && kept[i].ncc < rival * config_.ambiguity_ratio;
-        hit.quality = hit.ambiguous ? "invalid" : (hit.correlation >= 0.85 && !hit.clipped ? "good" : "degraded");
+        hit.quality = hit.ambiguous ? "invalid" : chirp_quality(hit.correlation, hit.clipped);
         if (hit.correlation < config_.threshold) {
             hit.quality = "invalid";
         }

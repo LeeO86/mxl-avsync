@@ -43,9 +43,14 @@ With the default kernel clock source on a ptp4l + phc2sys node:
 
 - **Audio correlation.** With the default AVS2 signal (`AVSYNC_AUDIO_TIMECODE=1200`
   or `600`) `mxl_avsync_audio_correlation` and the event `correlation` are about
-  0.80 on a clean path. The legacy signal gives about 0.99. The value is the
-  chirp match before the timecode, not a quality loss. Review alert thresholds
-  set near 0.9 before switching to AVS2.
+  0.80 on a clean path. The legacy signal gives about 0.99. Review alert
+  thresholds set near 0.9 before switching to AVS2.
+  *Correction (2.0.3):* this is not by design and not "the chirp match before
+  the timecode". The AVS2 decoder correlated at 8 kHz at the integer lag, and
+  the generator's chirp sits half a sample off that grid, so a bit-exact path
+  read 0.80 and a resampling (lossy) path up to about 0.98. 2.0.3 reports the
+  best sub-sample match: a bit-exact path gives about 1.00. See
+  release-notes-2.0.3.md.
 - **Drops and duplicates.** `mxl_avsync_video_drops_total` and
   `mxl_avsync_video_duplicates_total` are stubs: they have been 0 in every
   version. What changes with AVS2 is the event: there is no frame counter strip,

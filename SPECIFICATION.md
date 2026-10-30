@@ -302,6 +302,8 @@ These are starting values, not proven optima. M0 tests them against level change
 - Matched filter: normalised cross-correlation of the input with each of the four reference chirps (FFT based, overlap-save), on one channel (`AVSYNC_AUDIO_CHANNEL`, default 0).
 - A detection needs: the normalised peak above `AVSYNC_AUDIO_THRESHOLD` (default 0.5, from M0), a peak-to-sidelobe ratio above a limit, and one chirp shape clearly better than the other three. Normalisation makes it level-independent; the energy floor keeps noise from becoming a hit.
 - Time: the peak position refined by parabolic interpolation (sub-sample).
+- Correlation (2.0.3): the best normalised match of the expected chirp alone, over sub-sample shifts of the reference (±0.5 sample in 1/20 steps) at the integer peak. The window is the 30 ms chirp only; the AVS2 timecode starts 10 ms after it and does not enter. Before 2.0.3 the value was taken at the integer lag: the AVS2 decoder works at 8 kHz, where the generator's chirp sits half a sample off the grid, so a bit-exact path read 0.80 and a resampling path (codec, SRC) up to about 0.98. A bit-exact path now gives ≥ 0.99, and noise or a lossy path lowers it. The timing is unchanged.
+- Quality: `good` at a correlation of at least 0.85 and no clipping, else `degraded`; the same rule for detector hits (analyzer, phone) and AVS2 packets (before 2.0.3 AVS2 packets were always `good`).
 - Per detection: time, chirp id, correlation (0–1), peak level in dBFS, clip indication (samples at ±1.0), quality (`good`, `degraded`, `invalid`).
 - A second peak of the same chirp within one period = `duplicate`; an expected chirp not found within ±2 periods = `missing`; two shapes nearly equal = `ambiguous`. Each is counted and reported, never silently dropped.
 
@@ -404,7 +406,7 @@ The grade compares the **AV offset** (index time) with three windows (the mainta
 
 `uncertainty_ms` is an interval half-width built from known parts, never a guess:
 
-- audio: the detector's timing uncertainty at the measured correlation (a table from M0's tests);
+- audio: the detector's timing uncertainty at the measured correlation (a table from M0's tests: ≥ 0.95 → 0.05 ms, ≥ 0.85 → 0.10 ms, ≥ 0.70 → 0.25 ms, ≥ 0.50 → 0.50 ms, else 1 ms). With the 2.0.3 correlation an AVS2 event on a clean path moves from the 0.25 ms row to the 0.05 ms row; the measured AVS2 timing spread (bit-exact 0, AAC 128k 0.0075 ms, AAC 64k 0.016 ms, noise 0.016–0.05 ms) is within that row;
 - video: 0 on a path without frame-rate conversion and without a drop or duplicate near the event; else one input frame (or field);
 - arrival times: the reader's wake-up resolution plus the largest commit batch seen on that flow;
 - a reference with `sync_state: unknown` makes latencies `uncertainty_status: "unknown"` (the offset is unaffected).
