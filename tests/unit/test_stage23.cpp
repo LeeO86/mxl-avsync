@@ -300,7 +300,8 @@ TEST_CASE("kernel unreported PTP errors are unknown accuracy, not a 16 second es
     clock.read_ok = true;
     clock.unsynced = false;
     clock.tai_offset_s = 37;
-    clock.esterror_us = clock.maxerror_us = 16000000;
+    clock.esterror_us = 16000000;
+    clock.maxerror_us = 0;
     auto state = classify_kernel_clock(clock, 100);
     CHECK(state.sync_state == "locked");
     CHECK(state.accuracy_ns == -1);
@@ -312,9 +313,11 @@ TEST_CASE("kernel unreported PTP errors are unknown accuracy, not a 16 second es
     CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
     CHECK(classify_kernel_clock(clock, 100).reason == "TAI offset is not set");
     clock.tai_offset_s = 37;
-    clock.maxerror_us = 1000; // phc2sys keeps maxerror low; esterror alone is the sentinel
+    clock.maxerror_us = 1000000; // fresh: phc2sys keeps resetting maxerror
     CHECK(classify_kernel_clock(clock, 100).sync_state == "locked");
     CHECK(classify_kernel_clock(clock, 100).accuracy_ns == -1);
+    clock.maxerror_us = 16000000; // both at the default: nothing disciplines the clock
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
     clock.esterror_us = 200;
     clock.maxerror_us = 16000000;
     CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
@@ -339,6 +342,24 @@ TEST_CASE("kernel clock sample from a ptp4l + phc2sys host is locked with unknow
     CHECK(state.accuracy_ns == -1);
     CHECK(state.reason == "error not reported (PTP discipline)");
     clock.unsynced = true; // the sentinel never overrides STA_UNSYNC
+    CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
+}
+
+TEST_CASE("a stopped phc2sys unlocks once maxerror grows past 1 s")
+{
+    // esterror stays at the 16-s default, the kernel adds 500 us/s to maxerror after the last
+    // discipline update: 5 s means about 2.8 h without phc2sys.
+    KernelClock clock;
+    clock.read_ok = true;
+    clock.unsynced = false;
+    clock.tai_offset_s = 37;
+    clock.esterror_us = 16000000;
+    clock.maxerror_us = 5000000;
+    const auto state = classify_kernel_clock(clock, 100);
+    CHECK(state.sync_state == "unlocked");
+    CHECK(state.accuracy_ns == -1);
+    CHECK(state.reason == "error not reported and maxerror above 1 s (discipline stopped)");
+    clock.maxerror_us = 1000001;
     CHECK(classify_kernel_clock(clock, 100).sync_state == "unlocked");
 }
 

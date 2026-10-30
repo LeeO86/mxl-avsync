@@ -2,7 +2,7 @@
 
 ## 2.0.1 (unreleased)
 
-- Kernel clock: `esterror` at the 16-s kernel default is "not reported" even when `maxerror` is low, so ptp4l + phc2sys hosts (esterror 16 s, maxerror 0) lock with unknown accuracy instead of "estimated error exceeds clock limit".
+- Kernel clock: `esterror` at the 16-s kernel default is "not reported" even when `maxerror` is low, so ptp4l + phc2sys hosts (esterror 16 s, maxerror 0) lock with unknown accuracy instead of "estimated error exceeds clock limit". `maxerror` above 1 s (about 33 min without a discipline update, e.g. phc2sys stopped) unlocks.
 
 ## 2.0.0 (2026-10-29)
 
