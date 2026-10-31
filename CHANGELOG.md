@@ -28,6 +28,13 @@
   on iOS; real device exchange/wizard is not implemented. Android's clock module
   does not claim the pending capture/generator NDK port.
 
+## 2.0.6 (unreleased)
+
+- Absolute-latency metrics per essence: `mxl_avsync_latency_abs_ms` and `mxl_avsync_latency_abs_uncertainty_ms` (gauges, median over the grade window of `AVSYNC_GRADE_EVENTS` events, `NaN` without a value), `mxl_avsync_latency_abs_seconds` (histogram of every event since start, 1 ms to 5 s, +Inf) and `mxl_avsync_emit_offset_mismatch_total` (counter). All exported from the first scrape.
+- `AVSyncGeneratorRenderSlow` fires at render p99 above 75 % of the new gauge `mxl_avsync_generator_render_budget_seconds` (grain period + video lead: 30 ms at 50p with the default 20 ms lead), not a fixed 10 ms that a healthy busy node (p99 17.6 ms, 0 late) exceeded permanently. New rule `AVSyncEmitOffsetMismatch`.
+- `mxl_avsync_av_offset_ms` is the median over the grade window (the last `AVSYNC_GRADE_EVENTS` valid events, the events the grade uses), as the specification says; before it was the last event. `mxl_avsync_av_offset_deviation_ms` is that window's median deviation (it was always 0). `mxl_avsync_av_offset_seconds` counts every paired event since start, like `events_total`; before it counted the last 1000 retained events and stopped growing after about 8 minutes.
+- The audio onset block is rendered 3 ms ahead and committed on time: measured audio emit −24.94 ms (spread 0.02 ms); in 2.0.5 the packet synthesis delayed it to −24.2 … −22.5 ms.
+
 ## 2.0.5 (2026-10-31)
 
 - Absolute latency as the headline: `video_latency_abs_ms` / `audio_latency_abs_ms` (emission → arrival) with `*_latency_abs_uncertainty_ms`, never negative. A chain latency below 0 inside its uncertainty is 0 ("0 ± u"); further below 0 gives no value and the flag `emit_offset_mismatch`. The UI latency card and the widget show "v ± u ms" with the clock source, state and accuracy; "arrival vs timestamp", the source emit offsets and the raw chain latency move to a Diagnostics card. The measurement API adds `clock`, `latency_basis` and the absolute fields; all earlier fields stay.

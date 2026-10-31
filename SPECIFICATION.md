@@ -90,7 +90,7 @@ A `serve` process has exactly one role. One generator can feed any number of ana
 **Writer timing.** MXL indexes grains and samples by timestamp, so a grain committed before its time is read at its own index; readers that ask for it earlier wait (`OUT_OF_RANGE_TOO_EARLY`). The generator uses this:
 
 - Video grain `k` is committed at `T_k − AVSYNC_VIDEO_LEAD_MS` (default 20 ms), or at once when its render ends later. The render has a whole grain period, because it starts right after the previous commit. A grain is skipped only when its render would start more than one grain after its own timestamp; the writer then continues at the first grain whose commit time is still ahead and counts the skipped grains in `output_frames_missed_total{essence="video"}`. `output_frames_late_total{essence="video"}` counts grains committed after their own timestamp.
-- Audio is committed between `AVSYNC_AUDIO_LEAD_MS` and that lead plus one 10 ms block before its timestamp. Each event's onset (AVS2 packet start, legacy chirp centre) is committed at exactly `AVSYNC_AUDIO_LEAD_MS` + 5 ms before its timestamp: the block before it ends at the onset (2.0.5). The audio wake-ups lie half a block off the video grid, so the two writers do not wake together.
+- Audio is committed between `AVSYNC_AUDIO_LEAD_MS` and that lead plus one 10 ms block before its timestamp. Each event's onset (AVS2 packet start, legacy chirp centre) is committed at exactly `AVSYNC_AUDIO_LEAD_MS` + 5 ms before its timestamp: the block before it ends at the onset (2.0.5). Since 2.0.6 the onset block is rendered 3 ms ahead and committed on time (measured −24.94 ms, spread 0.02 ms; 2.0.5 measured about −24.2 to −22.5 ms, the render time). The audio wake-ups lie half a block off the video grid, so the two writers do not wake together.
 
 ### 2.3 Analyzer threads
 
@@ -797,10 +797,14 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `input_grains_skipped_total` | counter | `essence` (`video`) | ana; input grains not analysed: written invalid by the source (a missed grain), overwritten, or jumped over after a stall longer than half the flow history (2.0.4) |
 | `events_total` | counter | `result` (`paired`, `missing_audio`, `missing_video`, `duplicate`, `ambiguous`, `out_of_range`, `quality`, `other`) | ana; every closed event counted once (2.0.4: a real counter; before it counted the last 1000 retained events). `missing_video`: an audio event (AVS2 packet or chirp) no video event claimed within its window; `quality`: paired but a part was invalid |
 | `generator_render_seconds` | histogram (buckets 1, 2, 5, 10, 20, 40, 80, 160 ms, +Inf) | | gen; picture render and v210 pack per video grain (2.0.4) |
+| `generator_render_budget_seconds` | gauge | | gen; render time per grain before the grain is late: grain period + `AVSYNC_VIDEO_LEAD_MS` (40 ms at 50p), 0 on an analyzer (2.0.6) |
+| `latency_abs_ms`, `latency_abs_uncertainty_ms` | gauge (median over the grade window, the last `AVSYNC_GRADE_EVENTS` events with a value); `NaN` until there is one | `essence` | ana; absolute latency and its half-width (§3.3, 2.0.6) |
+| `latency_abs_seconds` | histogram (buckets 1, 2, 5, 10, 20, 50, 100, 200, 500 ms, 1, 2, 5 s, +Inf), every event since start | `essence` | ana (2.0.6) |
+| `emit_offset_mismatch_total` | counter | `essence` | ana; events with a chain latency below 0 beyond its uncertainty, so no absolute value (2.0.6) |
 | `grade` | gauge 1 for the grade | `grade` (`pass`, `warn`, `fail`, `invalid`) | ana |
-| `av_offset_ms` | gauge (median of the grade window) | | ana |
-| `av_offset_deviation_ms` | gauge | | ana |
-| `av_offset_seconds` | histogram (signed buckets ±5, 15, 40, 60, 100, 200, 500 ms) | | ana |
+| `av_offset_ms` | gauge (median of the grade window: the last `AVSYNC_GRADE_EVENTS` valid events; before 2.0.6 the last event) | | ana |
+| `av_offset_deviation_ms` | gauge (median of the grade window; before 2.0.6 always 0) | | ana |
+| `av_offset_seconds` | histogram (signed buckets ±5, 15, 40, 60, 100, 200, 500 ms), every paired event since start (before 2.0.6: the last 1000 retained events) | | ana |
 | `video_latency_ms`, `audio_latency_ms` | gauge (median), absent without a reference | | ana |
 | `video_index_shift_ms`, `audio_index_shift_ms` | gauge | | ana |
 | `video_drops_total`, `video_duplicates_total` | counter | | ana |
@@ -823,7 +827,8 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `AVSyncInputGrainsSkipped` | `increase(input_grains_skipped_total[5m]) > 0` | 5 m | info |
 | `AVSyncGeneratorMissedGrains` | `increase(output_frames_missed_total{essence="video"}[5m]) > 0` | 5 m | warning |
 | `AVSyncGeneratorLateGrains` | more than 1 % of video grains committed after their timestamp in 5 min | 5 m | warning |
-| `AVSyncGeneratorRenderSlow` | `generator_render_seconds` p99 over 5 min above 10 ms | 10 m | warning |
+| `AVSyncGeneratorRenderSlow` | `generator_render_seconds` p99 over 5 min above 75 % of `generator_render_budget_seconds` (30 ms at 50p with the default lead) | 10 m | warning |
+| `AVSyncEmitOffsetMismatch` | `increase(emit_offset_mismatch_total[10m]) > 0` | 1 m | warning |
 | `AVSyncGeneratorMuted` | `mxl_avsync_generator_audio_muted == 1` | 10 m | info |
 
 The rules are in `deploy/prometheus/avsync-rules.yaml`, checked and unit-tested in CI with promtool (`deploy/prometheus/avsync-rules.test.yaml`). The platform owns the rules (`k8s/monitoring/20-rules.yaml.j2`); this repo delivers the proposal with 1.0.
