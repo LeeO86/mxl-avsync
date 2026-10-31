@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.5 (unreleased)
+## 2.0.5 (2026-10-31)
 
 - Absolute latency as the headline: `video_latency_abs_ms` / `audio_latency_abs_ms` (emission → arrival) with `*_latency_abs_uncertainty_ms`, never negative. A chain latency below 0 inside its uncertainty is 0 ("0 ± u"); further below 0 gives no value and the flag `emit_offset_mismatch`. The UI latency card and the widget show "v ± u ms" with the clock source, state and accuracy; "arrival vs timestamp", the source emit offsets and the raw chain latency move to a Diagnostics card. The measurement API adds `clock`, `latency_basis` and the absolute fields; all earlier fields stay.
 - Source emit offsets, per essence: new live settings `AVSYNC_SOURCE_EMIT_VIDEO_MS` / `AVSYNC_SOURCE_EMIT_AUDIO_MS` (copy them from the generator's `/api/v1/status` `emit_offsets`) win and are labelled `entered`; otherwise the 2.0.2 flow tag of the directly connected generator flow from the Query API (`nmos-tag`); otherwise none, and the latency is "relative to the source timestamp". `source_emit_offsets` gains `video_source` / `audio_source`. No new NMOS tag.
