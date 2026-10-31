@@ -499,12 +499,24 @@ std::vector<Measurement> Pairer::poll(double now_ms)
     }
     if (live_stream_) {
         if (first_poll_ms_ < 0) first_poll_ms_ = now_ms;
-        // An audio event no video claimed within its window is reported, never dropped silently.
+        // An audio event no video claimed within its window is reported, never dropped silently
+        // (after a warm-up of two periods: a reader that starts mid-event cannot see that flash).
         for (size_t i = 0; i < audios_.size(); ++i) {
             const auto& audio = audios_[i];
             const double horizon = audio.time_ms + (audio.timecode ? 10000.0 : 4.0 * period_ms_);
-            if (!audio_used_[i] && now_ms > horizon && audio.time_ms >= first_poll_ms_ - 2.0 * period_ms_) {
+            if (!audio_used_[i] && now_ms > horizon && audio.time_ms >= first_poll_ms_ + 2.0 * period_ms_) {
                 audio_used_[i] = true;
+                // A legacy chirp seen again (the detector rescans its window) next to one already
+                // paired or reported is the same chirp, not a lost event.
+                bool repeat = false;
+                for (size_t j = 0; j < audios_.size() && !audio.timecode; ++j) {
+                    if (j != i && audio_used_[j] && !audios_[j].timecode && audios_[j].chirp_id == audio.chirp_id
+                        && std::abs(audios_[j].time_ms - audio.time_ms) < period_ms_ / 4.0) {
+                        repeat = true;
+                        break;
+                    }
+                }
+                if (repeat) continue;
                 auto measured = make_missing_video(audio);
                 fresh.push_back(measured);
             }

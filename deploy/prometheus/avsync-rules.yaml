@@ -1,8 +1,10 @@
 # Proposed alert rules for the platform (SPECIFICATION §16.6).
-# The platform owns k8s/monitoring/20-rules.yaml.j2; this file is the proposal shipped with 1.0.
+# The platform owns k8s/monitoring/20-rules.yaml.j2; this file is the proposal shipped with the repo.
+# Checked in CI with promtool (check rules + the unit tests in avsync-rules.test.yaml).
 groups:
   - name: mxl-avsync
     rules:
+      # ---- grade (analyzer) ----
       - alert: AVSyncFail
         expr: mxl_avsync_grade{grade="fail"} == 1
         for: 30s
@@ -17,13 +19,57 @@ groups:
           severity: warning
         annotations:
           summary: AV sync is inside EBU R37 but outside the per-stage window
+      # ---- events (analyzer) ----
       - alert: AVSyncNoEvents
-        expr: mxl_avsync_input_state{state="running"} == 1 and rate(mxl_avsync_events_total{result="paired"}[1m]) == 0
+        expr: |
+          (sum without (essence, state) (mxl_avsync_input_state{state="running"}) > 0)
+          and (sum without (result) (rate(mxl_avsync_events_total{result="paired"}[2m])) == 0)
         for: 1m
         labels:
           severity: warning
         annotations:
-          summary: Analyzer is routed and has paired no events for a minute
+          summary: Analyzer is running and has paired no events for two minutes
+      - alert: AVSyncMissingEvents
+        expr: |
+          sum without (result) (increase(mxl_avsync_events_total{result!="paired"}[10m]))
+            / sum without (result) (increase(mxl_avsync_events_total[10m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5 % of events in 10 minutes were not paired (see events_total by result)
+      - alert: AVSyncInputGrainsSkipped
+        expr: increase(mxl_avsync_input_grains_skipped_total{essence="video"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: The analyzer passed over input grains (missing at the source, or the analyzer stalled)
+      # ---- generator ----
+      - alert: AVSyncGeneratorMissedGrains
+        expr: increase(mxl_avsync_output_frames_missed_total{essence="video"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Generator video grains were never written in the last 5 minutes
+      - alert: AVSyncGeneratorLateGrains
+        expr: |
+          increase(mxl_avsync_output_frames_late_total{essence="video"}[5m])
+            / increase(mxl_avsync_output_frames_total{essence="video"}[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 1 % of generator video grains were committed after their timestamp
+      - alert: AVSyncGeneratorRenderSlow
+        expr: |
+          histogram_quantile(0.99, rate(mxl_avsync_generator_render_seconds_bucket[5m])) > 0.010
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Generator picture render p99 above 10 ms (a grain is 20 ms at 50p)
       - alert: AVSyncGeneratorMuted
         expr: mxl_avsync_generator_audio_muted == 1
         for: 10m

@@ -1,0 +1,58 @@
+# promtool test rules deploy/prometheus/avsync-rules.test.yaml
+rule_files:
+  - avsync-rules.yaml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      # analyzer a: running, 2 events/min paired, 1 of 10 missing_video per minute
+      - series: 'mxl_avsync_input_state{instance="a",essence="video",state="running"}'
+        values: '1x30'
+      - series: 'mxl_avsync_events_total{instance="a",result="paired"}'
+        values: '0+120x30'
+      - series: 'mxl_avsync_events_total{instance="a",result="missing_video"}'
+        values: '0+12x30'
+      # analyzer b: running, nothing paired
+      - series: 'mxl_avsync_input_state{instance="b",essence="video",state="running"}'
+        values: '1x30'
+      - series: 'mxl_avsync_events_total{instance="b",result="paired"}'
+        values: '0x30'
+      # generator g: misses grains, 5 % late, render p99 about 40 ms
+      - series: 'mxl_avsync_output_frames_missed_total{instance="g",essence="video"}'
+        values: '0+10x30'
+      - series: 'mxl_avsync_output_frames_late_total{instance="g",essence="video"}'
+        values: '0+150x30'
+      - series: 'mxl_avsync_output_frames_total{instance="g",essence="video"}'
+        values: '0+3000x30'
+      - series: 'mxl_avsync_generator_render_seconds_bucket{instance="g",le="0.01"}'
+        values: '0+2000x30'
+      - series: 'mxl_avsync_generator_render_seconds_bucket{instance="g",le="0.04"}'
+        values: '0+3000x30'
+      - series: 'mxl_avsync_generator_render_seconds_bucket{instance="g",le="+Inf"}'
+        values: '0+3000x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AVSyncMissingEvents
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: a}
+            exp_annotations: {summary: 'More than 5 % of events in 10 minutes were not paired (see events_total by result)'}
+      - eval_time: 20m
+        alertname: AVSyncNoEvents
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: b}
+            exp_annotations: {summary: 'Analyzer is running and has paired no events for two minutes'}
+      - eval_time: 20m
+        alertname: AVSyncGeneratorMissedGrains
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: g, essence: video}
+            exp_annotations: {summary: 'Generator video grains were never written in the last 5 minutes'}
+      - eval_time: 20m
+        alertname: AVSyncGeneratorLateGrains
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: g, essence: video}
+            exp_annotations: {summary: 'More than 1 % of generator video grains were committed after their timestamp'}
+      - eval_time: 20m
+        alertname: AVSyncGeneratorRenderSlow
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: g}
+            exp_annotations: {summary: 'Generator picture render p99 above 10 ms (a grain is 20 ms at 50p)'}
