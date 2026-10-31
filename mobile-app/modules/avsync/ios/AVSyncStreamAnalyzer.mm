@@ -213,6 +213,7 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  NSMutableArray *chirps=[NSMutableArray array];double bestCorrelation=0;
  for(const auto&hit:report.audio_hits){bestCorrelation=std::max(bestCorrelation,hit.correlation);[chirps addObject:@{@"id":@(hit.chirp_id),@"timeMs":@(hit.time_ms),@"correlation":@(hit.correlation),@"quality":[NSString stringWithUTF8String:hit.quality.c_str()]}];}
  result[@"timeMs"]=@(now);result[@"picture"]=[self pictureObservation];
+ if(s.haveWallClock)result[@"deviceUtcOffsetMs"]=@(s.wallOffsetMs);
  if(s.qr)result[@"signalIdentity"]=[NSString stringWithUTF8String:(s.qr->test_id+":"+std::to_string(s.qr->source_id)).c_str()];
  NSMutableDictionary *latency=[@{@"state":@"waiting_for_live_qr",@"estimated":@YES,@"taiUtcSeconds":@(s.taiUtcSeconds),@"clockAccuracy":@"unknown",@"videoState":@"waiting_for_live_qr",@"audioState":@"waiting_for_audio_timecode"}mutableCopy];
  if(s.qr){

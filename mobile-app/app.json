@@ -2,7 +2,7 @@
   "expo": {
     "name": "AVsync",
     "slug": "mxl-avsync",
-    "version": "2.0.0",
+    "version": "2.0.5",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "platforms": [
@@ -13,7 +13,8 @@
       "bundleIdentifier": "io.leeo86.mxl.avsync",
       "infoPlist": {
         "NSCameraUsageDescription": "See the AV sync test picture.",
-        "NSMicrophoneUsageDescription": "Hear the AV sync chirps."
+        "NSMicrophoneUsageDescription": "Hear the AV sync chirps.",
+        "NSLocalNetworkUsageDescription": "Synchronize the measurement clock with a time server on your local network."
       },
       "config": {
         "usesNonExemptEncryption": false
@@ -29,7 +30,9 @@
       },
       "permissions": [
         "CAMERA",
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ],
       "icon": "./assets/android-icon.png"
     },

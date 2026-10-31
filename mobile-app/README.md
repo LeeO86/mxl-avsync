@@ -17,7 +17,7 @@ Use the custom development build, not Expo Go. The local Avsync Expo module cont
 
 The Measure tab uses the original dark camera/guide/result layout. Native AVFoundation camera and microphone capture start together. The app selects the rear wide camera format with the highest supported maximum frame rate, choosing the larger raster on a tie, and explicitly sets both frame durations. The overlay distinguishes the configured camera rate from the rate actually processed. CPU load, dropped frames and light can affect achievable performance; the configured rate is not an accuracy claim.
 
-The C++ phone detector receives camera luma and PCM audio on the capture session's shared timestamp timeline. Results update roughly once per second after the initial observation window; this is continuous analysis, not eight-second movie recording. Aim at the complete test picture with four visible corner markers and audible chirps (currently 2 events/second). Status text distinguishes missing picture, unreadable marker code and missing matching chirps. Save result stores a snapshot; Results lists saved measurements and tap-to-export JSON.
+The C++ phone detector receives camera luma and PCM audio on the capture session's shared timestamp timeline. Results update roughly once per second after the initial observation window; this is continuous analysis, not eight-second movie recording. For AVS2, keep the large QR and its adjacent flash field visible; external corner markers are not required. Legacy signals still need their corner markers. Aim at the test picture and audible chirps (currently 2 events/second). Status text distinguishes missing picture, unreadable marker code and missing matching chirps. Save result stores a snapshot; Results lists saved measurements and tap-to-export JSON.
 
 Calibration is optional. Missing, expired or incompatible calibration means **0 ms correction**, with an uncalibrated status. Positive offset means audio is late. A separate **estimated latency** panel uses matching LIVE QR/audio TAI references and the phone clock; its clock/capture accuracy remains unknown, as described below.
 
@@ -195,3 +195,19 @@ Application Support image assets. Verify saved state again afterwards. Numeric
 diagnostic history is not a saved-session backup. Do not use broad
 `devicectl copy to --remove-existing-content` operations for subdirectory cleanup;
 use scoped app-owned cleanup instead. Keep backups outside Git.
+
+
+## Native time reference and platform 2.0.5
+
+The app builds the shared 2.0.5 core, including corrected chirp correlation.
+Settings → Time reference provides native SNTP on iOS (configurable server)
+and raw GNSS on Android 10+ with receiver support and precise location consent.
+The current Android module supplies timing only; live capture/generation are
+explicitly unsupported until their NDK port is completed. Expo Go cannot load
+these modules. [Algorithms, stored evidence, calibration context and limits](../docs/phone-clock.md).
+
+Use Apply time settings, then Synchronize. References expire after 5 minutes;
+the configurable clock uncertainty limit defaults to 20 ms. Optional source
+emit offsets are separate from capture calibration. Clock/source/capture
+uncertainties are not interchangeable. Old saved readings remain unchanged;
+new route-incompatible calibrations stay stored but are not applied.

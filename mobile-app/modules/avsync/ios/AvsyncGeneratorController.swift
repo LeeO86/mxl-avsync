@@ -38,8 +38,11 @@ final class AvsyncGeneratorController: UIViewController {
   private var sourceID = ""
   private var lastStatus = 0.0
   private var utcMinusHost = 0.0
+  private let clockReference: [String:String]
+  private var usingReference = false
 
-  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil) {
+  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil, clockReference: [String:String] = [:]) {
+    self.clockReference = clockReference
     self.rate = rate; self.taiUtc = taiUtc; self.sourceName = name; self.subtitle = subtitle; self.sourceImage = image
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .fullScreen
@@ -132,7 +135,16 @@ final class AvsyncGeneratorController: UIViewController {
       let before = CACurrentMediaTime(), utc = Date().timeIntervalSince1970, after = CACurrentMediaTime()
       epochHost = target + 1.5
       utcMinusHost = utc - (before + after)/2
-      let epochTai = Int64(((utc + taiUtc) + epochHost - (before + after)/2) * 1e9)
+      var referenceUtcMinusHost = utcMinusHost
+      usingReference = false
+      if clockReference["clockId"] == PhoneClock.identifier,
+         let unixMs = Double(clockReference["clockUnixMs"] ?? ""), (1e12...4e12).contains(unixMs),
+         let hostMs = Double(clockReference["clockMonotonicMs"] ?? ""), unixMs.isFinite, hostMs.isFinite,
+         (before*1000-hostMs) >= 0, before*1000-hostMs < 300_000 {
+        referenceUtcMinusHost = (unixMs-hostMs)/1000
+        usingReference = true
+      }
+      let epochTai = Int64((referenceUtcMinusHost + taiUtc + epochHost) * 1e9)
       plan = AVSyncGenerator(testID: sourceID, rate: rate, epochTaiNs: epochTai, epochHost: epochHost)
       guard let plan else { return }
       plan.setSource(name: sourceName, subtitle: subtitle, image: sourceImage)
@@ -208,10 +220,15 @@ final class AvsyncGeneratorController: UIViewController {
     CATransaction.commit()
     if now - lastStatus > 0.5 {
       lastStatus = now
+      if usingReference, let anchor = Double(clockReference["clockMonotonicMs"] ?? ""),
+         let radius = Double(clockReference["clockUncertaintyMs"] ?? ""), let limit = Double(clockReference["clockLimitMs"] ?? ""),
+         (now*1000-anchor > 300_000 || radius+(now*1000-anchor)*50/1e6 > limit) {
+        stop("Clock reference expired. Close and synchronize again."); return
+      }
       if abs(Date().timeIntervalSince1970 - now - utcMinusHost) > 0.1 {
         stop("Phone clock changed. Tap Start to create a fresh clock mapping."); return
       }
-      status.text = "TEST SIGNAL ACTIVE · 1200 baud · \(rate)/s · frame skips \(lateFrames)\nEstimated output timing · audio lead \(Int((outputLatency*1000).rounded())) ms"
+      status.text = "TEST SIGNAL ACTIVE · 1200 baud · \(rate)/s · frame skips \(lateFrames)\nEstimated output timing · \(usingReference ? "NTP UTC" : "device UTC") · audio lead \(Int((outputLatency*1000).rounded())) ms"
     }
   }
   private func stop(_ message: String) {
@@ -229,7 +246,7 @@ final class AvsyncGeneratorController: UIViewController {
   func shutdown() { closeScreen() }
   @objc private func closeScreen() {
     guard !finishing else { return }; finishing = true
-    let result: [String: Any] = ["source": sourceID, "eventRate": rate, "skippedDisplayFrames": lateFrames, "audioPresentationLatencyMs": outputLatency*1000, "estimated": true]
+    let result: [String: Any] = ["source": sourceID, "eventRate": rate, "skippedDisplayFrames": lateFrames, "audioPresentationLatencyMs": outputLatency*1000, "estimated": true, "clockReference": clockReference, "clockApplied": usingReference]
     stop("Closed")
     for token in notices { NotificationCenter.default.removeObserver(token) }; notices.removeAll()
     // Playback has stopped and cleanup is complete. Resolve independently of

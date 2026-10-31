@@ -1,1 +1,16 @@
-{"platforms":["ios"],"ios":{"modules":["AvsyncModule"]}}
+{
+  "platforms": [
+    "ios",
+    "android"
+  ],
+  "ios": {
+    "modules": [
+      "AvsyncModule"
+    ]
+  },
+  "android": {
+    "modules": [
+      "io.leeo86.mxl.avsync.AvsyncModule"
+    ]
+  }
+}
