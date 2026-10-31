@@ -167,3 +167,17 @@ jobs:
           name: amwa
           path: ${{ runner.temp }}/amwa
           if-no-files-found: ignore
+
+  phone-clock:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift SNTP protocol and real local UDP exchange
+        run: python3 mobile-app/tests/native/clock.py
+      - name: Experimental device-calibration maths bridge
+        run: |
+          clang++ -std=c++20 -O2 -fobjc-arc -I mobile-app/modules/avsync/ios -I core/include -I third_party/pocketfft \
+            mobile-app/tests/native/calibration-math.mm mobile-app/modules/avsync/ios/AVSyncDeviceCalibration.mm \
+            core/src/two_way.cpp core/src/timecode.cpp core/src/chirp.cpp core/src/detect.cpp core/src/g711.cpp \
+            -framework Foundation -o /tmp/avsync-calibration-math
+          /tmp/avsync-calibration-math

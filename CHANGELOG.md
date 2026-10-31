@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased (mobile)
+
+- Native iOS SNTP and Android GNSS time references, with clock/timebase identity,
+  age, RTT/uncertainty, expiry and configurable server/qualification limit.
+  Correct latency once using the native monotonic mapping and retain exact
+  acquisition-time evidence in saved/exported results. No system clock changes.
+- Mobile 2.0.5 adopts the shared core's audio-correlation/quality fixes. Optional
+  per-source emit offsets distinguish timestamp-relative and estimated chain
+  latency; signed raw values remain in diagnostics. Physical accuracy stays
+  unvalidated, capture/source uncertainty unknown. iOS generator uses a qualified
+  reference for scheduled source time while retaining estimated output flags.
+- Calibration compatibility now includes model/OS/route/sample rate/camera mode;
+  the existing UI is retained. Experimental two-way maths bridge is available
+  on iOS; real device exchange/wizard is not implemented. Android's clock module
+  does not claim the pending capture/generator NDK port.
+
 ## 2.0.5 (2026-10-31)
 
 - Absolute latency as the headline: `video_latency_abs_ms` / `audio_latency_abs_ms` (emission → arrival) with `*_latency_abs_uncertainty_ms`, never negative. A chain latency below 0 inside its uncertainty is 0 ("0 ± u"); further below 0 gives no value and the flag `emit_offset_mismatch`. The UI latency card and the widget show "v ± u ms" with the clock source, state and accuracy; "arrival vs timestamp", the source emit offsets and the raw chain latency move to a Diagnostics card. The measurement API adds `clock`, `latency_basis` and the absolute fields; all earlier fields stay.

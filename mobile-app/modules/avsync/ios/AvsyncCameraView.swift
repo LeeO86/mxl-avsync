@@ -17,6 +17,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private var qrBusy = false
   private var lastQrScan = -10.0
   private var generation = 0
+  private var captureMode = "unknown"
+  private var capturedSampleRate = 0.0
   private let pictureOutline = CAShapeLayer()
   private var outlineTracker = PreviewOutlineTracker()
   private var outlineWatchdog: Timer?
@@ -44,6 +46,21 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     outlineWatchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.drawPicture() }
     notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = true; self?.updateRunning() })
     notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = false; self?.updateRunning() })
+    notifications.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object:nil, queue:.main) { [weak self] _ in
+      guard let self else { return }
+      self.clearOutline()
+      self.samples.async { self.generation += 1; self.processor.reset(); self.emit(["kind":"error","message":"Audio route changed · capture restarted; check calibration compatibility"]) }
+    })
+  }
+  private func captureContext() -> [String:Any] {
+    var system = utsname(); uname(&system)
+    let model = Mirror(reflecting:system.machine).children.compactMap { item -> String? in
+      guard let value = item.value as? Int8, value != 0 else { return nil }; return String(UnicodeScalar(UInt8(bitPattern:value)))
+    }.joined()
+    let audio = AVAudioSession.sharedInstance()
+    let route = audio.currentRoute.inputs.map { $0.portType.rawValue }.sorted().joined(separator:"+") + "/" + audio.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator:"+")
+    return ["platform":"ios","model":model,"os":UIDevice.current.systemVersion,"audioRoute":route,
+            "sampleRate":capturedSampleRate,"cameraMode":captureMode]
   }
   override func layoutSubviews() { super.layoutSubviews(); preview.frame = bounds; drawPicture() }
   private func observePicture(_ value: [String: Any], at now: Double) {
@@ -77,7 +94,16 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   func beginCalibration() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.beginCalibration() } }
   func resumeAnalysis() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.reset() } }
   private func emit(_ value: [String: Any]) {
-    var report = value; report["configuredFps"] = targetFps
+    var report = value; report["configuredFps"] = targetFps; report["captureContext"] = captureContext()
+    if let captureMs = value["timeMs"] as? Double, let clock = session.masterClock,
+       let offsetMs = value["deviceUtcOffsetMs"] as? Double {
+      let host = CMSyncConvertTime(CMTime(seconds:captureMs/1000,preferredTimescale:1_000_000_000), from:clock, to:CMClockGetHostTimeClock())
+      let hostMs = CMTimeGetSeconds(host)*1000
+      if hostMs.isFinite {
+        report["clockMapping"] = ["monotonicMs":hostMs,"deviceUnixMs":captureMs+offsetMs,
+                                 "clockId":PhoneClock.identifier,"timebase":"ios-host"]
+      }
+    }
     if report["kind"] as? String != "calibration" {
       let snapshot = report
       diagnostics.async { [weak self] in
@@ -150,6 +176,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     }) else { throw NSError(domain: "Avsync", code: 5, userInfo: [NSLocalizedDescriptionKey: "No supported camera format."]) }
     try device.lockForConfiguration()
     device.activeFormat = best.0
+    let dimensions = CMVideoFormatDescriptionGetDimensions(best.0.formatDescription)
+    captureMode = "\(dimensions.width)x\(dimensions.height)@\(best.1.maxFrameRate)"
     device.activeVideoMinFrameDuration = best.1.minFrameDuration
     device.activeVideoMaxFrameDuration = best.1.minFrameDuration
     device.unlockForConfiguration()
@@ -175,7 +203,10 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
             }
           }
         }
-      } else { processor.pushAudio(sampleBuffer) }
+      } else {
+        if let description = CMSampleBufferGetFormatDescription(sampleBuffer), let format = CMAudioFormatDescriptionGetStreamBasicDescription(description) { capturedSampleRate = format.pointee.mSampleRate }
+        processor.pushAudio(sampleBuffer)
+      }
       let now = ProcessInfo.processInfo.systemUptime
       if now - lastPoll > 0.1 {
         lastPoll = now

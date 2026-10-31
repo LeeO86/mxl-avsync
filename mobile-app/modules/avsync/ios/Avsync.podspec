@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name = 'Avsync'
-  s.version = '1.0.0'
+  s.version = '2.0.5'
   s.summary = 'Recorded AV sync analysis using avsync-core'
   s.description = s.summary
   s.license = 'MIT'
@@ -11,11 +11,11 @@ Pod::Spec.new do |s|
   s.swift_version = '5.0'
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'AVFoundation', 'UIKit', 'CoreMedia', 'CoreVideo', 'CoreGraphics', 'CoreText', 'Vision', 'PhotosUI'
+  s.frameworks = 'AVFoundation', 'UIKit', 'CoreMedia', 'CoreVideo', 'CoreGraphics', 'CoreText', 'Vision', 'PhotosUI', 'Network'
   s.resource_bundles = { 'AvsyncResources' => ['Resources/*'] }
   s.source_files = '*.{h,mm,cpp,swift}'
   s.exclude_files = 'AvsyncCapture.swift'
-  s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h', 'AVSyncQRCodeReader.h', 'AVSyncGenerator.h'
+  s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h', 'AVSyncQRCodeReader.h', 'AVSyncGenerator.h', 'AVSyncDeviceCalibration.h'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'GCC_OPTIMIZATION_LEVEL' => '2',
