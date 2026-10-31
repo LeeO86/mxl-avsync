@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.4 (unreleased)
+## 2.0.4 (2026-10-31)
 
 - Generator render cost: the AVS2 picture is no longer drawn and packed in full on every grain. Bars, icon and titles are drawn once per settings change; each grain redraws and repacks only what changed (sync scale, flash edges, QR and event line per event, GIF frames), byte-identical to a full render. 1080p50: 7.9 → 0.84 ms per grain (p99 10.8 → 3.7 ms); the v210 packer is also faster (2.5 → 1.6 ms for a full frame). Lab, node-like load (two bursty busy loops per generator CPU plus four memory-bandwidth threads, 5 min): 2.0.3 missed 805 grains/min (27 %) and committed p50 +37 / p99 +118 ms after `T_k` at 0.48 core; 2.0.4 missed 0, commit p50 −16.8 / p99 −7.2 ms (before `T_k`), 0.14 core.
 - New `mxl_avsync_generator_render_seconds` histogram (render + pack per video grain).

@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.4 (unreleased)
+# mxl-avsync 2.0.4
 
 The generator keeps 50 grains per second on a busy node, the analyzer no
 longer reports events one frame off when it is briefly starved, and every event
