@@ -499,11 +499,12 @@ std::vector<Measurement> Pairer::poll(double now_ms)
     }
     if (live_stream_) {
         if (first_poll_ms_ < 0) first_poll_ms_ = now_ms;
-        // An audio event no video claimed within its window is reported, never dropped silently.
+        // An audio event no video claimed within its window is reported, never dropped silently
+        // (after a warm-up of two periods: a reader that starts mid-event cannot see that flash).
         for (size_t i = 0; i < audios_.size(); ++i) {
             const auto& audio = audios_[i];
             const double horizon = audio.time_ms + (audio.timecode ? 10000.0 : 4.0 * period_ms_);
-            if (!audio_used_[i] && now_ms > horizon && audio.time_ms >= first_poll_ms_ - 2.0 * period_ms_) {
+            if (!audio_used_[i] && now_ms > horizon && audio.time_ms >= first_poll_ms_ + 2.0 * period_ms_) {
                 audio_used_[i] = true;
                 auto measured = make_missing_video(audio);
                 fresh.push_back(measured);

@@ -76,17 +76,6 @@ void tag_test(nmos::resource& resource)
     resource.data[U("tags")][U("urn:x-mxl:tag:test-signal/v1.0")] = web::json::value_of({web::json::value::string(U("mxl-avsync"))});
 }
 
-// The generator's emit offset (commit time - content timestamp) for one flow, read by analyzers via the Query API.
-void tag_emit_offset(nmos::resource& resource, double offset_ms)
-{
-    if (!resource.data.has_field(U("tags"))) {
-        resource.data[U("tags")] = web::json::value::object();
-    }
-    std::ostringstream text;
-    text << offset_ms;
-    resource.data[U("tags")][us(kEmitOffsetTag)] = web::json::value_of({web::json::value::string(us(text.str()))});
-}
-
 std::string video_flow_description(int numerator, int denominator, double offset_ms)
 {
     std::string rate = denominator == 1 ? std::to_string(numerator) : std::to_string(numerator) + "/" + std::to_string(denominator);
@@ -314,9 +303,6 @@ void NmosNode::start()
                         flow.data[U("description")] = value::string(us(description));
                         tag_group(flow, group, "Video");
                         tag_test(flow);
-                        if (generator && flow_id == ids.video_flow) {
-                            tag_emit_offset(flow, video_emit_offset_ms(config.video_lead_ms));
-                        }
                         nmos::insert_resource(node_model.node_resources, std::move(flow));
                         auto sender = nmos::make_sender(us(sender_id), us(flow_id), nmos::transports::mxl, us(ids.device), {}, bindings, node_model.settings);
                         sender.data[U("label")] = value::string(us(label));
@@ -358,7 +344,6 @@ void NmosNode::start()
                         flow.data[U("description")] = value::string(U("TEST SIGNAL — AV sync chirps, 48000 Hz float32, " + std::to_string(config.audio_channels) + " ch"));
                         tag_group(flow, "AVSync Test", "Audio");
                         tag_test(flow);
-                        tag_emit_offset(flow, audio_emit_offset_ms(config.audio_lead_ms));
                         nmos::insert_resource(node_model.node_resources, std::move(flow));
                         auto sender = nmos::make_sender(us(ids.audio_sender), us(ids.audio_flow), nmos::transports::mxl, us(ids.device), {}, bindings, node_model.settings);
                         sender.data[U("label")] = value::string(U("AVSync Test Audio"));

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Generator emit offsets, analyzer chain latency from Query API flow tags, and the extended PTP status URL.
-# A Python stand-in serves the Query API flows (with the generator's tags) and the PTP status page.
+# Generator emit offsets, analyzer absolute latency from operator-entered source emit offsets
+# (AVSYNC_SOURCE_EMIT_*_MS, live via the settings API), and the extended PTP status URL (a Python stand-in).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/mxl-avsync}"
@@ -35,7 +35,6 @@ python3 - "$QPORT" "$GAPI" <<'PY' >"$WORK/stub.log" 2>&1 &
 import json, sys, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port, gapi = int(sys.argv[1]), sys.argv[2]
-TAG = "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0"
 PTP = {"sync_state": "locked", "accuracy_ns": "4048", "grandmaster": "ec4670.fffe.00fe77", "port_state": "SLAVE",
        "ptp4l_offset_ns": -126, "phc2sys_offset_ns": -96, "path_delay_ns": 7670}
 class Handler(BaseHTTPRequestHandler):
@@ -49,14 +48,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/ptp":
             return self.send(200, PTP)
-        prefix = "/x-nmos/query/v1.3/flows/"
-        if self.path.startswith(prefix):
-            status = json.load(urllib.request.urlopen(gapi + "/api/v1/status", timeout=2))
-            emit = status["emit_offsets"]
-            flow = self.path[len(prefix):]
-            for key, offset in (("video_flow", emit["video_ms"]), ("audio_flow", emit["audio_ms"])):
-                if status.get(key) == flow:
-                    return self.send(200, {"id": flow, "tags": {TAG: ["%g" % offset]}})
         self.send(404, {"code": 404})
     def log_message(self, *args):
         pass
@@ -67,7 +58,7 @@ STUB_PID=$!
 for _ in $(seq 1 80); do curl -sf "$GAPI/api/v1/status" >/dev/null && break; sleep 0.1; done
 
 AVSYNC_ROLE=analyzer AVSYNC_EVENT_RATE=2 AVSYNC_STATE_DIR="$WORK/astate" NMOS_ENABLE=false NMOS_SEED=chain-ana \
-  NMOS_QUERY_ADDRESS=127.0.0.1 NMOS_QUERY_PORT="$QPORT" AVSYNC_PTP_STATUS_URL="http://127.0.0.1:$QPORT/ptp" \
+  AVSYNC_PTP_STATUS_URL="http://127.0.0.1:$QPORT/ptp" \
   MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$WORK/ana" WEB_PORT="$APORT" \
   "$BIN" serve >"$WORK/ana.log" 2>&1 &
 ANA_PID=$!
@@ -76,37 +67,53 @@ python3 - "$GAPI" "$AAPI" <<'PY'
 import json, sys, time, urllib.request
 gapi, aapi = sys.argv[1], sys.argv[2]
 get = lambda url: json.load(urllib.request.urlopen(url, timeout=2))
-deadline = time.time() + 40
-chain = []
-while time.time() < deadline:
+def patch(url, body):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="PUT", headers={"Content-Type": "application/json"})
+    return urllib.request.urlopen(req, timeout=2).status
+def events():
+    return get(aapi + "/api/v1/events?limit=100").get("events", [])
+deadline = time.time() + 30
+while time.time() < deadline and len([e for e in events() if e.get("video_latency_ms") is not None]) < 4:
     time.sleep(1)
-    try:
-        events = get(aapi + "/api/v1/events?limit=100").get("events", [])
-    except Exception:
-        continue
-    chain = [e for e in events if e.get("video_chain_latency_ms") is not None and e.get("audio_chain_latency_ms") is not None]
-    if len(chain) >= 6:
-        break
-gen = get(gapi + "/api/v1/status")["emit_offsets"]
-assert gen["video_ms"] == -20 and gen["audio_ms"] == -25, gen
-assert gen["video_commit_vs_timestamp_ms"]["p50"] < 0, gen
-print("generator emit offsets", gen["video_ms"], gen["audio_ms"], "commit p50", round(gen["video_commit_vs_timestamp_ms"]["p50"], 2))
-status = get(aapi + "/api/v1/status")
-assert status["source_emit_offsets"]["video_ms"] == -20 and status["source_emit_offsets"]["audio_ms"] == -25, status["source_emit_offsets"]
-ptp = status["ptp"]
-assert ptp["sync_state"] == "locked" and ptp["gm_present"] and ptp["gm_identity"] == "ec4670fffe00fe77", ptp
-assert ptp["port_state"] == "SLAVE" and ptp["path_delay_ns"] == 7670 and ptp["ptp4l_offset_ns"] == -126 and ptp["phc2sys_offset_ns"] == -96, ptp
-assert len(chain) >= 6, f"only {len(chain)} events with chain latency"
-for e in chain:
-    assert e["video_source_emit_offset_ms"] == -20 and e["audio_source_emit_offset_ms"] == -25, e
-    assert abs(e["video_chain_latency_ms"] - (e["video_latency_ms"] + 20)) < 1e-6, e
-    # Direct path: the chain adds only the analyzer's own read time (video) and one audio block (audio).
-    assert -5 <= e["video_chain_latency_ms"] <= 25, e
-    assert -15 <= e["audio_chain_latency_ms"] <= 25, e
+# Nothing entered: no absolute latency, only "relative to the source timestamp".
 m = get(aapi + "/api/v1/measurement")
-assert m["labels"]["av_sync_ms"] == "AV sync (what MXL consumers see)", m
-assert m["av_sync_ms"] == m["offset_ms"] and "video_chain_latency_ms" in m and "video_arrival_vs_timestamp_ms" in m, m
-print("chain latency video", round(chain[0]["video_chain_latency_ms"], 2), "audio", round(chain[0]["audio_chain_latency_ms"], 2),
-      "from", len(chain), "events")
+assert m["latency_basis"] == "relative to the source timestamp" and "video_latency_abs_ms" not in m, m
+assert m["source_emit_offsets"]["source"] == "none" and m["clock"]["source"] == "url" and m["clock"]["accuracy_ms"] == 0.004048, m
+assert all("video_latency_abs_ms" not in e for e in events())
+gen = get(gapi + "/api/v1/status")["emit_offsets"]
+assert gen["video_ms"] == -20 and gen["audio_ms"] == -25 and "nmos_tag" not in gen, gen
+assert gen["video_commit_vs_timestamp_ms"]["p50"] < 0, gen
+# The operator copies the generator's emit offsets into the analyzer (live setting).
+assert patch(aapi + "/api/v1/config", {"AVSYNC_SOURCE_EMIT_VIDEO_MS": str(gen["video_ms"]), "AVSYNC_SOURCE_EMIT_AUDIO_MS": str(gen["audio_ms"])}) in (200, 204)
+since = time.time()
+absolute = []
+deadline = time.time() + 30
+while time.time() < deadline and len(absolute) < 6:
+    time.sleep(1)
+    absolute = [e for e in events() if e.get("video_latency_abs_ms") is not None and e.get("audio_latency_abs_ms") is not None]
+assert len(absolute) >= 6, f"only {len(absolute)} events with absolute latency"
+for e in absolute:
+    assert e["video_source_emit_offset_ms"] == -20 and e["audio_source_emit_offset_ms"] == -25, e
+    assert e["video_latency_abs_ms"] >= 0 and e["audio_latency_abs_ms"] >= 0, e
+    assert abs(e["video_chain_latency_ms"] - (e["video_latency_ms"] + 20)) < 1e-6, e
+    # Direct path: the chain adds only the analyzer's own read time (video) and the audio block (audio).
+    assert e["video_latency_abs_ms"] <= 25 and e["audio_latency_abs_ms"] <= 25, e
+    assert e["latency_abs_clock_accuracy_known"] is True and abs(e["video_latency_abs_uncertainty_ms"] - 1.004048) < 1e-6, e
+    assert "emit_offset_mismatch" not in e.get("flags", []), e
+m = get(aapi + "/api/v1/measurement")
+assert m["latency_basis"] == "absolute" and m["source_emit_offsets"]["source"] == "entered" and "video_latency_abs_ms" in m, m
+assert m["labels"]["av_sync_ms"] == "AV sync (what MXL consumers see)" and m["av_sync_ms"] == m["offset_ms"], m
+# A wrong entry (the source emits 60 ms later than entered) is flagged, never a negative latency.
+assert patch(aapi + "/api/v1/config", {"AVSYNC_SOURCE_EMIT_VIDEO_MS": "40"}) in (200, 204)
+flagged = []
+deadline = time.time() + 20
+while time.time() < deadline and not flagged:
+    time.sleep(1)
+    flagged = [e for e in events() if e.get("video_source_emit_offset_ms") == 40]
+assert flagged and all("video_latency_abs_ms" not in e and "emit_offset_mismatch" in e["flags"] for e in flagged), flagged[:1]
+ptp = get(aapi + "/api/v1/status")["ptp"]
+assert ptp["gm_identity"] == "ec4670fffe00fe77" and ptp["port_state"] == "SLAVE" and ptp["path_delay_ns"] == 7670, ptp
+print("absolute latency video", round(absolute[0]["video_latency_abs_ms"], 2), "±", round(absolute[0]["video_latency_abs_uncertainty_ms"], 3),
+      "audio", round(absolute[0]["audio_latency_abs_ms"], 2), "±", round(absolute[0]["audio_latency_abs_uncertainty_ms"], 3), "from", len(absolute), "events")
 PY
 echo "chain-latency.sh ok"

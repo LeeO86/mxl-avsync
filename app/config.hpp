@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,10 @@ struct Config {
     bool audio_enable = true;
     int audio_lead_ms = 20;
     int video_lead_ms = 20;
+    // Analyzer: the measured source's emit offsets (commit time - content timestamp), entered by the operator.
+    // Empty: unknown, so no absolute latency.
+    std::string source_emit_video_ms;
+    std::string source_emit_audio_ms;
     int qr_period_ms = 1000;
     std::string test_id;
     std::string title;
@@ -84,6 +89,8 @@ Config load_config(const std::map<std::string, std::string>& extra = {});
 nlohmann::json config_settings(const Config& config);
 void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std::string>* skipped_env);
 bool is_restart_key(const std::string& key);
+// AVSYNC_SOURCE_EMIT_*_MS: empty is unknown; a number from -1000 to 1000 ms.
+std::optional<double> parse_emit_offset(const std::string& text);
 bool is_live_key(const std::string& key);
 
 } // namespace avsync

@@ -51,6 +51,10 @@ jobs:
         run: ./tests/integration/api.sh
       - name: metrics
         run: ./tests/integration/metrics.sh
+      - name: alert rules (promtool)
+        run: docker run --rm -v "$PWD/deploy/prometheus:/rules:ro" --entrypoint sh prom/prometheus:v3.5.0 -c 'cd /rules && promtool check rules avsync-rules.yaml && promtool test rules avsync-rules.test.yaml'
+      - name: bench script
+        run: python3 tools/bench_paths.py --help >/dev/null
       - name: clock source API
         run: ./tests/integration/clock.sh
       - name: file

@@ -63,10 +63,8 @@ video = next(f for f in flows if f.get("media_type") == "video/v210" and "Result
 description = video.get("description", "")
 if "50/s" not in description or "offset 0 ms" not in description:
     sys.exit("video flow description: " + description)
-emit_tag = "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0"
-audio = next(f for f in flows if f.get("media_type") == "audio/float32")
-if video.get("tags", {}).get(emit_tag) != ["-20"] or audio.get("tags", {}).get(emit_tag) != ["-25"]:
-    sys.exit("emit offset tags: video %s audio %s" % (video.get("tags", {}).get(emit_tag), audio.get("tags", {}).get(emit_tag)))
+if any("urn:x-mxl:tag:avsync-emit-offset-ms/v1.0" in f.get("tags", {}) for f in flows):
+    sys.exit("flows still carry the removed emit offset tag")
 for resource in flows + senders:
     tags = resource.get("tags", {})
     if tags.get("urn:x-mxl:tag:test-signal/v1.0") != ["mxl-avsync"]:

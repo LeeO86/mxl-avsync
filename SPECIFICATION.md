@@ -146,8 +146,11 @@ From these:
 - `video_index_shift_ms = t_idx(video) − T_k`, `audio_index_shift_ms` alike: how much the chain re-stamped the content (0 when every stage keeps the origin time). `mxl-st2110-gateway` keeps that origin with RTP timestamps; checking a gateway version is that repo's job, not a milestone here.
 - `video_latency_ms = t_arr(video) − T_k`, `audio_latency_ms` alike: the real latency through the chain up to this point.
 - `av_offset_arrival_ms = t_arr(audio) − t_arr(video)`: informative, for functions that read "the newest available" rather than by index.
-- **Emit offsets and chain latency (2.0.2).** Latency is measured against the content timestamp, so directly behind the generator it shows the generator's own write timing (§2.2): video arrives about `AVSYNC_VIDEO_LEAD_MS` early and audio about `AVSYNC_AUDIO_LEAD_MS` plus half a block early, and both latencies are negative. The generator publishes its **emit offsets** (commit time − content timestamp; video `−AVSYNC_VIDEO_LEAD_MS`, audio `−(AVSYNC_AUDIO_LEAD_MS + 5 ms)`, the mean over a 10 ms block) in `/api/v1/status` (`emit_offsets`, with the measured video commit time `video_commit_vs_timestamp_ms` p50/p99/max over the last 500 grains) and as the NMOS tag `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0` = `["<ms>"]` on its video and audio flows. When a Query API is configured (`NMOS_QUERY_ADDRESS` or the registry address), the analyzer reads that tag of the flows it reads (`/x-nmos/query/v1.3/flows/{id}`, on a flow change and every 30 s) and adds `video_chain_latency_ms = video_latency_ms − video_source_emit_offset_ms` (audio alike): the latency the chain adds after the source. A flow without the tag (for example a gateway's output) leaves chain latency absent. The audio value has the uncertainty of one audio block (±5 ms). The AVS2 payload has no spare field (fixed 27 bytes, other flag bits forbidden), so the offsets are not carried in the signal.
-- **Presentation.** The UI and `/api/v1/measurement` lead with the index-based offset, labelled "AV sync (what MXL consumers see)" (`av_sync_ms`, same value as `offset_ms`). The per-essence latency is labelled "arrival vs timestamp" (`video_arrival_vs_timestamp_ms`, `audio_arrival_vs_timestamp_ms`, same values as `video_latency_ms` / `audio_latency_ms`) with a one-line note; chain latency is shown when known. `labels` in the measurement answer carries these strings.
+- **Emit offsets, chain and absolute latency (2.0.2, 2.0.5).** Latency is measured against the content timestamp, so directly behind the generator it shows the generator's own write timing (§2.2): video arrives about `AVSYNC_VIDEO_LEAD_MS` early and audio about `AVSYNC_AUDIO_LEAD_MS` plus half a block early, and both are negative. The generator shows its **emit offsets** (commit time − content timestamp; video `−AVSYNC_VIDEO_LEAD_MS`, audio `−(AVSYNC_AUDIO_LEAD_MS + 5 ms)`, the mean over a 10 ms block) in `/api/v1/status` `emit_offsets`, with the measured video commit time `video_commit_vs_timestamp_ms` (p50/p99/max over the last 500 grains). The analyzer learns the measured source's emit offsets **only from the operator**: `AVSYNC_SOURCE_EMIT_VIDEO_MS` / `AVSYNC_SOURCE_EMIT_AUDIO_MS` (live; empty = unknown), copied from the generator's status. This works behind any gateway, mixer or SRT path, because it does not depend on the routed flow. Only standard NMOS is used: since 2.0.5 there is no custom emit-offset tag and no Query API lookup (2.0.2–2.0.4 published `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0` and read it from the Query API).
+  - `video_chain_latency_ms = video_latency_ms − video_source_emit_offset_ms` (audio alike): raw, may be negative, a diagnostic.
+  - **Absolute latency** (emission → arrival) `video_latency_abs_ms`, `audio_latency_abs_ms`, never negative, with `*_latency_abs_uncertainty_ms` = arrival part (video 1 ms; audio 6 ms: 1 ms plus half the source's 10 ms block) + the clock accuracy when the clock reports one (`latency_abs_clock_accuracy_known`). A chain latency below 0 but within the uncertainty is reported as 0 (shown "0 ± u"). Further below 0 there is no absolute value and the event gets the flag `emit_offset_mismatch` (wrong entered offset or a clock error).
+  - Without entered offsets there is no absolute latency, only the AV offset; the measurement says `latency_basis: "relative to the source timestamp"`.
+- **Presentation.** The UI and `/api/v1/measurement` lead with the index-based offset, labelled "AV sync (what MXL consumers see)" (`av_sync_ms`, same value as `offset_ms`). The latency card shows the absolute latency "v ± u ms" with the clock source, state and accuracy next to it (`clock` in the measurement answer), or "relative to the source timestamp". "Arrival vs timestamp" (`video_arrival_vs_timestamp_ms`, `audio_arrival_vs_timestamp_ms`, same values as `video_latency_ms` / `audio_latency_ms`), the entered emit offsets and the raw chain latency are on a Diagnostics card. `labels` in the measurement answer carries these strings. The widget shows the absolute latency with its clock, or "relative to the source timestamp".
 
 Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measured in M3) and is coarsened by writers that commit in batches (for example 960 samples per video frame, or packet bursts in a gateway). The reader MUST NOT count ranges that are not yet committed as late, and the uncertainty of every latency includes the batch size seen on that flow (§8.4).
 
@@ -325,7 +328,7 @@ See §11: the chirps are audible test tones and are muted by one control.
 | Video source, flow, sender | `AVSync Test Video` | `AVSync Test:Video` |
 | Audio source, flow, sender | `AVSync Test Audio` | `AVSync Test:Audio` |
 
-- Senders, flows and the device carry the tag `urn:x-mxl:tag:test-signal/v1.0` = `["mxl-avsync"]` (`TODO_` confirm the tag namespace with the platform). The generator's video and audio flows also carry `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0` = `["-20"]` / `["-25"]` with the defaults (§3.3). Video flow `description`: `TEST SIGNAL — AV sync, <rate>/s, offset <n> ms`. Sender and receiver `interface_bindings` name the host interface. Node `hostname` is `HOST_ID` with any domain suffix removed.
+- Senders, flows and the device carry the tag `urn:x-mxl:tag:test-signal/v1.0` = `["mxl-avsync"]` (`TODO_` confirm the tag namespace with the platform). Video flow `description`: `TEST SIGNAL — AV sync, <rate>/s, offset <n> ms`. Sender and receiver `interface_bindings` name the host interface. Node `hostname` is `HOST_ID` with any domain suffix removed.
 - Flows are written in the generator's own output domain (G2). History `MXL_HISTORY_DURATION_NS` (default 200 ms).
 - A change of format, channel count or rate mints new flow ids (flow token, as mxl-scopes); the senders follow.
 
@@ -367,7 +370,8 @@ The rule of mxl-scopes §6, for the same reasons: a stuck reader takes down one 
 | `av_offset_ms`, `expected_av_offset_ms`, `deviation_ms` | §3.1 |
 | `av_offset_arrival_ms` | LIVE only |
 | `video_latency_ms`, `audio_latency_ms`, `video_index_shift_ms`, `audio_index_shift_ms` | LIVE with a reference only; else absent |
-| `video_source_emit_offset_ms`, `audio_source_emit_offset_ms`, `video_chain_latency_ms`, `audio_chain_latency_ms` | with a latency and a source emit offset from the flow's NMOS tag (§3.3); else absent |
+| `video_source_emit_offset_ms`, `audio_source_emit_offset_ms`, `video_chain_latency_ms`, `audio_chain_latency_ms` | with a latency and an entered source emit offset (§3.3); else absent |
+| `video_latency_abs_ms`, `audio_latency_abs_ms`, `*_latency_abs_uncertainty_ms`, `latency_abs_clock_accuracy_known` | absolute latency, ≥ 0 (§3.3); absent without an entered offset or on `emit_offset_mismatch` |
 | `grade` | `pass`, `warn`, `fail`, `invalid` (§8.3) |
 | `uncertainty_ms` or `uncertainty_status: "unknown"` | §8.4 |
 | `video_quality`, `audio_quality`, `correlation`, `audio_level_dbfs`, `clipped` | |
@@ -531,6 +535,7 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_WARN_MIN_MS`, `AVSYNC_WARN_MAX_MS` | −40, 60 | live | §8.3 |
 | `AVSYNC_GRADE_EVENTS` | 10 | live | events behind the current grade |
 | `AVSYNC_STALE_S` | 5 | live | grade `invalid` after this long without a valid event |
+| `AVSYNC_SOURCE_EMIT_VIDEO_MS`, `AVSYNC_SOURCE_EMIT_AUDIO_MS` | empty | live | the measured source's emit offsets (−1000…1000 ms), copied from the generator's `/api/v1/status` `emit_offsets`; empty = no absolute latency (§3.3) |
 | `AVSYNC_STATS_WINDOW` | 120 | live | events in the window statistics |
 | `AVSYNC_EVENT_LOG` | `true` | live | keep the event records in `<state>/events/` (rotated, 7 days or 100 MB) |
 | `AVSYNC_RESULT_ENABLE` | `true` | flow | result video flow (§7.3) |
@@ -799,10 +804,15 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | --- | --- | --- | --- |
 | `AVSyncFail` | `mxl_avsync_grade{grade="fail"} == 1` | 30 s | critical |
 | `AVSyncWarn` | `mxl_avsync_grade{grade="warn"} == 1` | 2 m | warning |
-| `AVSyncNoEvents` | analyzer routed and `rate(mxl_avsync_events_total{result="paired"}[1m]) == 0` | 1 m | warning |
+| `AVSyncNoEvents` | analyzer running and no paired event in 2 min | 1 m | warning |
+| `AVSyncMissingEvents` | more than 5 % of the events closed in 10 min not paired (`events_total` by result) | 5 m | warning |
+| `AVSyncInputGrainsSkipped` | `increase(input_grains_skipped_total[5m]) > 0` | 5 m | info |
+| `AVSyncGeneratorMissedGrains` | `increase(output_frames_missed_total{essence="video"}[5m]) > 0` | 5 m | warning |
+| `AVSyncGeneratorLateGrains` | more than 1 % of video grains committed after their timestamp in 5 min | 5 m | warning |
+| `AVSyncGeneratorRenderSlow` | `generator_render_seconds` p99 over 5 min above 10 ms | 10 m | warning |
 | `AVSyncGeneratorMuted` | `mxl_avsync_generator_audio_muted == 1` | 10 m | info |
 
-The platform owns the rules (`k8s/monitoring/20-rules.yaml.j2`); this repo delivers the proposal with 1.0.
+The rules are in `deploy/prometheus/avsync-rules.yaml`, checked and unit-tested in CI with promtool (`deploy/prometheus/avsync-rules.test.yaml`). The platform owns the rules (`k8s/monitoring/20-rules.yaml.j2`); this repo delivers the proposal with 1.0.
 
 ---
 

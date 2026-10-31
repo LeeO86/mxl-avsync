@@ -488,6 +488,42 @@ TEST_CASE("chain latency subtracts the source emit offsets")
     CHECK(!phone.video_chain_latency_ms);
 }
 
+TEST_CASE("absolute latency is never negative: 0 within its uncertainty, else a mismatch flag")
+{
+    SourceEmitOffsets emit;
+    emit.video_ms = -20.0;
+    emit.audio_ms = -25.0;
+    Measurement m;
+    m.video_latency_ms = -16.0; // chain +4
+    m.audio_latency_ms = -29.0; // chain -4, inside 6 ms (1 + half a block) + clock
+    apply_source_emit(m, emit, 0.004);
+    REQUIRE(m.video_latency_abs_ms);
+    REQUIRE(m.audio_latency_abs_ms);
+    CHECK(*m.video_latency_abs_ms == doctest::Approx(4.0));
+    CHECK(*m.video_latency_abs_uncertainty_ms == doctest::Approx(1.004));
+    CHECK(*m.audio_latency_abs_ms == doctest::Approx(0.0));
+    CHECK(*m.audio_latency_abs_uncertainty_ms == doctest::Approx(6.004));
+    CHECK(*m.audio_chain_latency_ms == doctest::Approx(-4.0)); // the raw value stays for diagnostics
+    CHECK(m.latency_abs_clock_accuracy_known);
+    CHECK(std::find(m.flags.begin(), m.flags.end(), "emit_offset_mismatch") == m.flags.end());
+    // Far below 0: the entered offset (or the clock) is wrong. No absolute value, a flag instead.
+    Measurement wrong;
+    wrong.video_latency_ms = -40.0; // chain -20
+    wrong.audio_latency_ms = -24.0;
+    apply_source_emit(wrong, emit, std::nullopt);
+    CHECK(!wrong.video_latency_abs_ms);
+    REQUIRE(wrong.audio_latency_abs_ms);
+    CHECK(*wrong.audio_latency_abs_uncertainty_ms == doctest::Approx(6.0)); // clock accuracy unknown
+    CHECK(!wrong.latency_abs_clock_accuracy_known);
+    CHECK(std::count(wrong.flags.begin(), wrong.flags.end(), "emit_offset_mismatch") == 1);
+    // Nothing entered: no absolute latency.
+    Measurement none;
+    none.video_latency_ms = 12.0;
+    apply_source_emit(none, SourceEmitOffsets{}, 0.004);
+    CHECK(!none.video_latency_abs_ms);
+    CHECK(!none.video_chain_latency_ms);
+}
+
 TEST_CASE("content versus grain does not need a locked clock")
 {
     GradeWindows windows;

@@ -44,18 +44,39 @@ double audio_emit_offset_ms(int audio_lead_ms)
     return -(static_cast<double>(std::max(0, audio_lead_ms)) + kAudioBlockMs / 2.0);
 }
 
-void apply_source_emit(Measurement& m, const SourceEmitOffsets& emit)
+void apply_source_emit(Measurement& m, const SourceEmitOffsets& emit, std::optional<double> clock_accuracy_ms)
 {
     if (m.latency_estimated) {
         return;
     }
-    if (emit.video_ms && m.video_latency_ms) {
-        m.video_source_emit_offset_ms = emit.video_ms;
-        m.video_chain_latency_ms = *m.video_latency_ms - *emit.video_ms;
+    const bool clock_known = clock_accuracy_ms && *clock_accuracy_ms >= 0;
+    const double clock_ms = clock_known ? *clock_accuracy_ms : 0.0;
+    bool mismatch = false;
+    auto fill = [&](const std::optional<double>& latency, const std::optional<double>& offset, double arrival_u, std::optional<double>& source,
+                    std::optional<double>& chain, std::optional<double>& absolute, std::optional<double>& uncertainty) {
+        if (!offset || !latency) return;
+        source = offset;
+        chain = *latency - *offset;
+        const double u = arrival_u + clock_ms;
+        if (*chain >= 0) {
+            absolute = *chain;
+            uncertainty = u;
+        } else if (*chain >= -u) {
+            absolute = 0.0;
+            uncertainty = u;
+        } else {
+            mismatch = true;
+        }
+    };
+    fill(m.video_latency_ms, emit.video_ms, kVideoArrivalUncertaintyMs, m.video_source_emit_offset_ms, m.video_chain_latency_ms, m.video_latency_abs_ms,
+        m.video_latency_abs_uncertainty_ms);
+    fill(m.audio_latency_ms, emit.audio_ms, kAudioArrivalUncertaintyMs, m.audio_source_emit_offset_ms, m.audio_chain_latency_ms, m.audio_latency_abs_ms,
+        m.audio_latency_abs_uncertainty_ms);
+    if (m.video_latency_abs_ms || m.audio_latency_abs_ms) {
+        m.latency_abs_clock_accuracy_known = clock_known;
     }
-    if (emit.audio_ms && m.audio_latency_ms) {
-        m.audio_source_emit_offset_ms = emit.audio_ms;
-        m.audio_chain_latency_ms = *m.audio_latency_ms - *emit.audio_ms;
+    if (mismatch && std::find(m.flags.begin(), m.flags.end(), "emit_offset_mismatch") == m.flags.end()) {
+        m.flags.push_back("emit_offset_mismatch");
     }
 }
 

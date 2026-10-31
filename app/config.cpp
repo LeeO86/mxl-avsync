@@ -1,3 +1,5 @@
+#include <optional>
+#include <cmath>
 #include "config.hpp"
 
 #include "avsync/avsync.hpp"
@@ -54,6 +56,7 @@ double num(const std::string& text, const char* key)
     return value;
 }
 
+
 void require(bool ok, const std::string& message)
 {
     if (!ok) {
@@ -62,6 +65,25 @@ void require(bool ok, const std::string& message)
 }
 
 } // namespace
+
+std::optional<double> parse_emit_offset(const std::string& text)
+{
+    if (text.empty()) return std::nullopt;
+    try {
+        size_t used = 0;
+        const double value = std::stod(text, &used);
+        if (used != text.size() || !std::isfinite(value) || value < -1000 || value > 1000) return std::nullopt;
+        return value;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+bool emit_offset_valid(const std::string& text)
+{
+    return text.empty() || parse_emit_offset(text).has_value();
+}
+
 
 std::string Config::seed() const
 {
@@ -94,7 +116,8 @@ bool is_live_key(const std::string& key)
         || key == "AVSYNC_TEST_ID" || key == "AVSYNC_TITLE" || key == "AVSYNC_SOURCE" || key == "AVSYNC_SUBTITLE" || key == "AVSYNC_NOTES"
         || key == "AVSYNC_AUDIO_CHANNEL" || key == "AVSYNC_AUDIO_THRESHOLD" || key == "AVSYNC_QR_RATE"
         || key == "AVSYNC_PASS_MIN_MS" || key == "AVSYNC_PASS_MAX_MS" || key == "AVSYNC_WARN_MIN_MS" || key == "AVSYNC_WARN_MAX_MS"
-        || key == "AVSYNC_GRADE_EVENTS" || key == "AVSYNC_STALE_S" || key == "AVSYNC_STATS_WINDOW" || key == "LOG_LEVEL";
+        || key == "AVSYNC_GRADE_EVENTS" || key == "AVSYNC_STALE_S" || key == "AVSYNC_STATS_WINDOW" || key == "LOG_LEVEL"
+        || key == "AVSYNC_SOURCE_EMIT_VIDEO_MS" || key == "AVSYNC_SOURCE_EMIT_AUDIO_MS";
 }
 
 Config load_config(const std::map<std::string, std::string>& extra)
@@ -167,6 +190,8 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.warn_max_ms = num(pick("AVSYNC_WARN_MAX_MS", "60"), "AVSYNC_WARN_MAX_MS");
     config.grade_events = static_cast<int>(num(pick("AVSYNC_GRADE_EVENTS", "10"), "AVSYNC_GRADE_EVENTS"));
     config.stale_s = num(pick("AVSYNC_STALE_S", "5"), "AVSYNC_STALE_S");
+    config.source_emit_video_ms = pick("AVSYNC_SOURCE_EMIT_VIDEO_MS", "");
+    config.source_emit_audio_ms = pick("AVSYNC_SOURCE_EMIT_AUDIO_MS", "");
     config.stats_window = static_cast<int>(num(pick("AVSYNC_STATS_WINDOW", "120"), "AVSYNC_STATS_WINDOW"));
     config.event_log = parse_bool(pick("AVSYNC_EVENT_LOG", "true"));
     config.result_enable = parse_bool(pick("AVSYNC_RESULT_ENABLE", "true"));
@@ -208,6 +233,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     require(config.audio_channels >= 1 && config.audio_channels <= 16, "AVSYNC_AUDIO_CHANNELS");
     require(config.offset_ms >= -500 && config.offset_ms <= 500, "AVSYNC_AV_OFFSET_MS");
     require(config.chirp_level_dbfs >= -40 && config.chirp_level_dbfs <= -1, "AVSYNC_CHIRP_LEVEL_DBFS");
+    require(emit_offset_valid(config.source_emit_video_ms) && emit_offset_valid(config.source_emit_audio_ms), "AVSYNC_SOURCE_EMIT_*_MS must be empty or a number from -1000 to 1000");
     require(config.video_lead_ms >= 0 && config.video_lead_ms <= 100, "AVSYNC_VIDEO_LEAD_MS must be 0-100");
     require(config.qr_period_ms >= 500 && config.qr_period_ms <= 5000, "AVSYNC_QR_PERIOD_MS");
     require(config.title.size() <= 80 && config.source.size() <= 80 && config.subtitle.size() <= 80 && config.notes.size() <= 80, "free text longer than 80");
@@ -245,6 +271,8 @@ nlohmann::json config_settings(const Config& config)
         {"AVSYNC_WARN_MAX_MS", std::to_string(config.warn_max_ms)},
         {"AVSYNC_GRADE_EVENTS", std::to_string(config.grade_events)},
         {"AVSYNC_STALE_S", std::to_string(config.stale_s)},
+        {"AVSYNC_SOURCE_EMIT_VIDEO_MS", config.source_emit_video_ms},
+        {"AVSYNC_SOURCE_EMIT_AUDIO_MS", config.source_emit_audio_ms},
         {"AVSYNC_STATS_WINDOW", std::to_string(config.stats_window)},
         {"AVSYNC_AUDIO_THRESHOLD", std::to_string(config.audio_threshold)},
         {"AVSYNC_AUDIO_CHANNEL", std::to_string(config.audio_channel)},
@@ -293,6 +321,8 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
         else if (key == "AVSYNC_WARN_MAX_MS") next.warn_max_ms = num(value, key.c_str());
         else if (key == "AVSYNC_GRADE_EVENTS") next.grade_events = static_cast<int>(num(value, key.c_str()));
         else if (key == "AVSYNC_STALE_S") next.stale_s = num(value, key.c_str());
+        else if (key == "AVSYNC_SOURCE_EMIT_VIDEO_MS") next.source_emit_video_ms = value;
+        else if (key == "AVSYNC_SOURCE_EMIT_AUDIO_MS") next.source_emit_audio_ms = value;
         else if (key == "AVSYNC_STATS_WINDOW") next.stats_window = static_cast<int>(num(value, key.c_str()));
         else if (key == "AVSYNC_AUDIO_THRESHOLD") next.audio_threshold = num(value, key.c_str());
         else if (key == "AVSYNC_AUDIO_CHANNEL") next.audio_channel = static_cast<int>(num(value, key.c_str()));
@@ -314,6 +344,7 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
         require(next.chirp_ms == 30 && next.chirp_low_hz == 700 && next.chirp_high_hz == 2500, "timecode prefix is fixed at 30 ms / 700-2500 Hz");
     }
     require(next.event_rate == 1 || next.event_rate == 2 || next.event_rate == 4, "AVSYNC_EVENT_RATE");
+    require(emit_offset_valid(next.source_emit_video_ms) && emit_offset_valid(next.source_emit_audio_ms), "AVSYNC_SOURCE_EMIT_*_MS must be empty or a number from -1000 to 1000");
     require(parse_video_format(next.video_format).has_value(), "AVSYNC_VIDEO_FORMAT");
     config = std::move(next);
 }
