@@ -550,6 +550,89 @@ TEST_CASE("absolute latency is never negative: 0 within its uncertainty, else a 
     CHECK(!none.video_chain_latency_ms);
 }
 
+TEST_CASE("a path that re-stamps by a constant shows it in content vs grain for both essences")
+{
+    // A gateway maps the content 480 ms later (video) and 476.5 ms later (audio, moved onto its video phase).
+    Pairer pairer(500, GradeWindows{}, ReferenceInfo{}, "LIVE", "TEST");
+    VideoObservation video;
+    video.event = true;
+    video.timecode = true;
+    video.source_id = 7;
+    video.event_time_ns = 5000000000LL;
+    video.seq = 10;
+    video.time_ms = 5480;
+    video.quality = "good";
+    video.have_set_time = true;
+    video.set_tai_ns = 5000000000LL;
+    video.have_grain_time = true;
+    video.grain_tai_ns = 5480000000LL;
+    pairer.observe_video(video, 0);
+    AudioObservation audio;
+    audio.timecode = true;
+    audio.source_id = 7;
+    audio.event_time_ns = 5000000000LL;
+    audio.audio_send_ns = 5000000000LL;
+    audio.time_ms = 5476.5;
+    audio.have_grain_time = true;
+    audio.grain_tai_ns = 5476500000LL;
+    audio.correlation = 1.0;
+    audio.quality = "good";
+    pairer.observe_audio(audio);
+    pairer.finish();
+    REQUIRE(pairer.results().size() == 1);
+    const auto& m = pairer.results().front();
+    REQUIRE(m.av_offset_ms);
+    CHECK(*m.av_offset_ms == doctest::Approx(-3.5));
+    CHECK(*m.video_content_vs_grain_ms == doctest::Approx(-480.0));
+    CHECK(*m.audio_content_vs_grain_ms == doctest::Approx(-476.5)); // was 0: the detected time, not the packet's
+    CHECK(*m.content_vs_grain_av_ms == doctest::Approx(-3.5));      // was -480
+    CHECK(m.grade == "pass");
+}
+
+TEST_CASE("content vs grain and index shift agree behind a constant re-stamp: their check reads 0")
+{
+    ReferenceInfo reference;
+    reference.type = "tai-ptp";
+    reference.sync_state = "locked";
+    Pairer pairer(500, GradeWindows{}, reference, "LIVE", "TEST");
+    VideoObservation video;
+    video.event = true;
+    video.timecode = true;
+    video.source_id = 7;
+    video.event_time_ns = 5000000000LL;
+    video.seq = 10;
+    video.time_ms = 5480;
+    video.quality = "good";
+    video.have_set_time = true;
+    video.set_tai_ns = 5000000000LL;
+    video.have_grain_time = true;
+    video.grain_tai_ns = 5480000000LL;
+    video.have_arrival = true;
+    video.arrival_ms = 5482;
+    pairer.observe_video(video, 0);
+    AudioObservation audio;
+    audio.timecode = true;
+    audio.source_id = 7;
+    audio.event_time_ns = 5000000000LL;
+    audio.audio_send_ns = 5000000000LL;
+    audio.time_ms = 5476.5;
+    audio.have_grain_time = true;
+    audio.grain_tai_ns = 5476500000LL;
+    audio.have_arrival = true;
+    audio.arrival_ms = 5478;
+    audio.correlation = 1.0;
+    audio.quality = "good";
+    pairer.observe_audio(audio);
+    pairer.finish();
+    REQUIRE(pairer.results().size() == 1);
+    const auto& m = pairer.results().front();
+    CHECK(*m.video_index_shift_ms == doctest::Approx(480.0));
+    CHECK(*m.video_content_vs_grain_ms == doctest::Approx(-480.0));
+    CHECK(*m.video_content_vs_grain_vs_index_shift_ms == doctest::Approx(0.0)); // was -960
+    CHECK(*m.audio_index_shift_ms == doctest::Approx(476.5));
+    CHECK(*m.audio_content_vs_grain_vs_index_shift_ms == doctest::Approx(0.0));
+}
+
 TEST_CASE("content versus grain does not need a locked clock")
 {
     GradeWindows windows;

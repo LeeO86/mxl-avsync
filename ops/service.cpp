@@ -51,6 +51,17 @@ double measurement_now_ms()
 #endif
 }
 
+// av_offset_seconds: the grade edges (±5, 15, 40, 60 ms and ±0.1, 0.2, 0.5 s) plus finer steps near 0, so
+// histogram_quantile resolves a sub-ms AV sync (2.0.7; 2.0.6 had only the grade edges).
+constexpr std::array<double, 33> kAvOffsetBuckets{-0.5, -0.3, -0.2, -0.1, -0.06, -0.04, -0.03, -0.02, -0.015, -0.01, -0.007, -0.005, -0.003,
+    -0.002, -0.001, -0.0005, 0, 0.0005, 0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.015, 0.02, 0.03, 0.04, 0.06, 0.1, 0.2, 0.3, 0.5};
+// latency_abs_seconds buckets (2.0.7): 1 ms steps to 10 ms and 5 ms steps to 60 ms (direct, fabrics and
+// mixer paths), 25 ms from 300 ms and 10 ms steps from 400 to 600 ms (SRT loops), coarse elsewhere.
+constexpr std::array<double, 59> kAbsBuckets{0.0005, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01,
+    0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05, 0.055, 0.06, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.325, 0.35, 0.375,
+    0.4, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.5, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59, 0.6,
+    0.7, 0.8, 1, 1.5, 2, 3, 5, 10};
+
 struct Runtime {
     Config config;
     std::mutex mu;
@@ -73,12 +84,12 @@ struct Runtime {
     double input_skipped = 0;
     std::map<std::string, double> event_results; // events_total{result}: counted when an event closes
     // Absolute latency per essence (0 video, 1 audio): cumulative histogram and mismatch counter.
-    std::array<std::array<double, 12>, 2> abs_bucket{};
+    std::array<std::array<double, kAbsBuckets.size()>, 2> abs_bucket{};
     std::array<double, 2> abs_count{};
     std::array<double, 2> abs_sum_s{};
     std::array<double, 2> mismatch_total{};
     // av_offset_seconds: every paired event since start (cumulative, not the retained list).
-    std::array<double, 14> av_bucket{};
+    std::array<double, kAvOffsetBuckets.size()> av_bucket{};
     double av_count = 0;
     double av_sum_s = 0;
     std::string media_detail;
@@ -125,11 +136,7 @@ std::string event_result(const Measurement& event)
     return "other";
 }
 
-// latency_abs_seconds buckets: 1 ms to 5 s, so a direct link (a few ms) and an SRT or gateway chain
-// (hundreds of ms) both land in resolved buckets.
-constexpr std::array<double, 14> kAvOffsetBuckets{-0.5, -0.2, -0.1, -0.06, -0.04, -0.015, -0.005, 0.005, 0.015, 0.04, 0.06, 0.1, 0.2, 0.5};
 
-constexpr std::array<double, 12> kAbsBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5};
 
 constexpr std::array<double, 8> kRenderBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08, 0.16};
 
@@ -381,9 +388,8 @@ std::string metrics_text(Runtime& rt)
     os << "mxl_avsync_av_offset_deviation_ms " << (deviations.empty() ? 0.0 : percentile(deviations, 0.5)) << "\n";
     os << "# TYPE mxl_avsync_av_offset_seconds histogram\n";
     {
-        const char* labels[] = {"-0.5", "-0.2", "-0.1", "-0.06", "-0.04", "-0.015", "-0.005", "0.005", "0.015", "0.04", "0.06", "0.1", "0.2", "0.5"};
         for (size_t i = 0; i < kAvOffsetBuckets.size(); ++i) {
-            os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << labels[i] << "\"} " << rt.av_bucket[i] << "\n";
+            os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << kAvOffsetBuckets[i] << "\"} " << rt.av_bucket[i] << "\n";
         }
         os << "mxl_avsync_av_offset_seconds_bucket{le=\"+Inf\"} " << rt.av_count << "\n";
         os << "mxl_avsync_av_offset_seconds_sum " << rt.av_sum_s << "\nmxl_avsync_av_offset_seconds_count " << rt.av_count << "\n";

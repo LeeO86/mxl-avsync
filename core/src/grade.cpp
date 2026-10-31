@@ -424,8 +424,17 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
         m.video_content_vs_grain_ms = content_ms - grain_ms;
     }
     if (audio->have_grain_time) {
+        // Content time of the audio event: the AVS2 packet's own send time; for legacy chirps the
+        // video's set time plus the expected offset (the chirp carries no time). Only without either,
+        // the detected time (which is on the grain timeline, so the difference is then 0).
         const double grain_ms = static_cast<double>(audio->grain_tai_ns) / 1e6;
-        m.audio_content_vs_grain_ms = audio->time_ms - grain_ms;
+        double content_ms = audio->time_ms;
+        if (audio->timecode) {
+            content_ms = static_cast<double>(audio->audio_send_ns) / 1e6;
+        } else if (pending.video.have_set_time) {
+            content_ms = static_cast<double>(pending.video.set_tai_ns) / 1e6 + pending.expected_offset_ms;
+        }
+        m.audio_content_vs_grain_ms = content_ms - grain_ms;
     }
     if (m.video_content_vs_grain_ms && m.audio_content_vs_grain_ms) {
         m.content_vs_grain_av_ms = *m.video_content_vs_grain_ms - *m.audio_content_vs_grain_ms;
@@ -438,10 +447,10 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
             m.audio_content_vs_grain_vs_latency_ms = *m.audio_content_vs_grain_ms - *m.audio_latency_ms;
         }
         if (m.video_content_vs_grain_ms && m.video_index_shift_ms) {
-            m.video_content_vs_grain_vs_index_shift_ms = *m.video_content_vs_grain_ms - *m.video_index_shift_ms;
+            m.video_content_vs_grain_vs_index_shift_ms = *m.video_content_vs_grain_ms + *m.video_index_shift_ms; // 0 when they agree (2.0.7: was the difference)
         }
         if (m.audio_content_vs_grain_ms && m.audio_index_shift_ms) {
-            m.audio_content_vs_grain_vs_index_shift_ms = *m.audio_content_vs_grain_ms - *m.audio_index_shift_ms;
+            m.audio_content_vs_grain_vs_index_shift_ms = *m.audio_content_vs_grain_ms + *m.audio_index_shift_ms; // 0 when they agree (2.0.7: was the difference)
         }
         if (m.content_vs_grain_av_ms && m.av_offset_arrival_ms) {
             m.content_vs_grain_av_vs_arrival_ms = *m.content_vs_grain_av_ms - *m.av_offset_arrival_ms;

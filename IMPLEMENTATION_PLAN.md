@@ -438,10 +438,10 @@ Host for that run: 4 CPUs, `Intel(R) Xeon(R) Processor`, analyzer user time 0.11
 Live results name:
 
 - `video_content_vs_grain_ms` — QR `T_k` minus the video grain timestamp
-- `audio_content_vs_grain_ms` — chirp time minus that sample's MXL timestamp
+- `audio_content_vs_grain_ms` — the audio content time minus that sample's MXL timestamp: the AVS2 packet's send time, or for legacy chirps the video set time plus the expected offset (2.0.7; before, the detected time, which is on the grain timeline, so it was always about 0)
 - `content_vs_grain_av_ms` — the video difference minus the audio difference
 
-These three are reported when `sync_state` is unknown. Arrival latency stays absent then. When the clock is locked, the result also names `video_content_vs_grain_vs_latency_ms`, `audio_content_vs_grain_vs_latency_ms`, `video_content_vs_grain_vs_index_shift_ms`, `audio_content_vs_grain_vs_index_shift_ms`, and `content_vs_grain_av_vs_arrival_ms`.
+These three are reported when `sync_state` is unknown. Arrival latency stays absent then. (2.0.7: `*_content_vs_grain_vs_index_shift_ms` is the sum of content vs grain and the index shift, 0 when they agree; before it was the difference.) When the clock is locked, the result also names `video_content_vs_grain_vs_latency_ms`, `audio_content_vs_grain_vs_latency_ms`, `video_content_vs_grain_vs_index_shift_ms`, `audio_content_vs_grain_vs_index_shift_ms`, and `content_vs_grain_av_vs_arrival_ms`.
 
 Command:
 
