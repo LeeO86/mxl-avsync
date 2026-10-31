@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.6 (unreleased)
+# mxl-avsync 2.0.6
 
 Metrics and an alert for the absolute latency, an alert threshold that fits
 busy nodes, and a more exact audio emit time. The signal, ports, NMOS

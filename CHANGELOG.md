@@ -28,7 +28,7 @@
   on iOS; real device exchange/wizard is not implemented. Android's clock module
   does not claim the pending capture/generator NDK port.
 
-## 2.0.6 (unreleased)
+## 2.0.6 (2026-10-31)
 
 - Absolute-latency metrics per essence: `mxl_avsync_latency_abs_ms` and `mxl_avsync_latency_abs_uncertainty_ms` (gauges, median over the grade window of `AVSYNC_GRADE_EVENTS` events, `NaN` without a value), `mxl_avsync_latency_abs_seconds` (histogram of every event since start, 1 ms to 5 s, +Inf) and `mxl_avsync_emit_offset_mismatch_total` (counter). All exported from the first scrape.
 - `AVSyncGeneratorRenderSlow` fires at render p99 above 75 % of the new gauge `mxl_avsync_generator_render_budget_seconds` (grain period + video lead: 30 ms at 50p with the default 20 ms lead), not a fixed 10 ms that a healthy busy node (p99 17.6 ms, 0 late) exceeded permanently. New rule `AVSyncEmitOffsetMismatch`.
