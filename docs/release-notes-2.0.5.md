@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.5 (unreleased)
+# mxl-avsync 2.0.5
 
 Latency is now reported as an absolute value (emission → arrival) that is
 never negative, with its uncertainty and the clock named next to it. The
