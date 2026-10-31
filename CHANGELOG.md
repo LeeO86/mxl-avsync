@@ -1,5 +1,15 @@
 # Changelog
 
+## Mobile 2.0.7 (2026-10-31)
+
+- Keep screen awake (on by default) prevents idle dimming/locking during live
+  capture, calibration including frame review, and running iOS signal output.
+  Pause/stop, leaving the capture tab, backgrounding and module teardown release
+  each owner. Settings can disable the feature; measurement brightness is unchanged.
+- Share native wake ownership between measurement and generator, restoring the
+  original idle-timer setting only after the final owner releases it. No global
+  iOS auto-lock setting or measurement timing changes.
+
 ## Mobile 2.0.6 (2026-10-31)
 
 - Select 60/120/240 fps or Maximum in Settings. Default to 120 fps for a

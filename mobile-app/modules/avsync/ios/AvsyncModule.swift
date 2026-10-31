@@ -1,12 +1,14 @@
 import ExpoModulesCore
 
 public class AvsyncModule: Module {
+  private let screenAwake = ScreenAwakeLease()
   private var clockBusy = false
   private var imagePicker: GeneratorImagePicker?
   private weak var generator: AvsyncGeneratorController?
   public func definition() -> ModuleDefinition {
     Name("Avsync")
     Function("supportsLiveCapture") { true }
+    Function("setScreenAwake") { (active: Bool) in self.screenAwake.setActive(active) }
     Function("solveDeviceCalibration") { (input: [String:Double]) -> [AnyHashable:Any] in
       AVSyncDeviceCalibration.solve(input)
     }
@@ -54,8 +56,8 @@ public class AvsyncModule: Module {
       AsyncFunction("resumeAnalysis") { (view: AvsyncCameraView) in view.resumeAnalysis() }
     }
     OnDestroy {
-      let controller = self.generator, picker = self.imagePicker
-      DispatchQueue.main.async { controller?.shutdown(); picker?.cancel() }
+      let controller = self.generator, picker = self.imagePicker, awake = self.screenAwake
+      DispatchQueue.main.async { controller?.shutdown(); picker?.cancel(); awake.setActive(false) }
     }
     Function("loadState") { () -> String? in
       UserDefaults.standard.string(forKey: "avsync.session.v1")
@@ -94,7 +96,7 @@ public class AvsyncModule: Module {
     }
     do {
       let image = try GeneratorImageStore.load(id: options["imageId"] ?? "")
-      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") })
+      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false")
       generator = controller; controller.onClose = { result in promise.resolve(result) }
       parent.view.endEditing(true)
       parent.present(controller, animated: true)

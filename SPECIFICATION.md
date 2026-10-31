@@ -605,6 +605,14 @@ Compact phone event timing retains the first clear black-to-white optical onset 
 
 AV offset is measured. Optional estimated latency uses the phone clock with explicitly unknown physical timing accuracy (§3.3). The Generate tab also supplies a native test source for an external camera/analyzer; its source-output calibration is separate from capture calibration.
 
+### Foreground display (maintainer decision, 2026-10-31)
+
+iOS Settings → Keep screen awake defaults on. Prevent idle dimming/locking
+during permitted live capture, calibration including frame review, and active
+signal generation. Release on pause/stop, leaving capture, background/inactive
+or teardown; restore normal auto-lock. Disabling the preference restores normal
+behavior. Preserve measurement brightness and the original idle-timer state.
+
 ### 12.1a Phone time reference (maintainer decision, 2026-10-31)
 
 Native iOS uses an explicit configurable SNTP exchange; Android uses raw GNSS

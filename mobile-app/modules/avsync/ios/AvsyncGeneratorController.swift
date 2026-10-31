@@ -30,7 +30,8 @@ final class AvsyncGeneratorController: UIViewController {
   private var renderGeneration = 0
   private var notices: [NSObjectProtocol] = []
   private var oldBrightness: CGFloat = 0
-  private var oldIdle = false
+  private let screenAwake = ScreenAwakeLease()
+  private let keepScreenAwake: Bool
   private var outputLatency = 0.0
   private var lateFrames = 0
   private var lastFrame: UInt64?
@@ -41,7 +42,8 @@ final class AvsyncGeneratorController: UIViewController {
   private let clockReference: [String:String]
   private var usingReference = false
 
-  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil, clockReference: [String:String] = [:]) {
+  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil, clockReference: [String:String] = [:], keepScreenAwake: Bool = true) {
+    self.keepScreenAwake = keepScreenAwake
     self.clockReference = clockReference
     self.rate = rate; self.taiUtc = taiUtc; self.sourceName = name; self.subtitle = subtitle; self.sourceImage = image
     super.init(nibName: nil, bundle: nil)
@@ -74,7 +76,7 @@ final class AvsyncGeneratorController: UIViewController {
     close.accessibilityIdentifier = "generatorClose"; view.addSubview(close)
     engine.attach(player)
     engine.connect(player, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!)
-    oldBrightness = UIScreen.main.brightness; oldIdle = UIApplication.shared.isIdleTimerDisabled
+    oldBrightness = UIScreen.main.brightness
     notices.append(NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.stop("Paused: app is inactive. Tap Start to create a fresh source session.") })
     notices.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in self?.stop("Audio interrupted. Tap Start to restart.") })
     notices.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
@@ -119,7 +121,7 @@ final class AvsyncGeneratorController: UIViewController {
       }
       plan = nil
       player.play()
-      UIApplication.shared.isIdleTimerDisabled = true; UIScreen.main.brightness = 1
+      screenAwake.setActive(keepScreenAwake); UIScreen.main.brightness = 1
       let display = CADisplayLink(target: self, selector: #selector(tick(_:)))
       if #available(iOS 15.0, *) { display.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60) }
       else { display.preferredFramesPerSecond = 60 }
@@ -238,7 +240,7 @@ final class AvsyncGeneratorController: UIViewController {
     canvas.layer.contents = nil; syncDot.isHidden = true; marker.backgroundColor = UIColor.black.cgColor
     for cell in cells { cell.backgroundColor = UIColor.black.cgColor }
     CATransaction.commit()
-    UIApplication.shared.isIdleTimerDisabled = oldIdle; UIScreen.main.brightness = oldBrightness
+    screenAwake.setActive(false); UIScreen.main.brightness = oldBrightness
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     status.text = message; toggle.setTitle("Start signal", for: .normal)
   }
