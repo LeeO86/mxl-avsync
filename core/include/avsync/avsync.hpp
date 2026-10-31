@@ -41,6 +41,8 @@ uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns);
 
 // Live audio writer block (SPECIFICATION §2.2).
 inline constexpr int kAudioBlockMs = 10;
+// NMOS flow tag with the generator's emit offset for that flow, in ms, as a decimal string (2.0.2).
+inline constexpr char kEmitOffsetTag[] = "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0";
 // Emit offset = commit time - content timestamp. Video: every grain at T_k - lead. Audio: each sample
 // between lead and lead + one block early, so the mean is -(lead + block / 2).
 double video_emit_offset_ms(int video_lead_ms);

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Generator emit offsets, analyzer absolute latency from operator-entered source emit offsets
-# (AVSYNC_SOURCE_EMIT_*_MS, live via the settings API), and the extended PTP status URL (a Python stand-in).
+# Generator emit offsets and the analyzer's absolute latency. Source emit offsets: entered
+# (AVSYNC_SOURCE_EMIT_*_MS, live via PUT /api/v1/config) win; else the 2.0.2 flow tag from the Query
+# API; else none. A Python stand-in serves the Query API flows and the extended PTP status page.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/mxl-avsync}"
@@ -31,10 +32,12 @@ AVSYNC_ROLE=generator AVSYNC_EVENT_RATE=2 AVSYNC_STATE_DIR="$WORK/gstate" NMOS_E
   "$BIN" serve >"$WORK/gen.log" 2>&1 &
 GEN_PID=$!
 
-python3 - "$QPORT" "$GAPI" <<'PY' >"$WORK/stub.log" 2>&1 &
-import json, sys, urllib.request
+touch "$WORK/hide"
+python3 - "$QPORT" "$GAPI" "$WORK/hide" <<'PY' >"$WORK/stub.log" 2>&1 &
+import json, os, sys, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-port, gapi = int(sys.argv[1]), sys.argv[2]
+port, gapi, hide = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+TAG = "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0"
 PTP = {"sync_state": "locked", "accuracy_ns": "4048", "grandmaster": "ec4670.fffe.00fe77", "port_state": "SLAVE",
        "ptp4l_offset_ns": -126, "phc2sys_offset_ns": -96, "path_delay_ns": 7670}
 class Handler(BaseHTTPRequestHandler):
@@ -48,6 +51,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/ptp":
             return self.send(200, PTP)
+        prefix = "/x-nmos/query/v1.3/flows/"
+        if self.path.startswith(prefix) and not os.path.exists(hide):
+            status = json.load(urllib.request.urlopen(gapi + "/api/v1/status", timeout=2))
+            emit = status["emit_offsets"]
+            flow = self.path[len(prefix):]
+            for key, offset in (("video_flow", emit["video_ms"]), ("audio_flow", emit["audio_ms"])):
+                if status.get(key) == flow:
+                    return self.send(200, {"id": flow, "tags": {TAG: ["%g" % offset]}})
         self.send(404, {"code": 404})
     def log_message(self, *args):
         pass
@@ -58,14 +69,15 @@ STUB_PID=$!
 for _ in $(seq 1 80); do curl -sf "$GAPI/api/v1/status" >/dev/null && break; sleep 0.1; done
 
 AVSYNC_ROLE=analyzer AVSYNC_EVENT_RATE=2 AVSYNC_STATE_DIR="$WORK/astate" NMOS_ENABLE=false NMOS_SEED=chain-ana \
-  AVSYNC_PTP_STATUS_URL="http://127.0.0.1:$QPORT/ptp" \
+  NMOS_QUERY_ADDRESS=127.0.0.1 NMOS_QUERY_PORT="$QPORT" AVSYNC_PTP_STATUS_URL="http://127.0.0.1:$QPORT/ptp" \
   MXL_DOMAIN_SCAN_PATH="$WORK" MXL_OUTPUT_DOMAIN_DIR="$WORK/ana" WEB_PORT="$APORT" \
   "$BIN" serve >"$WORK/ana.log" 2>&1 &
 ANA_PID=$!
 
-python3 - "$GAPI" "$AAPI" <<'PY'
+python3 - "$GAPI" "$AAPI" "$WORK/hide" <<'PY'
 import json, sys, time, urllib.request
-gapi, aapi = sys.argv[1], sys.argv[2]
+import os
+gapi, aapi, hide = sys.argv[1], sys.argv[2], sys.argv[3]
 get = lambda url: json.load(urllib.request.urlopen(url, timeout=2))
 def patch(url, body):
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="PUT", headers={"Content-Type": "application/json"})
@@ -81,9 +93,20 @@ assert m["latency_basis"] == "relative to the source timestamp" and "video_laten
 assert m["source_emit_offsets"]["source"] == "none" and m["clock"]["source"] == "url" and m["clock"]["accuracy_ms"] == 0.004048, m
 assert all("video_latency_abs_ms" not in e for e in events())
 gen = get(gapi + "/api/v1/status")["emit_offsets"]
-assert gen["video_ms"] == -20 and gen["audio_ms"] == -25 and "nmos_tag" not in gen, gen
+assert gen["video_ms"] == -20 and gen["audio_ms"] == -25 and gen["nmos_tag"] == "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0", gen
 assert gen["video_commit_vs_timestamp_ms"]["p50"] < 0, gen
-# The operator copies the generator's emit offsets into the analyzer (live setting).
+# The 2.0.2 tag of the directly connected generator flow (read from the Query API) gives the offsets.
+os.remove(hide)
+tagged = []
+deadline = time.time() + 45  # the lookup refreshes every 30 s
+while time.time() < deadline and len(tagged) < 4:
+    time.sleep(1)
+    tagged = [e for e in events() if e.get("video_latency_abs_ms") is not None]
+assert len(tagged) >= 4 and all(e["video_source_emit_offset_ms"] == -20 for e in tagged), tagged[:1]
+m = get(aapi + "/api/v1/measurement")
+assert m["source_emit_offsets"]["source"] == "nmos-tag" and m["source_emit_offsets"]["video_source"] == "nmos-tag" and m["latency_basis"] == "absolute", m
+# Entered values win over the tag (here the same numbers, so the source label is what changes).
+
 assert patch(aapi + "/api/v1/config", {"AVSYNC_SOURCE_EMIT_VIDEO_MS": str(gen["video_ms"]), "AVSYNC_SOURCE_EMIT_AUDIO_MS": str(gen["audio_ms"])}) in (200, 204)
 since = time.time()
 absolute = []

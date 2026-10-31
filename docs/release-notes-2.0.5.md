@@ -2,9 +2,10 @@
 
 Latency is now reported as an absolute value (emission → arrival) that is
 never negative, with its uncertainty and the clock named next to it. The
-analyzer gets the source's emit offsets from the operator instead of a custom
-NMOS tag. Alert rules and a per-release bench script are added. The signal,
-ports and dependency pins are unchanged from 2.0.4.
+operator can enter the source's emit offsets, which makes absolute latency
+work behind gateways, mixers and SRT. Alert rules and a per-release bench
+script are added. The signal, ports, NMOS resources and dependency pins are
+unchanged from 2.0.4.
 
 ## Absolute latency
 
@@ -24,25 +25,27 @@ ports and dependency pins are unchanged from 2.0.4.
   raw (signed) chain latency are on a separate Diagnostics card and stay in
   the API. Existing fields keep their names and values.
 
-## Change: emit offsets are entered, not read from NMOS
+## Where the source emit offsets come from
 
-Only standard NMOS is used. **Removed:** the flow tag
-`urn:x-mxl:tag:avsync-emit-offset-ms/v1.0` (added in 2.0.2) and the analyzer's
-Query API lookup of it.
+Per essence, in this order:
 
-- New live settings on the analyzer: `AVSYNC_SOURCE_EMIT_VIDEO_MS` and
-  `AVSYNC_SOURCE_EMIT_AUDIO_MS` (empty, or −1000 to 1000). They can be set by
-  env, in Settings → Latency, or with `PUT /api/v1/config`.
-- Copy them from the generator's `/api/v1/status` → `emit_offsets.video_ms` /
-  `audio_ms`. With the defaults these are −20 and −25.
-- This works on every path (direct, across nodes, through a mixer, over SRT),
-  because it does not depend on the routed flow. Behind a gateway the 2.0.2–2.0.4
-  lookup found no tag.
-- Without the two values there is no absolute latency. The measurement says
-  `latency_basis: "relative to the source timestamp"`, and only the AV offset
-  is graded, as always.
-- API: the generator's `emit_offsets` no longer has `nmos_tag`. The analyzer's
-  `source_emit_offsets.source` is `entered` or `none` (was `nmos-query`).
+1. **Entered** (new): live settings `AVSYNC_SOURCE_EMIT_VIDEO_MS` and
+   `AVSYNC_SOURCE_EMIT_AUDIO_MS` (empty, or −1000 to 1000 ms), set by env, in
+   Settings → Latency, or with `PUT /api/v1/config`. Copy them from the
+   generator's `/api/v1/status` → `emit_offsets.video_ms` / `audio_ms`
+   (−20 / −25 with the defaults). They win, and work on every path (direct,
+   across nodes, through a mixer, over SRT), because they do not depend on the
+   routed flow.
+2. **NMOS tag** (as in 2.0.2): the tag `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0`
+   on the generator flow the analyzer reads directly, from the Query API. It
+   gives nothing behind a gateway or mixer, whose output flow has no tag.
+3. **None:** no absolute latency. The measurement says
+   `latency_basis: "relative to the source timestamp"`, and only the AV offset
+   is reported, as before.
+
+`source_emit_offsets` names the source overall (`source`) and per essence
+(`video_source`, `audio_source`: `entered`, `nmos-tag` or `none`). No new NMOS
+tag is added.
 
 ## Alerts and bench
 
@@ -62,12 +65,11 @@ Query API lookup of it.
 
 ## What changes for the platform
 
-- **Chart:** for absolute latency, set on each analyzer
-  `AVSYNC_SOURCE_EMIT_VIDEO_MS=-20` and `AVSYNC_SOURCE_EMIT_AUDIO_MS=-25`, or the
-  values from the generator's `/api/v1/status` if its leads are changed.
-- `NMOS_QUERY_ADDRESS` / `NMOS_QUERY_PORT` are **no longer needed for chain
-  latency**. Keep them only if `/readyz` should wait until the node is listed
-  in the registry (that use is unchanged).
+- **Chart:** on the analyzers behind fabrics, the mixer and SRT, set
+  `AVSYNC_SOURCE_EMIT_VIDEO_MS=-20` and `AVSYNC_SOURCE_EMIT_AUDIO_MS=-25` (or the
+  generator's `/api/v1/status` values if its leads are changed). On the direct
+  analyzer the existing `NMOS_QUERY_ADDRESS` / `NMOS_QUERY_PORT` keep giving the
+  offsets from the tag; setting the two values there too is allowed and wins.
 - Dashboards and alerts: take `deploy/prometheus/avsync-rules.yaml` into the
   platform rules. `events_total` is a counter since 2.0.4.
 - Per release: `tools/bench_paths.py --minutes 30 --generator http://<avgen>:8180

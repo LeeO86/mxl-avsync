@@ -97,6 +97,9 @@ struct Runtime {
     double render_sum_s = 0;
     std::vector<double> video_commit_ms; // generator: last grains, commit time - grain timestamp
     size_t video_commit_next = 0;
+    SourceEmitOffsets tag_emit; // analyzer: from the NMOS Query API tags of the flows it reads (2.0.2)
+    std::string tag_emit_video_flow;
+    std::string tag_emit_audio_flow;
 };
 
 // Every closed event is counted once under one result. "quality": paired but a part was invalid.
@@ -118,7 +121,7 @@ constexpr const char* kArrivalLabel = "arrival vs timestamp";
 constexpr const char* kArrivalNote = "Diagnostics: arrival time minus the content timestamp. Directly behind the generator this is its own write timing: it writes audio early by the audio lead and video at its write time (by default 20 ms early).";
 constexpr const char* kChainLabel = "chain latency";
 constexpr const char* kAbsLabel = "latency (emission to arrival)";
-constexpr const char* kRelativeLabel = "relative to the source timestamp: enter the source's emit offsets (AVSYNC_SOURCE_EMIT_VIDEO_MS / _AUDIO_MS, from the generator's /api/v1/status emit_offsets) for an absolute latency";
+constexpr const char* kRelativeLabel = "relative to the source timestamp: enter the source's emit offsets (AVSYNC_SOURCE_EMIT_VIDEO_MS / _AUDIO_MS, from the generator's /api/v1/status emit_offsets), or route the generator's flows directly with a Query API configured, for an absolute latency";
 
 double percentile(std::vector<double> values, double p)
 {
@@ -131,7 +134,8 @@ double percentile(std::vector<double> values, double p)
 nlohmann::json emit_offsets_json(const Runtime& rt)
 {
     nlohmann::json body = {{"video_ms", video_emit_offset_ms(rt.config.video_lead_ms)}, {"audio_ms", audio_emit_offset_ms(rt.config.audio_lead_ms)},
-        {"video_lead_ms", rt.config.video_lead_ms}, {"audio_lead_ms", rt.config.audio_lead_ms}, {"audio_block_ms", kAudioBlockMs}};
+        {"video_lead_ms", rt.config.video_lead_ms}, {"audio_lead_ms", rt.config.audio_lead_ms}, {"audio_block_ms", kAudioBlockMs},
+        {"nmos_tag", kEmitOffsetTag}};
     if (!rt.video_commit_ms.empty()) {
         body["video_commit_vs_timestamp_ms"] = {{"grains", rt.video_commit_ms.size()}, {"p50", percentile(rt.video_commit_ms, 0.5)},
             {"p99", percentile(rt.video_commit_ms, 0.99)}, {"max", percentile(rt.video_commit_ms, 1.0)}};
@@ -143,6 +147,18 @@ nlohmann::json emit_offsets_json(const Runtime& rt)
 SourceEmitOffsets entered_emit(const Config& config)
 {
     return {parse_emit_offset(config.source_emit_video_ms), parse_emit_offset(config.source_emit_audio_ms)};
+}
+
+// Per essence: the entered value wins; otherwise the emit-offset tag of the directly connected flow.
+SourceEmitOffsets effective_emit(const Runtime& rt)
+{
+    const auto entered = entered_emit(rt.config);
+    return {entered.video_ms ? entered.video_ms : rt.tag_emit.video_ms, entered.audio_ms ? entered.audio_ms : rt.tag_emit.audio_ms};
+}
+
+const char* emit_source(const std::optional<double>& entered, const std::optional<double>& tag)
+{
+    return entered ? "entered" : (tag ? "nmos-tag" : "none");
 }
 
 // Clock accuracy in ms when the clock reports one (accuracy_ns >= 0), else nothing.
@@ -159,11 +175,34 @@ std::optional<double> clock_accuracy_ms(const PtpReading& clock)
 
 nlohmann::json source_emit_json(const Runtime& rt)
 {
-    const auto emit = entered_emit(rt.config);
-    nlohmann::json body = {{"source", emit.video_ms || emit.audio_ms ? "entered" : "none"}};
+    const auto entered = entered_emit(rt.config);
+    const auto emit = effective_emit(rt);
+    const char* video_source = emit_source(entered.video_ms, rt.tag_emit.video_ms);
+    const char* audio_source = emit_source(entered.audio_ms, rt.tag_emit.audio_ms);
+    const bool any_entered = entered.video_ms || entered.audio_ms;
+    nlohmann::json body = {{"source", any_entered ? "entered" : (emit.video_ms || emit.audio_ms ? "nmos-tag" : "none")},
+        {"video_source", video_source}, {"audio_source", audio_source}};
     body["video_ms"] = emit.video_ms ? nlohmann::json(*emit.video_ms) : nlohmann::json(nullptr);
     body["audio_ms"] = emit.audio_ms ? nlohmann::json(*emit.audio_ms) : nlohmann::json(nullptr);
     return body;
+}
+
+// The emit offset tag of one IS-04 flow, or nothing.
+std::optional<double> emit_tag_of(const std::string& flow_json)
+{
+    const auto doc = nlohmann::json::parse(flow_json, nullptr, false);
+    if (!doc.is_object() || !doc.contains("tags") || !doc["tags"].is_object() || !doc["tags"].contains(kEmitOffsetTag)) return std::nullopt;
+    const auto& values = doc["tags"][kEmitOffsetTag];
+    if (!values.is_array() || values.empty() || !values[0].is_string()) return std::nullopt;
+    try {
+        size_t used = 0;
+        const std::string text = values[0].get<std::string>();
+        const double value = std::stod(text, &used);
+        if (used != text.size() || !std::isfinite(value)) return std::nullopt;
+        return value;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 // Clock source, state and accuracy, named next to every absolute value (C8).
@@ -621,8 +660,8 @@ void install_web(HttpServer& http, Runtime& rt)
         }
         body["source_emit_offsets"] = source_emit_json(rt);
         body["clock"] = clock_brief_json(rt);
-        const auto entered = entered_emit(rt.config);
-        body["latency_basis"] = entered.video_ms || entered.audio_ms ? "absolute" : "relative to the source timestamp";
+        const auto effective = effective_emit(rt);
+        body["latency_basis"] = effective.video_ms || effective.audio_ms ? "absolute" : "relative to the source timestamp";
         body["labels"] = {{"av_sync_ms", kAvSyncLabel}, {"arrival_vs_timestamp", kArrivalLabel}, {"arrival_vs_timestamp_note", kArrivalNote},
             {"chain_latency", kChainLabel}, {"latency_abs", kAbsLabel}, {"latency_relative", kRelativeLabel}};
         return json_response(body);
@@ -1037,6 +1076,44 @@ int run_service(Config config)
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     });
+    // Analyzer: the emit offsets of the flows it reads, from their NMOS tags in the Query API (a direct
+    // generator publishes them; behind a gateway the tag is absent and chain latency stays absent).
+    std::thread emit([&] {
+        int ticks = 0;
+        while (!g_stop) {
+            std::string host, video_flow, audio_flow, known_video, known_audio;
+            int port = 0;
+            {
+                std::lock_guard lock(rt.mu);
+                if (rt.config.role == "analyzer") {
+                    host = rt.config.nmos_query_address;
+                    port = rt.config.nmos_query_port;
+                }
+                video_flow = rt.video_flow;
+                audio_flow = rt.audio_flow;
+                known_video = rt.tag_emit_video_flow;
+                known_audio = rt.tag_emit_audio_flow;
+            }
+            if (!host.empty() && port > 0 && (video_flow != known_video || audio_flow != known_audio || ++ticks >= 30)) {
+                ticks = 0;
+                auto lookup = [&](const std::string& flow) -> std::optional<double> {
+                    std::string body;
+                    if (flow.empty() || !http_get(host, std::to_string(port), "/x-nmos/query/v1.3/flows/" + flow, &body, 500)) return std::nullopt;
+                    return emit_tag_of(body);
+                };
+                SourceEmitOffsets found;
+                found.video_ms = lookup(video_flow);
+                found.audio_ms = lookup(audio_flow);
+                std::lock_guard lock(rt.mu);
+                rt.tag_emit = found;
+                rt.tag_emit_video_flow = video_flow;
+                rt.tag_emit_audio_flow = audio_flow;
+            }
+            for (int i = 0; i < 10 && !g_stop; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    });
     std::thread ptp([&] {
         bool socket_error_logged = false;
         while (!g_stop) {
@@ -1114,7 +1191,7 @@ int run_service(Config config)
         callbacks.add_event = [&](const Measurement& event) {
             std::lock_guard lock(rt.mu);
             rt.events.push_back(event);
-            apply_source_emit(rt.events.back(), entered_emit(rt.config), clock_accuracy_ms(rt.clock_status));
+            apply_source_emit(rt.events.back(), effective_emit(rt), clock_accuracy_ms(rt.clock_status));
             rt.event_results[event_result(event)] += 1;
             if (rt.events.size() > 1000) {
                 rt.events.erase(rt.events.begin(), rt.events.begin() + static_cast<std::ptrdiff_t>(rt.events.size() - 1000));
@@ -1205,6 +1282,7 @@ int run_service(Config config)
     if (nmos_thread.joinable()) nmos_thread.join();
     if (beat.joinable()) beat.join();
     if (ptp.joinable()) ptp.join();
+    if (emit.joinable()) emit.join();
 #ifdef AVSYNC_WITH_MXL
     if (media.joinable()) media.join();
 #endif
