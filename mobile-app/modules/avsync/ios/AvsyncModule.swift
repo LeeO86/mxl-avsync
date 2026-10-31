@@ -1,11 +1,29 @@
 import ExpoModulesCore
 
 public class AvsyncModule: Module {
+  private var clockBusy = false
   private var imagePicker: GeneratorImagePicker?
   private weak var generator: AvsyncGeneratorController?
   public func definition() -> ModuleDefinition {
     Name("Avsync")
     Function("supportsLiveCapture") { true }
+    Function("solveDeviceCalibration") { (input: [String:Double]) -> [AnyHashable:Any] in
+      AVSyncDeviceCalibration.solve(input)
+    }
+    Function("clockNow") { PhoneClock.now() }
+    AsyncFunction("synchronizeClock") { (host: String, promise: Promise) in
+      guard !self.clockBusy else { promise.reject("CLOCK_BUSY", "A clock check is already running"); return }
+      self.clockBusy = true
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let reference = try SntpClient().synchronize(host: host)
+          DispatchQueue.main.async { self.clockBusy = false; promise.resolve(reference) }
+        } catch {
+          DispatchQueue.main.async { self.clockBusy = false; promise.reject("NTP_UNAVAILABLE", error.localizedDescription) }
+        }
+      }
+    }.runOnQueue(.main)
+
     Function("supportsGenerator") { true }
     AsyncFunction("generate") { (rate: Int, taiUtc: Double, promise: Promise) in
       self.presentGenerator(rate: rate, taiUtc: taiUtc, options: [:], promise: promise)
@@ -75,7 +93,7 @@ public class AvsyncModule: Module {
     }
     do {
       let image = try GeneratorImageStore.load(id: options["imageId"] ?? "")
-      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image)
+      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") })
       generator = controller; controller.onClose = { result in promise.resolve(result) }
       parent.view.endEditing(true)
       parent.present(controller, animated: true)

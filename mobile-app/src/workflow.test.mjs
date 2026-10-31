@@ -39,3 +39,14 @@ test('settings reports the applied correction, and distinguishes stale saved val
   assert.equal(validCalibration({ ...record, savedAt: undefined }, '26.6', 2000), null);
   assert.equal(calibrationSummary({ ...record, offset_ms: 0 }, '26.6', 2000).state, 'active');
 });
+
+test('calibration is scoped to model, route, sample rate and camera mode without deleting the stored correction', () => {
+ const context={platform:'ios',model:'iPhone18,1',os:'26.6',audioRoute:'MicrophoneBuiltIn/Speaker',sampleRate:48000,cameraMode:'1920x1080@240'};
+ const record=makeCalibration({frames:[{timeMs:100}],spikeTimeMs:112,fps:240,captureContext:context},0,'26.6',1000);
+ assert.equal(validCalibration(record,'26.6',2000,context),record);
+ for (const changed of [{audioRoute:'BluetoothHFP/BluetoothHFP'},{sampleRate:44100},{cameraMode:'1920x1080@60'},{model:'iPhone19,1'}]) {
+  assert.equal(validCalibration(record,'26.6',2000,{...context,...changed}),null);
+ }
+ assert.equal(validCalibration({...record,captureContext:null},'26.6',2000,context),null);
+ assert.equal(calibrationSummary(record,'26.6',2000,{...context,sampleRate:44100}).storedOffsetMs,12);
+});

@@ -1,0 +1,19 @@
+apply plugin: 'com.android.library'
+
+group = 'io.leeo86.mxl.avsync'
+version = '2.0.5'
+
+def expoModulesCorePlugin = new File(project(':expo-modules-core').projectDir, 'ExpoModulesCorePlugin.gradle')
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace 'io.leeo86.mxl.avsync.clock'
+  defaultConfig { minSdkVersion 24 }
+}
+
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}

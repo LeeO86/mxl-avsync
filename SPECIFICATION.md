@@ -605,6 +605,20 @@ Compact phone event timing retains the first clear black-to-white optical onset 
 
 AV offset is measured. Optional estimated latency uses the phone clock with explicitly unknown physical timing accuracy (§3.3). The Generate tab also supplies a native test source for an external camera/analyzer; its source-output calibration is separate from capture calibration.
 
+### 12.1a Phone time reference (maintainer decision, 2026-10-31)
+
+Native iOS uses an explicit configurable SNTP exchange; Android uses raw GNSS
+clock time mapped to elapsedRealtime (API 29+, hardware permitting). Every
+saved reading retains the reference/correction/age/uncertainty at acquisition.
+The system clock is not set. References expire and over-limit uncertainty is
+not used for correction. UTC correction is separate from capture calibration
+and AV offset. Optional per-source emit offsets permit estimated
+emission-to-capture latency; without them the value is timestamp-relative.
+Clock uncertainty is labelled separately from unknown capture/source timing.
+Android capture remains a separate port. The calibration UI is unchanged;
+new corrections are scoped to model/OS/route/sample rate/camera mode.
+See [phone time reference](docs/phone-clock.md) for algorithms and limits.
+
 ### 12.2 Technology
 
 - **Expo** (React Native) for the UI, one code base for iOS and Android, with an **Expo native module** per platform for capture and timing.

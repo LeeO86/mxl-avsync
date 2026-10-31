@@ -59,8 +59,9 @@ reception time refers to the chirp onset.
     distances removed; `consistency_ms` checks this.
   - Half the difference: `θ + ((out_A + in_B) − (out_B + in_A))/2`.
 - **What can be solved.** There are 5 unknowns (`out_A`, `in_A`, `out_B`,
-  `in_B`, `θ`) but only 4 independent equations (two loopbacks, two cross
-  runs; the distance comes from the ranging). One quantity stays open:
+  `in_B`, `θ`) but the four equations (two loopbacks, two cross
+  runs) have rank 3: their sums obey the consistency relation above.
+  Two degrees of freedom remain (the distance comes from the ranging):
   - the split of each device's loop into output and input, together with
     `θ`;
   - with a **trusted clock** (C4 SNTP/PTP gives `θ`) and **one known latency**
@@ -89,8 +90,9 @@ reception time refers to the chirp onset.
 
 ## Next steps (devices needed)
 
-1. iOS: add `Core_two_way.cpp` to the module and expose `onsets_from_recording`
-   and the two functions to Swift (`AVSyncStreamAnalyzer`).
+1. iOS maths is now compiled through `Core_two_way.cpp` and exposed by the
+   experimental `solveDeviceCalibration` module function. Recording acquisition
+   and onset extraction into the device-exchange workflow remain to be wired.
 2. App flow:
    - pair the two phones;
    - each plays its packet at a scheduled time and records 3 s;

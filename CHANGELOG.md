@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased (mobile)
+
+- Native iOS SNTP and Android GNSS time references, with clock/timebase identity,
+  age, RTT/uncertainty, expiry and configurable server/qualification limit.
+  Correct latency once using the native monotonic mapping and retain exact
+  acquisition-time evidence in saved/exported results. No system clock changes.
+- Mobile 2.0.5 adopts the shared core's audio-correlation/quality fixes. Optional
+  per-source emit offsets distinguish timestamp-relative and estimated chain
+  latency; signed raw values remain in diagnostics. Physical accuracy stays
+  unvalidated, capture/source uncertainty unknown. iOS generator uses a qualified
+  reference for scheduled source time while retaining estimated output flags.
+- Calibration compatibility now includes model/OS/route/sample rate/camera mode;
+  the existing UI is retained. Experimental two-way maths bridge is available
+  on iOS; real device exchange/wizard is not implemented. Android's clock module
+  does not claim the pending capture/generator NDK port.
+
 ## 2.0.6 (unreleased)
 
 - Absolute-latency metrics per essence: `mxl_avsync_latency_abs_ms` and `mxl_avsync_latency_abs_uncertainty_ms` (gauges, median over the grade window of `AVSYNC_GRADE_EVENTS` events, `NaN` without a value), `mxl_avsync_latency_abs_seconds` (histogram of every event since start, 1 ms to 5 s, +Inf) and `mxl_avsync_emit_offset_mismatch_total` (counter). All exported from the first scrape.

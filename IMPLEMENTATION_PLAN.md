@@ -1092,3 +1092,26 @@ The live AVS2 picture was rendered and packed in full per grain (about 8 ms at 1
 ## Absolute latency from entered emit offsets (2.0.5, 2026-10-31)
 
 Maintainer decision: keep the 2.0.2 flow tag `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0` and its Query API lookup, add no new custom tag. Emit offsets per essence: operator-entered `AVSYNC_SOURCE_EMIT_VIDEO_MS` / `_AUDIO_MS` (live) win; else the tag of the directly connected generator flow; else none. Entered values also work behind gateways, mixers and SRT. The absolute latency is the chain latency clamped by its uncertainty (`apply_source_emit` in core, unit tested): ≥ 0 as is, below 0 within ± u as 0, further below as `emit_offset_mismatch` without a value. The uncertainty is 1 ms (video arrival) or 6 ms (audio: 1 ms + half the 10 ms source block) plus the clock accuracy when reported. Alert rules are promtool-tested in CI; `tools/bench_paths.py` is the platform's per-release four-path bench. Custom tags published: `urn:x-mxl:tag:test-signal/v1.0` (IS-04 device, sources, flows, senders and the MXL flow definitions) and `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0` (generator video and audio flows, 2.0.2).
+
+
+## Phone clock reference and platform 2.0.5 integration (2026-10-31)
+
+Maintainer decision: implement iOS NTP and Android GNSS time, incorporate the
+platform/report 2.0.5 fixes in the app, leave calibration UI design for later.
+The app compiles the current shared detector (including sub-sample correlation)
+and the experimental two-way maths. Native iOS SNTP supplies a process-local
+host-clock/UTC mapping; Android's raw GNSS clock maps to elapsedRealtime with
+reported uncertainty and leap conversion. The missing Android capture/JNI and
+generator are explicitly unsupported, not claimed by the clock module.
+
+Deviation from the earlier coarse HTTPS check: qualified native references
+now correct timestamp-relative phone latency and scheduled iOS source time;
+results stay estimated/unvalidated. Optional entered source emit offsets add
+estimated nonnegative emission-to-capture latency and signed diagnostics.
+Clock contribution is never presented as total physical timing uncertainty.
+References expire after 5 min with explicit 50-ppm holdover assumption and a
+configurable uncertainty limit. Saved snapshots are immutable. Source changes
+do not reuse another source's offsets. New capture calibration records bind to
+model/OS/audio route/sample rate/camera mode; incompatible old records remain
+stored but inactive. No new calibration wizard or autonomous two-device flow.
+See docs/phone-clock.md for checks and remaining hardware validation.

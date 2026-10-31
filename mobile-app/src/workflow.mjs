@@ -1,11 +1,15 @@
-export function validCalibration(record, os, now) {
+export function validCalibration(record, os, now, context) {
   if (!record || record.capturePath !== 'native-raw-v1' || !Number.isFinite(record.offset_ms) || !Number.isFinite(record.savedAt) || record.os !== os || now < record.savedAt || now - record.savedAt > 90 * 86400000) return null;
+  if (context) {
+    const keys = ['platform','model','os','audioRoute','sampleRate','cameraMode'];
+    if (!record.captureContext || keys.some(key => context[key] === undefined || context[key] !== record.captureContext[key]) || !(context.sampleRate > 0)) return null;
+  }
   return record;
 }
 
 // Describe the correction actually used, including an inactive saved calibration.
-export function calibrationSummary(record, os, now) {
-  const active = validCalibration(record, os, now);
+export function calibrationSummary(record, os, now, context) {
+  const active = validCalibration(record, os, now, context);
   const stored = Number.isFinite(record?.offset_ms) ? record.offset_ms : null;
   return {
     state: active ? 'active' : stored === null ? 'missing' : 'inactive',
@@ -22,7 +26,7 @@ export function nearestFrame(frames, time) {
 export function makeCalibration(take, selected, os, now) {
   const frame = take.frames[selected];
   if (!frame || !Number.isFinite(take.spikeTimeMs)) throw new Error('A real video frame and sound are required.');
-  return { offset_ms: take.spikeTimeMs - frame.timeMs, savedAt: now, os, method: 'manual-contact-raw', capturePath: 'native-raw-v1', fps: take.fps, uncertainty_ms: null };
+  return { offset_ms: take.spikeTimeMs - frame.timeMs, savedAt: now, os, method: 'manual-contact-raw', capturePath: 'native-raw-v1', fps: take.fps, captureContext: take.captureContext || null, uncertainty_ms: null };
 }
 
 export function prepareReading(report, calibration, now) {
