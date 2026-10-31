@@ -97,9 +97,11 @@ struct Runtime {
     double render_sum_s = 0;
     std::vector<double> video_commit_ms; // generator: last grains, commit time - grain timestamp
     size_t video_commit_next = 0;
-    SourceEmitOffsets source_emit; // analyzer: from the NMOS Query API tags of the flows it reads
-    std::string source_emit_video_flow;
-    std::string source_emit_audio_flow;
+    std::vector<double> audio_onset_commit_ms; // generator: last event onsets, commit time - content time
+    size_t audio_onset_next = 0;
+    SourceEmitOffsets tag_emit; // analyzer: from the NMOS Query API tags of the flows it reads (2.0.2)
+    std::string tag_emit_video_flow;
+    std::string tag_emit_audio_flow;
 };
 
 // Every closed event is counted once under one result. "quality": paired but a part was invalid.
@@ -118,8 +120,10 @@ constexpr std::array<double, 8> kRenderBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 
 
 constexpr const char* kAvSyncLabel = "AV sync (what MXL consumers see)";
 constexpr const char* kArrivalLabel = "arrival vs timestamp";
-constexpr const char* kArrivalNote = "Arrival time minus the content timestamp. Directly behind the generator this is its own write timing: it writes audio early by the audio lead and video at its write time (by default 20 ms early).";
+constexpr const char* kArrivalNote = "Diagnostics: arrival time minus the content timestamp. Directly behind the generator this is its own write timing: it writes audio early by the audio lead and video at its write time (by default 20 ms early).";
 constexpr const char* kChainLabel = "chain latency";
+constexpr const char* kAbsLabel = "latency (emission to arrival)";
+constexpr const char* kRelativeLabel = "relative to the source timestamp: enter the source's emit offsets (AVSYNC_SOURCE_EMIT_VIDEO_MS / _AUDIO_MS, from the generator's /api/v1/status emit_offsets), or route the generator's flows directly with a Query API configured, for an absolute latency";
 
 double percentile(std::vector<double> values, double p)
 {
@@ -128,24 +132,67 @@ double percentile(std::vector<double> values, double p)
     return values[static_cast<size_t>(p * static_cast<double>(values.size() - 1) + 0.5)];
 }
 
-// Generator: what it publishes as its emit offsets (also the NMOS flow tags).
+// Generator: its own emit offsets (commit time - content timestamp), for the operator to enter on analyzers.
 nlohmann::json emit_offsets_json(const Runtime& rt)
 {
-    nlohmann::json body = {{"video_ms", video_emit_offset_ms(rt.config.video_lead_ms)}, {"audio_ms", audio_emit_offset_ms(rt.config.audio_lead_ms)},
+    // Audio: the measured commit time of the event onsets once there are ten, else the nominal value.
+    const double audio_nominal = audio_emit_offset_ms(rt.config.audio_lead_ms);
+    const double audio_ms = rt.audio_onset_commit_ms.size() >= 10 ? std::round(percentile(rt.audio_onset_commit_ms, 0.5) * 100.0) / 100.0 : audio_nominal;
+    nlohmann::json body = {{"video_ms", video_emit_offset_ms(rt.config.video_lead_ms)}, {"audio_ms", audio_ms}, {"audio_nominal_ms", audio_nominal},
         {"video_lead_ms", rt.config.video_lead_ms}, {"audio_lead_ms", rt.config.audio_lead_ms}, {"audio_block_ms", kAudioBlockMs},
         {"nmos_tag", kEmitOffsetTag}};
     if (!rt.video_commit_ms.empty()) {
         body["video_commit_vs_timestamp_ms"] = {{"grains", rt.video_commit_ms.size()}, {"p50", percentile(rt.video_commit_ms, 0.5)},
             {"p99", percentile(rt.video_commit_ms, 0.99)}, {"max", percentile(rt.video_commit_ms, 1.0)}};
     }
+    if (!rt.audio_onset_commit_ms.empty()) {
+        body["audio_commit_vs_onset_ms"] = {{"events", rt.audio_onset_commit_ms.size()}, {"p50", percentile(rt.audio_onset_commit_ms, 0.5)},
+            {"min", percentile(rt.audio_onset_commit_ms, 0.0)}, {"max", percentile(rt.audio_onset_commit_ms, 1.0)}};
+    }
     return body;
+}
+
+// Analyzer: the source emit offsets the operator entered (AVSYNC_SOURCE_EMIT_VIDEO_MS / _AUDIO_MS).
+SourceEmitOffsets entered_emit(const Config& config)
+{
+    return {parse_emit_offset(config.source_emit_video_ms), parse_emit_offset(config.source_emit_audio_ms)};
+}
+
+// Per essence: the entered value wins; otherwise the emit-offset tag of the directly connected flow.
+SourceEmitOffsets effective_emit(const Runtime& rt)
+{
+    const auto entered = entered_emit(rt.config);
+    return {entered.video_ms ? entered.video_ms : rt.tag_emit.video_ms, entered.audio_ms ? entered.audio_ms : rt.tag_emit.audio_ms};
+}
+
+const char* emit_source(const std::optional<double>& entered, const std::optional<double>& tag)
+{
+    return entered ? "entered" : (tag ? "nmos-tag" : "none");
+}
+
+// Clock accuracy in ms when the clock reports one (accuracy_ns >= 0), else nothing.
+std::optional<double> clock_accuracy_ms(const PtpReading& clock)
+{
+    try {
+        size_t used = 0;
+        const double ns = std::stod(clock.accuracy_ns, &used);
+        if (used == clock.accuracy_ns.size() && std::isfinite(ns) && ns >= 0) return ns / 1e6;
+    } catch (const std::exception&) {
+    }
+    return std::nullopt;
 }
 
 nlohmann::json source_emit_json(const Runtime& rt)
 {
-    nlohmann::json body = {{"source", "nmos-query"}};
-    body["video_ms"] = rt.source_emit.video_ms ? nlohmann::json(*rt.source_emit.video_ms) : nlohmann::json(nullptr);
-    body["audio_ms"] = rt.source_emit.audio_ms ? nlohmann::json(*rt.source_emit.audio_ms) : nlohmann::json(nullptr);
+    const auto entered = entered_emit(rt.config);
+    const auto emit = effective_emit(rt);
+    const char* video_source = emit_source(entered.video_ms, rt.tag_emit.video_ms);
+    const char* audio_source = emit_source(entered.audio_ms, rt.tag_emit.audio_ms);
+    const bool any_entered = entered.video_ms || entered.audio_ms;
+    nlohmann::json body = {{"source", any_entered ? "entered" : (emit.video_ms || emit.audio_ms ? "nmos-tag" : "none")},
+        {"video_source", video_source}, {"audio_source", audio_source}};
+    body["video_ms"] = emit.video_ms ? nlohmann::json(*emit.video_ms) : nlohmann::json(nullptr);
+    body["audio_ms"] = emit.audio_ms ? nlohmann::json(*emit.audio_ms) : nlohmann::json(nullptr);
     return body;
 }
 
@@ -165,6 +212,14 @@ std::optional<double> emit_tag_of(const std::string& flow_json)
     } catch (const std::exception&) {
         return std::nullopt;
     }
+}
+
+// Clock source, state and accuracy, named next to every absolute value (C8).
+nlohmann::json clock_brief_json(const Runtime& rt)
+{
+    const auto accuracy = clock_accuracy_ms(rt.clock_status);
+    return {{"source", rt.clock_status.sync_source}, {"state", rt.clock_status.sync_state},
+        {"accuracy_ms", accuracy ? nlohmann::json(*accuracy) : nlohmann::json(nullptr)}};
 }
 
 nlohmann::json clock_status_json(const Runtime& rt)
@@ -599,10 +654,25 @@ void install_web(HttpServer& http, Runtime& rt)
             if (last->audio_latency_ms) body["audio_arrival_vs_timestamp_ms"] = *last->audio_latency_ms;
             if (last->video_chain_latency_ms) body["video_chain_latency_ms"] = *last->video_chain_latency_ms;
             if (last->audio_chain_latency_ms) body["audio_chain_latency_ms"] = *last->audio_chain_latency_ms;
+            if (last->video_latency_abs_ms) {
+                body["video_latency_abs_ms"] = *last->video_latency_abs_ms;
+                body["video_latency_abs_uncertainty_ms"] = *last->video_latency_abs_uncertainty_ms;
+            }
+            if (last->audio_latency_abs_ms) {
+                body["audio_latency_abs_ms"] = *last->audio_latency_abs_ms;
+                body["audio_latency_abs_uncertainty_ms"] = *last->audio_latency_abs_uncertainty_ms;
+            }
+            if (last->video_latency_abs_ms || last->audio_latency_abs_ms) {
+                body["latency_abs_clock_accuracy_known"] = last->latency_abs_clock_accuracy_known;
+            }
+            body["emit_offset_mismatch"] = std::find(last->flags.begin(), last->flags.end(), "emit_offset_mismatch") != last->flags.end();
         }
         body["source_emit_offsets"] = source_emit_json(rt);
+        body["clock"] = clock_brief_json(rt);
+        const auto effective = effective_emit(rt);
+        body["latency_basis"] = effective.video_ms || effective.audio_ms ? "absolute" : "relative to the source timestamp";
         body["labels"] = {{"av_sync_ms", kAvSyncLabel}, {"arrival_vs_timestamp", kArrivalLabel}, {"arrival_vs_timestamp_note", kArrivalNote},
-            {"chain_latency", kChainLabel}};
+            {"chain_latency", kChainLabel}, {"latency_abs", kAbsLabel}, {"latency_relative", kRelativeLabel}};
         return json_response(body);
     });
     http.add("GET", "/api/v1/events", [&](const HttpRequest& request) {
@@ -825,8 +895,11 @@ std::string widget_html(Runtime& rt, const std::string& id, bool latency, bool t
             "document.body.style.background=colours[grade]||colours.invalid;"
             "let line=grade==='invalid'?'<div>'+(m.sentence||m.reason||'no measurement')+'</div>':'<div class=\"offset\">'+(m.sentence||'')+'</div>';"
             "if(latency&&grade!=='invalid'&&(m.video_latency_ms!=null||m.audio_latency_ms!=null)){"
-            "const f=v=>v==null?'–':Number(v).toFixed(1);const chain=m.video_chain_latency_ms!=null||m.audio_chain_latency_ms!=null;"
-            "line+='<div>'+(m.latency_estimated?'estimated ':'')+(chain?'chain latency':'arrival vs timestamp')+': video '+f(chain?m.video_chain_latency_ms:m.video_latency_ms)+' ms · audio '+f(chain?m.audio_chain_latency_ms:m.audio_latency_ms)+' ms</div>';}"
+            "const f=v=>v==null?'–':Number(v).toFixed(1);const abs=m.video_latency_abs_ms!=null||m.audio_latency_abs_ms!=null;"
+            "const pm=(v,u)=>v==null?'–':f(v)+'±'+f(u);const clk=m.clock?(m.clock.source+(m.clock.accuracy_ms==null?', accuracy unknown':'')):'';"
+            "line+='<div>'+(m.latency_estimated?'estimated video '+f(m.video_latency_ms)+' ms · audio '+f(m.audio_latency_ms)+' ms'"
+            ":abs?'latency video '+pm(m.video_latency_abs_ms,m.video_latency_abs_uncertainty_ms)+' ms · audio '+pm(m.audio_latency_abs_ms,m.audio_latency_abs_uncertainty_ms)+' ms ('+clk+')'"
+            ":'latency relative to the source timestamp')+'</div>';}"
             "document.getElementById('view').innerHTML=line;"
             "const canvas=document.getElementById('trend');"
             "if(!trend||grade==='invalid'){canvas.style.display='none';return;}"
@@ -1027,8 +1100,8 @@ int run_service(Config config)
                 }
                 video_flow = rt.video_flow;
                 audio_flow = rt.audio_flow;
-                known_video = rt.source_emit_video_flow;
-                known_audio = rt.source_emit_audio_flow;
+                known_video = rt.tag_emit_video_flow;
+                known_audio = rt.tag_emit_audio_flow;
             }
             if (!host.empty() && port > 0 && (video_flow != known_video || audio_flow != known_audio || ++ticks >= 30)) {
                 ticks = 0;
@@ -1041,9 +1114,9 @@ int run_service(Config config)
                 found.video_ms = lookup(video_flow);
                 found.audio_ms = lookup(audio_flow);
                 std::lock_guard lock(rt.mu);
-                rt.source_emit = found;
-                rt.source_emit_video_flow = video_flow;
-                rt.source_emit_audio_flow = audio_flow;
+                rt.tag_emit = found;
+                rt.tag_emit_video_flow = video_flow;
+                rt.tag_emit_audio_flow = audio_flow;
             }
             for (int i = 0; i < 10 && !g_stop; ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -1127,7 +1200,7 @@ int run_service(Config config)
         callbacks.add_event = [&](const Measurement& event) {
             std::lock_guard lock(rt.mu);
             rt.events.push_back(event);
-            apply_source_emit(rt.events.back(), rt.source_emit);
+            apply_source_emit(rt.events.back(), effective_emit(rt), clock_accuracy_ms(rt.clock_status));
             rt.event_results[event_result(event)] += 1;
             if (rt.events.size() > 1000) {
                 rt.events.erase(rt.events.begin(), rt.events.begin() + static_cast<std::ptrdiff_t>(rt.events.size() - 1000));
@@ -1164,6 +1237,16 @@ int run_service(Config config)
             }
             rt.render_count += 1;
             rt.render_sum_s += seconds;
+        };
+        callbacks.audio_onset_commit = [&](double ms) {
+            std::lock_guard lock(rt.mu);
+            constexpr size_t keep = 100;
+            if (rt.audio_onset_commit_ms.size() < keep) {
+                rt.audio_onset_commit_ms.push_back(ms);
+            } else {
+                rt.audio_onset_commit_ms[rt.audio_onset_next] = ms;
+            }
+            rt.audio_onset_next = (rt.audio_onset_next + 1) % keep;
         };
         callbacks.video_commit = [&](double ms) {
             std::lock_guard lock(rt.mu);

@@ -279,6 +279,32 @@ TEST_CASE("gray code, marker, drops and a half-transition frame")
     CHECK(drops.drops() >= 2);
 }
 
+TEST_CASE("legacy event seen late after skipped grains takes its time from the strip")
+{
+    const auto fmt = fmt50();
+    std::vector<uint16_t> luma;
+    const int period = 25;
+    for (int skip : {0, 1, 3, 6}) {
+        MarkerTracker tracker(fmt, 2);
+        std::vector<VideoObservation> events;
+        for (int frame = 0; frame < 3 * period; ++frame) {
+            const uint64_t seq = static_cast<uint64_t>(1 + frame / period);
+            const int pos = frame % period;
+            // The reader passed over the first `skip` grains of the second period (a stalled analyzer).
+            if (frame >= period && frame < period + skip) continue;
+            render_grain(luma, fmt, seq, pos, period, (seq % 2) == 1);
+            auto obs = tracker.push(luma.data(), fmt.width, frame, frame * 20.0, static_cast<int64_t>(frame) * 20000000);
+            if (obs.event) events.push_back(obs);
+        }
+        const auto it = std::find_if(events.begin(), events.end(), [&](const VideoObservation& e) { return e.seq == 2; });
+        REQUIRE(it != events.end());
+        CHECK(it->time_ms == doctest::Approx(period * 20.0)); // the event frame, not the first frame seen
+        CHECK(it->tai_ns == static_cast<int64_t>(period) * 20000000);
+        const bool corrected = std::find(it->flags.begin(), it->flags.end(), "event_time_from_strip") != it->flags.end();
+        CHECK(corrected == (skip > 0));
+    }
+}
+
 TEST_CASE("live video schedule commits ahead and skips only after four grains")
 {
     const Rate rate{50, 1};
@@ -486,6 +512,42 @@ TEST_CASE("chain latency subtracts the source emit offsets")
     phone.video_latency_ms = 80.0;
     apply_source_emit(phone, emit);
     CHECK(!phone.video_chain_latency_ms);
+}
+
+TEST_CASE("absolute latency is never negative: 0 within its uncertainty, else a mismatch flag")
+{
+    SourceEmitOffsets emit;
+    emit.video_ms = -20.0;
+    emit.audio_ms = -25.0;
+    Measurement m;
+    m.video_latency_ms = -16.0; // chain +4
+    m.audio_latency_ms = -26.0; // chain -1, inside 1.5 ms + clock
+    apply_source_emit(m, emit, 0.004);
+    REQUIRE(m.video_latency_abs_ms);
+    REQUIRE(m.audio_latency_abs_ms);
+    CHECK(*m.video_latency_abs_ms == doctest::Approx(4.0));
+    CHECK(*m.video_latency_abs_uncertainty_ms == doctest::Approx(1.004));
+    CHECK(*m.audio_latency_abs_ms == doctest::Approx(0.0));
+    CHECK(*m.audio_latency_abs_uncertainty_ms == doctest::Approx(1.504));
+    CHECK(*m.audio_chain_latency_ms == doctest::Approx(-1.0)); // the raw value stays for diagnostics
+    CHECK(m.latency_abs_clock_accuracy_known);
+    CHECK(std::find(m.flags.begin(), m.flags.end(), "emit_offset_mismatch") == m.flags.end());
+    // Far below 0: the entered offset (or the clock) is wrong. No absolute value, a flag instead.
+    Measurement wrong;
+    wrong.video_latency_ms = -40.0; // chain -20
+    wrong.audio_latency_ms = -24.0;
+    apply_source_emit(wrong, emit, std::nullopt);
+    CHECK(!wrong.video_latency_abs_ms);
+    REQUIRE(wrong.audio_latency_abs_ms);
+    CHECK(*wrong.audio_latency_abs_uncertainty_ms == doctest::Approx(1.5)); // clock accuracy unknown
+    CHECK(!wrong.latency_abs_clock_accuracy_known);
+    CHECK(std::count(wrong.flags.begin(), wrong.flags.end(), "emit_offset_mismatch") == 1);
+    // Nothing entered: no absolute latency.
+    Measurement none;
+    none.video_latency_ms = 12.0;
+    apply_source_emit(none, SourceEmitOffsets{}, 0.004);
+    CHECK(!none.video_latency_abs_ms);
+    CHECK(!none.video_chain_latency_ms);
 }
 
 TEST_CASE("content versus grain does not need a locked clock")

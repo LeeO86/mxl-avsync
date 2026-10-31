@@ -53,10 +53,16 @@ nlohmann::json measurement_to_json(const Measurement& m)
     }
     for (const auto& [key, value] : {std::pair{"video_source_emit_offset_ms", m.video_source_emit_offset_ms},
              std::pair{"audio_source_emit_offset_ms", m.audio_source_emit_offset_ms}, std::pair{"video_chain_latency_ms", m.video_chain_latency_ms},
-             std::pair{"audio_chain_latency_ms", m.audio_chain_latency_ms}}) {
+             std::pair{"audio_chain_latency_ms", m.audio_chain_latency_ms},
+             std::pair{"video_latency_abs_ms", m.video_latency_abs_ms}, std::pair{"audio_latency_abs_ms", m.audio_latency_abs_ms},
+             std::pair{"video_latency_abs_uncertainty_ms", m.video_latency_abs_uncertainty_ms},
+             std::pair{"audio_latency_abs_uncertainty_ms", m.audio_latency_abs_uncertainty_ms}}) {
         if (value) {
             j[key] = *value;
         }
+    }
+    if (m.video_latency_abs_ms || m.audio_latency_abs_ms) {
+        j["latency_abs_clock_accuracy_known"] = m.latency_abs_clock_accuracy_known;
     }
     if (m.audio_latency_ms) {
         j["audio_latency_ms"] = *m.audio_latency_ms;

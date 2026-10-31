@@ -362,6 +362,16 @@ VideoObservation MarkerTracker::push(const uint16_t* luma, int stride, int64_t g
                 break;
             }
         }
+        // The strip names this grain's position in the period (mod 16) and the marker changes on
+        // position 0. When the reader saw the change late (grains dropped or skipped before it), the
+        // event was `pos` grains earlier: take its time from the strip instead of the late grain.
+        const int pos = reading.frame_pos_mod16;
+        if (pos > 0 && pos < std::min(16, period_.grains)) {
+            const double grain_ms = period_.period_ms / static_cast<double>(std::max(1, period_.grains));
+            obs.time_ms -= pos * grain_ms;
+            obs.tai_ns -= static_cast<int64_t>(std::llround(pos * grain_ms * 1e6));
+            obs.flags.push_back("event_time_from_strip");
+        }
     }
     if (reading.state != MarkerReading::State::Invalid) {
         prev_state_ = reading.state;

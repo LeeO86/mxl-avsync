@@ -41,10 +41,10 @@ uint64_t ns_to_index(Rate rate, uint64_t timestamp_ns);
 
 // Live audio writer block (SPECIFICATION §2.2).
 inline constexpr int kAudioBlockMs = 10;
-// NMOS flow tag with the generator's emit offset for that flow, in ms, as a decimal string.
+// NMOS flow tag with the generator's emit offset for that flow, in ms, as a decimal string (2.0.2).
 inline constexpr char kEmitOffsetTag[] = "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0";
-// Emit offset = commit time - content timestamp. Video: every grain at T_k - lead. Audio: each sample
-// between lead and lead + one block early, so the mean is -(lead + block / 2).
+// Emit offset = commit time - content timestamp. Video: every grain at T_k - lead. Audio: the writer
+// commits each event's onset (AVS2 packet start, legacy chirp centre) at exactly -(lead + block / 2).
 double video_emit_offset_ms(int video_lead_ms);
 double audio_emit_offset_ms(int audio_lead_ms);
 
@@ -53,8 +53,18 @@ struct SourceEmitOffsets {
     std::optional<double> audio_ms;
 };
 struct Measurement;
-// Copies known emit offsets into m and fills chain latency where m has a measured, not estimated, latency.
-void apply_source_emit(Measurement& m, const SourceEmitOffsets& emit);
+// Uncertainty parts of an absolute latency besides the clock: the reader's arrival stamp (video), and
+// for audio the reader plus the commit watch's 0.5 ms poll (the generator commits each event onset at
+// a fixed offset since 2.0.5).
+inline constexpr double kVideoArrivalUncertaintyMs = 1.0;
+inline constexpr double kAudioArrivalUncertaintyMs = 1.5;
+// Copies the operator-entered source emit offsets into m and fills, where m has a measured (not
+// estimated) latency: chain latency = arrival - timestamp - source emit offset (may be negative), and
+// the absolute latency, which is never negative. Its uncertainty is the arrival part plus the clock
+// accuracy when known (clock_accuracy_ms). A chain latency below 0 but within the uncertainty is 0;
+// further below 0 gives no absolute value and the flag "emit_offset_mismatch" (wrong entered offset
+// or a clock error).
+void apply_source_emit(Measurement& m, const SourceEmitOffsets& emit, std::optional<double> clock_accuracy_ms = std::nullopt);
 
 // Live video writer schedule. Grain k is committed at T_k - lead_ns. After grain last_index the next
 // one is last_index + 1 (a late grain is still read at its own index), unless its render would start
@@ -532,6 +542,12 @@ struct Measurement {
     std::optional<double> audio_source_emit_offset_ms;
     std::optional<double> video_chain_latency_ms;
     std::optional<double> audio_chain_latency_ms;
+    // Absolute latency (emission -> arrival, >= 0) and its half-width; clock part included when known.
+    std::optional<double> video_latency_abs_ms;
+    std::optional<double> audio_latency_abs_ms;
+    std::optional<double> video_latency_abs_uncertainty_ms;
+    std::optional<double> audio_latency_abs_uncertainty_ms;
+    bool latency_abs_clock_accuracy_known = false;
     std::string grade = "invalid";
     std::string graded_on = "offset";
     std::optional<double> uncertainty_ms;
