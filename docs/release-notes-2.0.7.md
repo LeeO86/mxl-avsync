@@ -73,8 +73,11 @@ Every `le` value of 2.0.6 is still present, so existing queries keep working.
     video set time plus the expected offset);
   - behind the relay, video −480 / audio −476.5 ms, and `content_vs_grain_av_ms`
     is −3.5 ms, the real AV difference.
-- **Not changed:** `*_content_vs_grain_vs_index_shift_ms` subtracts the index
-  shift from content vs grain, so a re-stamp counts twice (−960 ms here).
-  Content vs grain is the negative of the index shift by definition, so their
-  sum (0 when consistent) would be the useful check. This is left as it is,
-  for a decision.
+- **Changed values:** `video_content_vs_grain_vs_index_shift_ms` and
+  `audio_content_vs_grain_vs_index_shift_ms` are now the **sum** of content vs
+  grain and the index shift. Content vs grain is the negative of the index shift
+  by definition, so the sum reads 0 when the two agree.
+  - Until 2.0.6 it was the difference, so a constant re-stamp counted twice:
+    −960 ms behind the 480 ms relay, now 0.
+  - On a direct link both read about 0, as before.
+  - A value other than 0 now means the content time and the stamp disagree.

@@ -447,10 +447,10 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
             m.audio_content_vs_grain_vs_latency_ms = *m.audio_content_vs_grain_ms - *m.audio_latency_ms;
         }
         if (m.video_content_vs_grain_ms && m.video_index_shift_ms) {
-            m.video_content_vs_grain_vs_index_shift_ms = *m.video_content_vs_grain_ms - *m.video_index_shift_ms;
+            m.video_content_vs_grain_vs_index_shift_ms = *m.video_content_vs_grain_ms + *m.video_index_shift_ms; // 0 when they agree (2.0.7: was the difference)
         }
         if (m.audio_content_vs_grain_ms && m.audio_index_shift_ms) {
-            m.audio_content_vs_grain_vs_index_shift_ms = *m.audio_content_vs_grain_ms - *m.audio_index_shift_ms;
+            m.audio_content_vs_grain_vs_index_shift_ms = *m.audio_content_vs_grain_ms + *m.audio_index_shift_ms; // 0 when they agree (2.0.7: was the difference)
         }
         if (m.content_vs_grain_av_ms && m.av_offset_arrival_ms) {
             m.content_vs_grain_av_vs_arrival_ms = *m.content_vs_grain_av_ms - *m.av_offset_arrival_ms;
