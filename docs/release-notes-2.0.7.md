@@ -1,4 +1,4 @@
-# mxl-avsync 2.0.7 (unreleased)
+# mxl-avsync 2.0.7
 
 Steadier video latency on busy nodes, histograms that resolve the real paths,
 and a fix to the audio "content vs grain" diagnostic. The signal, ports, NMOS
