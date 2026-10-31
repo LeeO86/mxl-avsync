@@ -8,7 +8,7 @@
 - `mxl_avsync_events_total{result}` is a real counter: every closed event is counted once, under `paired` or its reason. Before, it counted the last 1000 retained events, so it stopped growing after about 8 minutes (and `AVSyncNoEvents`, `rate(...paired[1m]) == 0`, could fire on a healthy analyzer). New results `quality` and `other`. An audio event that no video event claims within its window is now reported as `missing_video` (it was dropped silently); with a 2.0.3 generator missing 27 % of grains, 14 of 361 events were lost this way in 3 min and are now counted.
 - Live analyzer pairing keeps only open events and recent observations; before, its history grew for the life of the process.
 
-## 2.0.3 (unreleased)
+## 2.0.3 (2026-10-30)
 
 - Audio correlation is the best sub-sample match of the expected chirp. The AVS2 decoder correlates at 8 kHz, where the generator's chirp sits half a sample off the grid, and took the value at the integer lag: a bit-exact MXL path read 0.80, while a resampling path (x264 + AAC over SRT) read up to about 0.98. It is now the maximum over sub-sample shifts of the reference (±0.5 sample, 1/20 steps); the timecode is not in the 30 ms window. Bit-exact AVS2 0.796 → 1.000, AAC 128k 0.976 → 1.000, Opus 128k 0.796 → 1.000, legacy 0.994 → 1.000; added noise lowers it. Timing is unchanged (identical offsets in every case).
 - One quality rule: `good` needs a correlation of at least 0.85 and no clipping, for detector hits (analyzer, phone) and AVS2 packets alike (AVS2 packets were always `good`). AVS2 events on a clean path move from the 0.25 ms to the 0.05 ms audio uncertainty row.
