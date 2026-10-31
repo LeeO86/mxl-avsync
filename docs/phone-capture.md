@@ -69,3 +69,26 @@ The original idle timer is restored after the final request. Disabling the
 setting opts out for both modes; stored results/calibration are unaffected.
 Measurement does not force maximum brightness or alter the system auto-lock
 preference. A manual press of the lock button still locks the device.
+
+## Nonblocking live DSP (mobile 2.0.8)
+
+The capture queue buffers audio with deferred timecode scanning and preserves
+original camera PTS. At most one independent PhoneSession snapshot is analyzed
+on a worker at the existing one-second cadence. Deep copies own all mutable
+buffers; decoded packet history is merged back on capture, with generation and
+source checks. Reset/routing never reuses an old worker result. The original
+12-second history remains bounded; synchronous core callers keep their default.
+`analysisMode=async-snapshot-v1`, `analysisDelayMs` and snapshot processing costs
+distinguish worker duration from capture callback blocking. Worker delay counts
+toward displayed reading age. No numerical jitter suppression was added.
+
+## Calibration review (mobile 2.0.8)
+
+The waveform's left play/pause and the video overlay control the same recorded
+audio/video preview. Blue is playback position; orange marks the detected sound.
+Tap the waveform to seek, or hold a frame arrow to repeat one-frame steps with
+acceleration. Stepping pauses playback; pause before saving the selected frame.
+The preview uses original captured images/timestamps and the WAV time origin,
+including nonzero audio/video start offsets. Live calibration exports a clipped
+WAV and dense waveform for the retained pre/post-contact window. Save uses the
+original selected frame timestamp, not the interpolated preview clock.

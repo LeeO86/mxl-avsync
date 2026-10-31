@@ -1152,3 +1152,28 @@ leases. Measurement brightness stays unchanged; existing generator brightness
 handling stays separate. Future Android capture needs its native equivalent;
 no new Android capture/generator capability is claimed. Container behavior and
 platform test/deployment state are unaffected.
+
+
+## Calibration playback and live capture isolation (mobile 2.0.8, 2026-11-01)
+
+Maintainer request: investigate a 120-fps test and add waveform-side play/pause,
+blue playback position, tap seeking, repeating/accelerating held frame arrows
+and video playback to calibration review. The review plays original JPEG frames
+at their capture times against the audio playback clock. It never substitutes
+preview timing for the selected frame's calibration timestamp. Live review WAV
+and dense waveform are cropped to the retained video window and report the
+exact audio origin; older full-WAV takes remain readable. Playback commands
+coalesce, stop at the window end, and cancel/unload on exit or inactivity.
+A development/test-only preview accepts a local fixture without altering saved
+state; it is excluded from production native builds.
+
+Diagnostics showed long serial capture-queue stalls in both incremental audio
+timecode scanning and report generation. Native live capture now only buffers
+audio/updates fast video tracking. One deep, bounded DSP snapshot is processed
+on a separate queue at the existing one-second reporting cadence. Only decoded
+packet history is merged back; capture/QR/clock state stays owned by capture.
+Generation and source checks discard obsolete worker results. Existing core
+callers retain synchronous scanning by default. Snapshot cost and worker delay
+are reported, and reading freshness includes that delay. No pulse timestamp
+smoothing or display/transport compensation is introduced. Protocol and
+container release version stay 2.0.7; real iPhone improvement remains a field test.

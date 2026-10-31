@@ -60,6 +60,10 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
     assert readings and abs(readings[-1]['offset_ms'] - 35) < 1, reports
     assert readings[-1]['diagnosticVersion'] == 3 and readings[-1]['videoEvents'] >= 3
     assert readings[-1]['audioHits'] >= 3 and readings[-1]['bestCorrelation'] > 0.9
+    snapshots = json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(tmp/'offset35.mov')],text=True,env={**os.environ,'SIMCTL_CHILD_AVSYNC_TEST_ASYNC_SNAPSHOTS':'1'}))
+    snap_readings=[row for row in snapshots if row.get('kind')=='reading']
+    assert snap_readings and abs(snap_readings[-1]['offset_ms']-35)<1,snapshots
+    print('PASS: detached DSP snapshots preserve timing and remain independent after capture advances/resets')
     assert readings[-1]['picture']['found'] and readings[-1]['picture']['codeDecoded']
     assert len(readings[-1]['picture']['points']) == 4
     qr = {'s':'mxl-avsync/1','t':'native-latency','m':'LIVE','k':1,'tk':1700000037000000000,'o':0,'r':2,'f':'1080p50'}
@@ -95,6 +99,12 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
     take = next(r for r in calibration_reports if r.get('kind') == 'calibration')
     assert take['framesAfter'] >= 25 and take['framesBefore'] >= 25, take
     assert max(f['timeMs'] for f in take['frames']) - take['spikeTimeMs'] >= 650, take
+    import wave
+    with wave.open(unquote(urlparse(take['uri']).path),'rb') as clip:
+        assert abs(clip.getnframes()*1000/clip.getframerate()-take['waveformDurationMs'])<1
+    assert take['audioStartMs'] >= take['frames'][0]['timeMs']-1
+    assert take['audioStartMs'] <= take['spikeTimeMs'] < take['audioStartMs']+take['waveformDurationMs']
+    (tmp/'review-take.json').write_text(json.dumps(take))
     run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', tmp / 'offset35.mov', '-vf', 'fps=240', '-c:v', 'libx264', '-c:a', 'copy', tmp / 'highfps.mov'])
     high = analyze(tmp / 'highfps.mov', calibration=True)
     assert len(high['frames']) > 100 and high['framesAfter'] > 50, high
@@ -115,6 +125,10 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
         assert abs(good[-1]['latency']['video_ms']-120)<1,good[-1]
         assert abs(good[-1]['latency']['audio_ms']-155)<1,good[-1]
         assert 'audio-timecode' in good[-1]['latency']['audioSource'],good[-1]
+        detached=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(movie)],text=True,env={**environment,'SIMCTL_CHILD_AVSYNC_TEST_ASYNC_SNAPSHOTS':'1'}))
+        accepted=[r for r in detached if r.get('kind')=='reading']
+        assert accepted and abs(accepted[-1]['offset_ms']-35)<1,detached
+        assert abs(accepted[-1]['latency']['audio_ms']-155)<1,accepted[-1]
         # Decode QR only at t=0: its 3-s latency lease expires, but an exact
         # CRC timecode/video pair still supplies the current video send time.
         stale=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(movie)],text=True,env={key:value for key,value in environment.items() if key!='SIMCTL_CHILD_AVSYNC_TEST_ADVANCE_QR'}))

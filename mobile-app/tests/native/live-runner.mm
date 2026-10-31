@@ -3,6 +3,7 @@
 #import "AVSyncStreamAnalyzer.h"
 #import "AVSyncQRCodeReader.h"
 #include "avsync/avsync.hpp"
+#include <cassert>
 int main(int argc,char**argv){@autoreleasepool{
  NSURL*url=[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];
  AVAsset*asset=[AVURLAsset URLAssetWithURL:url options:nil];
@@ -13,6 +14,8 @@ int main(int argc,char**argv){@autoreleasepool{
  AVSyncStreamAnalyzer*processor=[AVSyncStreamAnalyzer new];if(argc>2)[processor beginCalibration];
  NSDictionary *environment=NSProcessInfo.processInfo.environment;
  NSString *testQR=environment[@"AVSYNC_TEST_QR"];
+ const bool snapshots=environment[@"AVSYNC_TEST_ASYNC_SNAPSHOTS"]!=nil;
+ AVSyncStreamAnalyzer *retainedSnapshot=nil;NSDictionary *retainedPicture=nil;
  if(environment[@"AVSYNC_TEST_WALL_OFFSET_MS"])[processor setClockAnchor:0 unixTimeMs:[environment[@"AVSYNC_TEST_WALL_OFFSET_MS"] doubleValue]];
  CMSampleBufferRef v=[video copyNextSampleBuffer],a=[audio copyNextSampleBuffer];
  NSMutableArray*reports=[NSMutableArray array];double lastQR=-1e30;
@@ -36,8 +39,14 @@ int main(int argc,char**argv){@autoreleasepool{
     }
    }else [processor observeQR:testQR timeMs:0];
   }
-  NSDictionary*report=[processor poll];if(report){[reports addObject:report];if([report[@"kind"] isEqual:@"calibration"])break;}
+  NSDictionary*report=nil;
+  if(snapshots){
+   AVSyncStreamAnalyzer *snapshot=[processor liveSnapshotForPolling];
+   if(snapshot){report=[snapshot poll];assert([processor acceptLiveAnalysis:snapshot]);if(!retainedSnapshot){retainedSnapshot=snapshot;retainedPicture=[snapshot pictureObservation];}}
+  }else report=[processor poll];
+  if(report){[reports addObject:report];if([report[@"kind"] isEqual:@"calibration"])break;}
  }
+ if(snapshots){assert(retainedSnapshot);if(testQR){auto other=avsync::parse_qr_payload(testQR.UTF8String);assert(other);other->source_id^=1;other->test_id="other-source";[processor observeQR:[NSString stringWithUTF8String:avsync::qr_payload_json(*other).c_str()] timeMs:999999];assert(![processor acceptLiveAnalysis:retainedSnapshot]);}[processor reset];assert([retainedPicture isEqual:[retainedSnapshot pictureObservation]]);}
  if(v)CFRelease(v);if(a)CFRelease(a);
  NSData*json=[NSJSONSerialization dataWithJSONObject:reports options:0 error:nil];puts([[NSString alloc]initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
  return 0;

@@ -1,5 +1,18 @@
 # Changelog
 
+## Mobile 2.0.8 (2026-11-01)
+
+- Calibration review plays recorded frames with the audio clock: waveform-side
+  play/pause, blue playback cursor, tap-to-seek, video playback and accelerated
+  held-arrow frame stepping. Save always uses an original captured frame time.
+  Crop live review audio/waveform to the retained frame window with its exact
+  capture-time offset; retain both sides of the detected contact.
+- Move live audio-timecode scanning and report DSP off the serial capture queue.
+  One deep snapshot at a time preserves timestamps and bounded packet history;
+  route/reset/source changes discard stale results. Add snapshot cost/delivery
+  age diagnostics and include worker delay when displaying reading age.
+  Physical jitter improvement still requires an iPhone/player comparison.
+
 ## 2.0.7 (2026-10-31)
 
 - Video arrival is stamped by a watch thread that polls the video flow head every 0.5 ms (as audio since 2.0.5), not by the analyzer's main loop after it got the grain. A loop that was busy (QR or timecode decode, catching up) when the writer committed stamped the grain late, by up to the remaining work, and a fixed phase between that work and the writer's 20 ms commits could hold for minutes: the two modes on the platform (video 8.6 vs 15.8 ms median, p95 14 vs 31). Lab, analyzer under CPU and memory load: video arrival vs timestamp p50/p95 −16.4 / −11.4 ms → −18.6 / −18.0 ms (the generator commits at about −18.9).

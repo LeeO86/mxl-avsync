@@ -609,7 +609,8 @@ public:
     void observe_qr(const QrDetection& detection, double capture_ms);
     void set_calibration(const CalibrationRecord& record, std::string_view os_version, int64_t now_unix_ms);
     void push_video(const uint16_t* luma, int width, int height, int stride, double frame_start_ms, double readout_ms);
-    void push_audio(const float* samples, size_t count, double start_ms, int sample_rate);
+    void push_audio(const float* samples, size_t count, double start_ms, int sample_rate, bool defer_timecode_scan = false);
+    void merge_audio_analysis(const PhoneSession& analyzed);
     bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
     void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms);
     PhoneReport finish(const std::string& test_id = "PHONE");

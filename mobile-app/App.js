@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Image, Linking, Modal, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, Switch, Text, TextInput, View } from 'react-native';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { Audio } from 'expo-av';
+import CalibrationReview from './components/CalibrationReview';
 import { requireNativeViewManager } from 'expo-modules-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import native from './modules/avsync';
@@ -12,7 +12,7 @@ import { generatorOptions } from './src/generator.mjs';
 import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
 import { applyTimeReference, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, measurementSourceKey, referenceSummary, synchronizeClock } from './src/time-reference.mjs';
 import { offsetText, measureSentence, formatResultWhen } from './src/measure.mjs';
-import { validCalibration, calibrationSummary, makeCalibration, nearestFrame } from './src/workflow.mjs';
+import { validCalibration, calibrationSummary, makeCalibration } from './src/workflow.mjs';
 
 const NativeCamera = native?.supportsLiveCapture?.() ? requireNativeViewManager('Avsync') : null;
 const bg = '#121417', ink = '#e7ecf1', muted = '#9aa7b5', orange = '#ffc26b';
@@ -79,32 +79,6 @@ function GeneratorPanel({ rate, onRate, onStart, busy, clock, checking, clockErr
 }
 function initialState() { try { return JSON.parse(native?.loadState() || 'null') || { calibration: null, results: [] }; } catch { return { calibration: null, results: [] }; } }
 
-function Waveform({ take }) {
- const values = take.waveform || [], max = Math.max(0.001, ...values);
- return <View style={{ height: 60, marginTop: 10, justifyContent: 'center' }}>
-  <View style={{ flexDirection: 'row', alignItems: 'center', height: 56 }}>{values.map((v, i) => <View key={i} style={{ flex: 1, height: Math.max(2, v / max * 54), backgroundColor: '#7aa2ff', marginRight: 1 }} />)}</View>
-  <View style={{ position: 'absolute', left: `${Math.min(100, Math.max(0, (take.spikeTimeMs - (take.waveformStartMs || 0)) / (take.waveformDurationMs || take.durationMs) * 100))}%`, width: 2, top: 0, bottom: 0, backgroundColor: orange }} />
- </View>;
-}
-
-function CalibrationReview({ take, onSave, onRepeat, onCancel }) {
- const [selected, setSelected] = useState(() => nearestFrame(take.frames, take.spikeTimeMs));
- const sound = useRef(null);
- useEffect(() => () => { sound.current?.unloadAsync(); }, []);
- const frame = take.frames[selected], delta = frame.timeMs - take.spikeTimeMs;
- const replay = async () => { await sound.current?.unloadAsync(); const result = await Audio.Sound.createAsync({ uri: take.uri }, { shouldPlay: true }); sound.current = result.sound; };
- return <ScrollView contentContainerStyle={{ padding: 20 }}>
-  <Text style={{ ...text, fontSize: 22 }}>Match the sound</Text>
-  <Text style={{ color: muted, lineHeight: 21, marginVertical: 10 }}>Select the first frame where the hands or object make contact. There are frames on BOTH sides of the sound.</Text>
-  <Image source={{ uri: frame.uri }} resizeMode="contain" style={{ width: '100%', height: 280, backgroundColor: '#000', borderRadius: 12 }} />
-  <View style={{ flexDirection: 'row', gap: 12 }}><View style={{ flex: 1 }}><Button title="← Previous" disabled={!selected} onPress={() => setSelected(i => i - 1)} /></View><View style={{ flex: 1 }}><Button title="Next →" disabled={selected === take.frames.length - 1} onPress={() => setSelected(i => i + 1)} /></View></View>
-  <Text style={{ ...text, marginTop: 10 }}>Frame {selected + 1}/{take.frames.length} · {delta >= 0 ? '+' : ''}{delta.toFixed(1)} ms from sound</Text>
-  <Text style={{ color: muted }}>{take.framesBefore ?? take.frames.filter(f => f.timeMs < take.spikeTimeMs).length} before · {take.framesAfter ?? take.frames.filter(f => f.timeMs > take.spikeTimeMs).length} after · {take.fps.toFixed(0)} fps</Text>
-  <Waveform take={take} />
-  <Text style={text}>Correction {offsetText(take.spikeTimeMs - frame.timeMs)}</Text>
-  <Button title="Replay sound" onPress={replay} /><Button title="Save calibration" onPress={() => onSave(selected)} /><Button title="Repeat" onPress={onRepeat} /><Button title="Cancel" onPress={onCancel} />
- </ScrollView>;
-}
 
 export default function App() {
  const [session, setSession] = useState(initialState);
@@ -112,6 +86,7 @@ export default function App() {
  const [generating, setGenerating] = useState(false), [pickingImage, setPickingImage] = useState(false);
  const generatorImage = useMemo(() => session.generatorImageId && native?.generatorImageInfo ? native.generatorImageInfo(session.generatorImageId) : null, [session.generatorImageId]);
  const [settings, setSettings] = useState(false), [flow, setFlow] = useState(null), [take, setTake] = useState(null);
+ useEffect(() => { const preview=native?.calibrationPreview?.();if(preview){setTake(JSON.parse(preview));setFlow('review');} }, []);
  const [running, setRunning] = useState(true), [status, setStatus] = useState({ message: 'Looking for test signal…' }), [notice, setNotice] = useState(null);
  const [foreground, setForeground] = useState(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
  const [cameraPermission, requestCamera] = useCameraPermissions(), [micPermission, requestMic] = useMicrophonePermissions();
@@ -122,7 +97,7 @@ export default function App() {
  const clockGeneration = useRef(0), clockInFlight = useRef(false);
  const [clockCheck, setClockCheck] = useState(null), [clockBusy, setClockBusy] = useState(false), [clockError, setClockError] = useState(null);
  useEffect(() => { const timer = setInterval(() => setTick(performance.now()), 200); return () => clearInterval(timer); }, []);
- const age = Math.max(0, tick - lastReportAt.current);
+ const age = Math.max(0, tick - lastReportAt.current) + Math.max(0, status.analysisDelayMs || 0);
  const live = readingSnapshot?.reading || null;
  const readingView = readingPresentation(readingSnapshot, status, age, tick, running && !flow);
  const feedback = signalFeedback(status, age, running && !flow);
@@ -252,7 +227,7 @@ export default function App() {
        <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:8}}>{CAPTURE_RATES.map(fps => <Pressable key={fps} accessibilityRole="button" accessibilityLabel={`Camera ${captureRateLabel(fps)}`} accessibilityState={{selected:captureRate(session)===fps,disabled:Boolean(flow)}} disabled={Boolean(flow)} onPress={() => {setReadingSnapshot(null);setStatus({});setSession(previous=>({...previous,captureFps:fps}));setNotice('Capture rate changed · wait for fresh events');}} style={{padding:9,borderRadius:8,backgroundColor:captureRate(session)===fps ? '#386779' : '#2a3644',opacity:flow ? 0.4 : 1}}><Text style={text}>{captureRateLabel(fps)}</Text></Pressable>)}</View>
        <Text style={{color:muted,fontSize:11,marginTop:6}}>120 fps comparison default · lower load, 8.3 ms frame interval. Maximum uses the fastest supported mode. A rate change starts a fresh measurement and may make the saved calibration inactive.</Text>
        <Text style={{color:muted,fontSize:11,marginTop:6}}>{captureStatus(status)} · {status.captureContext?.cameraMode || 'format pending'}</Text>
-       {status.captureStats && <Text style={{color:muted,fontSize:11,marginTop:4}}>Max frame gap {status.captureStats.maxFrameGapMs?.toFixed(1)} ms · drop callbacks {status.captureStats.dropCallbacks} · poll max {status.captureStats.pollProcessingMaxMs?.toFixed(1)} ms</Text>}
+       {status.captureStats && <Text style={{color:muted,fontSize:11,marginTop:4}}>Max frame gap {status.captureStats.maxFrameGapMs?.toFixed(1)} ms · drop callbacks {status.captureStats.dropCallbacks} · analysis max {status.captureStats.pollProcessingMaxMs?.toFixed(1)} ms</Text>}
       </View>
       <Text style={{ color: muted, fontSize: 12, marginTop: 12 }}>Latency uses matching live source TAI timestamps and the selected phone clock. Capture and source clock accuracy are unknown. Clock synchronization corrects UTC mapping only; it does not calibrate capture or physical source output.</Text><View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}><Text style={{ color: ink, flex: 1 }}>Source TAI−UTC (seconds)</Text><TextInput accessibilityLabel="Source TAI minus UTC seconds" keyboardType="number-pad" value={taiDraft} onChangeText={value => { if (/^\d{0,3}$/.test(value)) setTaiDraft(value); }} style={{ color: ink, backgroundColor: '#121417', borderRadius: 6, padding: 8, minWidth: 48, textAlign: 'center' }} /><Pressable accessibilityRole="button" disabled={!taiDraft || Number(taiDraft) > 100} onPress={() => { setSession(previous => ({ ...previous, taiUtcSeconds: Number(taiDraft) })); setStatus(previous => ({ ...previous, latency: { state: 'waiting_for_live_qr' } })); }} style={{ padding: 8 }}><Text style={{ color: !taiDraft || Number(taiDraft) > 100 ? muted : orange }}>Apply</Text></Pressable></View><View style={{marginVertical: 12}}>
        <Text style={text}>Time reference · {Platform.OS === 'android' ? 'GNSS' : 'NTP'}</Text>

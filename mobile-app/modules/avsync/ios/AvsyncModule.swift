@@ -8,6 +8,12 @@ public class AvsyncModule: Module {
   public func definition() -> ModuleDefinition {
     Name("Avsync")
     Function("supportsLiveCapture") { true }
+    #if DEBUG || AVSYNC_UI_TESTS
+    Function("calibrationPreview") { () -> String? in
+      guard let path=ProcessInfo.processInfo.environment["AVSYNC_CALIBRATION_PREVIEW"] else { return nil }
+      return try? String(contentsOfFile:path,encoding:.utf8)
+    }
+    #endif
     Function("setScreenAwake") { (active: Bool) in self.screenAwake.setActive(active) }
     Function("solveDeviceCalibration") { (input: [String:Double]) -> [AnyHashable:Any] in
       AVSyncDeviceCalibration.solve(input)
