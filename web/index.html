@@ -178,7 +178,7 @@
       </div>
       <div v-if="role=='generator' && status.emit_offsets" class="card" style="margin-top:.9rem" data-testid="emit-offsets">
         <h3>Emit offsets (commit time vs timestamp)</h3>
-        <p class="note">MXL readers read by timestamp, so the generator commits early. Analyzers subtract these to show chain latency.</p>
+        <p class="note">MXL readers read by timestamp, so the generator commits early. Enter these on each analyzer (AVSYNC_SOURCE_EMIT_VIDEO_MS / AVSYNC_SOURCE_EMIT_AUDIO_MS) for an absolute latency.</p>
         <dl class="kv">
           <dt>Video</dt><dd>{{ ms1(status.emit_offsets.video_ms) }} (lead {{ status.emit_offsets.video_lead_ms }} ms)</dd>
           <dt>Video measured p50 / max</dt><dd>{{ ms1(status.emit_offsets.video_commit_vs_timestamp_ms?.p50) }} / {{ ms1(status.emit_offsets.video_commit_vs_timestamp_ms?.max) }}</dd>
