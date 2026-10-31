@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.7 (unreleased)
+## 2.0.7 (2026-10-31)
 
 - Video arrival is stamped by a watch thread that polls the video flow head every 0.5 ms (as audio since 2.0.5), not by the analyzer's main loop after it got the grain. A loop that was busy (QR or timecode decode, catching up) when the writer committed stamped the grain late, by up to the remaining work, and a fixed phase between that work and the writer's 20 ms commits could hold for minutes: the two modes on the platform (video 8.6 vs 15.8 ms median, p95 14 vs 31). Lab, analyzer under CPU and memory load: video arrival vs timestamp p50/p95 −16.4 / −11.4 ms → −18.6 / −18.0 ms (the generator commits at about −18.9).
 - Finer histogram buckets. `latency_abs_seconds`: 1 ms steps to 10 ms, 5 ms to 60 ms, 10 ms from 400 to 600 ms (59 buckets + Inf); `histogram_quantile` p50 on a 495 ms SRT path now reads 495 (was 350), on 42.7 ms mixer audio 42.6 (was 35.0). `av_offset_seconds`: steps of 0.5–10 ms near 0 next to the grade edges (33 buckets + Inf). All earlier `le` values stay.
