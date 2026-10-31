@@ -56,7 +56,8 @@ class Handler(BaseHTTPRequestHandler):
             status = json.load(urllib.request.urlopen(gapi + "/api/v1/status", timeout=2))
             emit = status["emit_offsets"]
             flow = self.path[len(prefix):]
-            for key, offset in (("video_flow", emit["video_ms"]), ("audio_flow", emit["audio_ms"])):
+            # The real tag is set once at registration from the nominal values.
+            for key, offset in (("video_flow", emit["video_ms"]), ("audio_flow", emit["audio_nominal_ms"])):
                 if status.get(key) == flow:
                     return self.send(200, {"id": flow, "tags": {TAG: ["%g" % offset]}})
         self.send(404, {"code": 404})
@@ -93,7 +94,7 @@ assert m["latency_basis"] == "relative to the source timestamp" and "video_laten
 assert m["source_emit_offsets"]["source"] == "none" and m["clock"]["source"] == "url" and m["clock"]["accuracy_ms"] == 0.004048, m
 assert all("video_latency_abs_ms" not in e for e in events())
 gen = get(gapi + "/api/v1/status")["emit_offsets"]
-assert gen["video_ms"] == -20 and gen["audio_ms"] == -25 and gen["nmos_tag"] == "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0", gen
+assert gen["video_ms"] == -20 and gen["audio_nominal_ms"] == -25 and gen["nmos_tag"] == "urn:x-mxl:tag:avsync-emit-offset-ms/v1.0", gen
 assert gen["video_commit_vs_timestamp_ms"]["p50"] < 0, gen
 # The 2.0.2 tag of the directly connected generator flow (read from the Query API) gives the offsets.
 os.remove(hide)
@@ -102,26 +103,35 @@ deadline = time.time() + 45  # the lookup refreshes every 30 s
 while time.time() < deadline and len(tagged) < 4:
     time.sleep(1)
     tagged = [e for e in events() if e.get("video_latency_abs_ms") is not None]
-assert len(tagged) >= 4 and all(e["video_source_emit_offset_ms"] == -20 for e in tagged), tagged[:1]
+assert len(tagged) >= 4 and all(e["video_source_emit_offset_ms"] == -20 and e["audio_source_emit_offset_ms"] == -25 for e in tagged), tagged[:1]
+# Tag (nominal -25): the direct link reads audio chain about +1 ms, never a mismatch.
+chains = sorted(e["audio_chain_latency_ms"] for e in tagged)
+assert 0 <= chains[len(chains) // 2] <= 2 and all("emit_offset_mismatch" not in e.get("flags", []) for e in tagged), chains
 m = get(aapi + "/api/v1/measurement")
 assert m["source_emit_offsets"]["source"] == "nmos-tag" and m["source_emit_offsets"]["video_source"] == "nmos-tag" and m["latency_basis"] == "absolute", m
 # Entered values win over the tag (here the same numbers, so the source label is what changes).
 
+gen = get(gapi + "/api/v1/status")["emit_offsets"]
+# Each event's audio onset is committed at a fixed offset: within 1.5 ms of the nominal, spread under 1 ms.
+onset = gen["audio_commit_vs_onset_ms"]
+assert -25 <= onset["p50"] <= -23.5 and onset["max"] - onset["min"] < 1.0 and abs(gen["audio_ms"] - onset["p50"]) < 0.01, gen
 assert patch(aapi + "/api/v1/config", {"AVSYNC_SOURCE_EMIT_VIDEO_MS": str(gen["video_ms"]), "AVSYNC_SOURCE_EMIT_AUDIO_MS": str(gen["audio_ms"])}) in (200, 204)
 since = time.time()
 absolute = []
 deadline = time.time() + 30
 while time.time() < deadline and len(absolute) < 6:
     time.sleep(1)
-    absolute = [e for e in events() if e.get("video_latency_abs_ms") is not None and e.get("audio_latency_abs_ms") is not None]
+    absolute = [e for e in events() if e.get("video_latency_abs_ms") is not None and e.get("audio_latency_abs_ms") is not None and abs(e.get("audio_source_emit_offset_ms", 0) - gen["audio_ms"]) < 1e-9]
 assert len(absolute) >= 6, f"only {len(absolute)} events with absolute latency"
 for e in absolute:
-    assert e["video_source_emit_offset_ms"] == -20 and e["audio_source_emit_offset_ms"] == -25, e
+    assert e["video_source_emit_offset_ms"] == -20 and abs(e["audio_source_emit_offset_ms"] - gen["audio_ms"]) < 1e-9, e
     assert e["video_latency_abs_ms"] >= 0 and e["audio_latency_abs_ms"] >= 0, e
     assert abs(e["video_chain_latency_ms"] - (e["video_latency_ms"] + 20)) < 1e-6, e
     # Direct path: the chain adds only the analyzer's own read time (video) and the audio block (audio).
     assert e["video_latency_abs_ms"] <= 25 and e["audio_latency_abs_ms"] <= 25, e
     assert e["latency_abs_clock_accuracy_known"] is True and abs(e["video_latency_abs_uncertainty_ms"] - 1.004048) < 1e-6, e
+    # Entered = the generator's measured onset commit: the direct link reads audio chain 0..+1 ms.
+    assert -0.5 <= e["audio_chain_latency_ms"] <= 1.5, e
     assert "emit_offset_mismatch" not in e.get("flags", []), e
 m = get(aapi + "/api/v1/measurement")
 assert m["latency_basis"] == "absolute" and m["source_emit_offsets"]["source"] == "entered" and "video_latency_abs_ms" in m, m

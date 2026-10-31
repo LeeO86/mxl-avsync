@@ -17,13 +17,38 @@ unchanged from 2.0.4.
 - **Never negative.** A value below 0 but within its uncertainty is 0
   ("0 ± u"). Further below 0 there is no value, and the event gets the flag
   `emit_offset_mismatch`: the entered emit offset or the clock is wrong.
-- **Uncertainty.** Video 1 ms, audio 6 ms (1 ms plus half the generator's
-  10 ms audio block), plus the clock accuracy when the clock reports one.
+- **Uncertainty.** Video 1 ms, audio 1.5 ms, plus the clock accuracy when the
+  clock reports one.
   With a kernel clock on a phc2sys host the accuracy is unknown; the value is
   then shown with "accuracy unknown (not in ±)".
 - **Diagnostics.** "Arrival vs timestamp", the entered emit offsets and the
   raw (signed) chain latency are on a separate Diagnostics card and stay in
   the API. Existing fields keep their names and values.
+
+## Exact audio emit offset
+
+The 2.0.4 bench read an audio chain latency of −2.1 ms median (p5 −4.4,
+p95 +4.8) on the direct link. Two causes, both fixed:
+
+- **Generator.** Audio went out in 10 ms blocks, so an event's onset was
+  committed anywhere within a block of the nominal −25 ms. The audio writer
+  now ends the block before each event onset and commits the onset at exactly
+  `−(AVSYNC_AUDIO_LEAD_MS + 5 ms)`. Measured: −24.2 ms (spread under 0.1 ms;
+  about 0.8 ms for the write itself). `/api/v1/status` `emit_offsets` adds
+  `audio_commit_vs_onset_ms` (p50, min, max of the last 100 events).
+  `audio_ms` is that measured p50 once ten onsets are known, and
+  `audio_nominal_ms` is the nominal value, which is also what the NMOS tag
+  carries.
+- **Analyzer.** Audio arrival was estimated from the main loop's read time,
+  which reads audio only after video grains. A second reader now polls the
+  audio flow head every 0.5 ms and stamps each sample with the commit it saw.
+- **Lab, direct link:** audio chain median +1.09 ms (p5 0.87, p95 1.31) at
+  offsets 0 and 35 ms with the nominal −25. With the measured value copied
+  from the status it is about +0.3 ms. No `emit_offset_mismatch`. The audio
+  uncertainty is now 1.5 ms (was 6).
+- **Mixed versions:** a 2.0.4 generator still emits audio −20 to −30 ms early.
+  A 2.0.5 analyzer can then flag `emit_offset_mismatch` for audio. Upgrade the
+  generator together with the analyzers.
 
 ## Where the source emit offsets come from
 

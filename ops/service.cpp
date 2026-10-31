@@ -97,6 +97,8 @@ struct Runtime {
     double render_sum_s = 0;
     std::vector<double> video_commit_ms; // generator: last grains, commit time - grain timestamp
     size_t video_commit_next = 0;
+    std::vector<double> audio_onset_commit_ms; // generator: last event onsets, commit time - content time
+    size_t audio_onset_next = 0;
     SourceEmitOffsets tag_emit; // analyzer: from the NMOS Query API tags of the flows it reads (2.0.2)
     std::string tag_emit_video_flow;
     std::string tag_emit_audio_flow;
@@ -133,12 +135,19 @@ double percentile(std::vector<double> values, double p)
 // Generator: its own emit offsets (commit time - content timestamp), for the operator to enter on analyzers.
 nlohmann::json emit_offsets_json(const Runtime& rt)
 {
-    nlohmann::json body = {{"video_ms", video_emit_offset_ms(rt.config.video_lead_ms)}, {"audio_ms", audio_emit_offset_ms(rt.config.audio_lead_ms)},
+    // Audio: the measured commit time of the event onsets once there are ten, else the nominal value.
+    const double audio_nominal = audio_emit_offset_ms(rt.config.audio_lead_ms);
+    const double audio_ms = rt.audio_onset_commit_ms.size() >= 10 ? std::round(percentile(rt.audio_onset_commit_ms, 0.5) * 100.0) / 100.0 : audio_nominal;
+    nlohmann::json body = {{"video_ms", video_emit_offset_ms(rt.config.video_lead_ms)}, {"audio_ms", audio_ms}, {"audio_nominal_ms", audio_nominal},
         {"video_lead_ms", rt.config.video_lead_ms}, {"audio_lead_ms", rt.config.audio_lead_ms}, {"audio_block_ms", kAudioBlockMs},
         {"nmos_tag", kEmitOffsetTag}};
     if (!rt.video_commit_ms.empty()) {
         body["video_commit_vs_timestamp_ms"] = {{"grains", rt.video_commit_ms.size()}, {"p50", percentile(rt.video_commit_ms, 0.5)},
             {"p99", percentile(rt.video_commit_ms, 0.99)}, {"max", percentile(rt.video_commit_ms, 1.0)}};
+    }
+    if (!rt.audio_onset_commit_ms.empty()) {
+        body["audio_commit_vs_onset_ms"] = {{"events", rt.audio_onset_commit_ms.size()}, {"p50", percentile(rt.audio_onset_commit_ms, 0.5)},
+            {"min", percentile(rt.audio_onset_commit_ms, 0.0)}, {"max", percentile(rt.audio_onset_commit_ms, 1.0)}};
     }
     return body;
 }
@@ -1228,6 +1237,16 @@ int run_service(Config config)
             }
             rt.render_count += 1;
             rt.render_sum_s += seconds;
+        };
+        callbacks.audio_onset_commit = [&](double ms) {
+            std::lock_guard lock(rt.mu);
+            constexpr size_t keep = 100;
+            if (rt.audio_onset_commit_ms.size() < keep) {
+                rt.audio_onset_commit_ms.push_back(ms);
+            } else {
+                rt.audio_onset_commit_ms[rt.audio_onset_next] = ms;
+            }
+            rt.audio_onset_next = (rt.audio_onset_next + 1) % keep;
         };
         callbacks.video_commit = [&](double ms) {
             std::lock_guard lock(rt.mu);

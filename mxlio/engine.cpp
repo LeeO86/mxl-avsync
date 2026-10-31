@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <filesystem>
 #include <mutex>
 #include <cmath>
@@ -123,6 +124,20 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     // It wakes every 10 ms block and fills the flow up to one block past AVSYNC_AUDIO_LEAD_MS:
     // every sample is committed between the lead and the lead plus one block before its timestamp.
     std::atomic<bool> audio_stop{false};
+    // The planned events around an audio sample index (two before, three after).
+    auto events_near = [&](const Config& cfg, uint64_t sample) {
+        const Rate rate{48000, 1};
+        PlanConfig plan = plan_from(cfg, *format);
+        const Period period = plan_period(*format, cfg.event_rate);
+        const uint64_t centre_grain = index_at(pace, time_of_index(rate, sample));
+        uint64_t seq = centre_grain / static_cast<uint64_t>(std::max(1, period.grains));
+        seq = seq > 2 ? seq - 2 : 0;
+        std::vector<PlannedEvent> events;
+        for (int extra = 0; extra < 6; ++extra) {
+            events.push_back(live_event(plan, seq + static_cast<uint64_t>(extra)));
+        }
+        return events;
+    };
     std::thread audio_thread([&, status] () mutable {
         const Rate audio_rate{48000, 1};
         const uint64_t block_ns = static_cast<uint64_t>(kAudioBlockMs) * 1000000ULL;
@@ -148,28 +163,42 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             if (next_wake <= now) {
                 next_wake += block_ns;
             }
-            const uint64_t target = index_at(audio_rate, next_wake + lead_ns);
+            uint64_t target = index_at(audio_rate, next_wake + lead_ns);
             if (!audio_started) {
                 audio_written = index_at(audio_rate, now + lead_ns);
                 audio_started = true;
+            }
+            // The next event onset (AVS2 packet start, or the legacy chirp centre) is committed at exactly
+            // onset - (lead + half a block): the published audio emit offset. The write before it stops at
+            // the onset, and the thread wakes for the onset's own commit.
+            std::optional<uint64_t> onset;
+            if (!halted && audio_config.audio_enable) {
+                for (const auto& event : events_near(audio_config, audio_written)) {
+                    if (event.audio_sample >= 0 && static_cast<uint64_t>(event.audio_sample) >= audio_written
+                        && (!onset || static_cast<uint64_t>(event.audio_sample) < *onset)) {
+                        onset = static_cast<uint64_t>(event.audio_sample);
+                    }
+                }
+            }
+            bool commit_onset = false;
+            uint64_t onset_ns = 0;
+            if (onset) {
+                onset_ns = time_of_index(audio_rate, *onset);
+                const uint64_t due = onset_ns - std::min(onset_ns, lead_ns + block_ns / 2);
+                if (now + 200000 < due) {
+                    if (target > *onset) target = *onset;
+                    if (due < next_wake) next_wake = due;
+                } else if (onset_ns <= time_of_index(audio_rate, target) + block_ns) {
+                    target = std::max(target, *onset + static_cast<uint64_t>(48 * kAudioBlockMs / 2));
+                    commit_onset = true;
+                }
             }
             if (target > audio_written && max_write > 0) {
                 const int frames = static_cast<int>(std::min<uint64_t>(target - audio_written, 48000));
                 samples.assign(static_cast<size_t>(frames * audio_config.audio_channels), 0.f);
                 if (!halted && audio_config.audio_enable) {
                     PlanConfig plan = plan_from(audio_config, *format);
-                    const Period period = plan_period(*format, audio_config.event_rate);
-                    const uint64_t centre_grain = index_at(pace, time_of_index(audio_rate, audio_written));
-                    uint64_t seq = centre_grain / static_cast<uint64_t>(std::max(1, period.grains));
-                    if (seq > 2) {
-                        seq -= 2;
-                    } else {
-                        seq = 0;
-                    }
-                    std::vector<PlannedEvent> events;
-                    for (int extra = 0; extra < 6; ++extra) {
-                        events.push_back(live_event(plan, seq + static_cast<uint64_t>(extra)));
-                    }
+                    const auto events = events_near(audio_config, audio_written);
                     std::vector<float> mono(static_cast<size_t>(frames));
                     if (plan.timecode_baud) {
                         const auto previous = timecode_writer.skipped();
@@ -187,6 +216,9 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     }
                 }
                 if (domain.write_samples(audio_written + static_cast<uint64_t>(frames), samples.data(), frames, audio_config.audio_channels, max_write)) {
+                    if (commit_onset && onset && *onset >= audio_written && *onset < audio_written + static_cast<uint64_t>(frames) && callbacks.audio_onset_commit) {
+                        callbacks.audio_onset_commit((static_cast<double>(tai_now()) - static_cast<double>(onset_ns)) / 1e6);
+                    }
                     audio_written += static_cast<uint64_t>(frames);
                     if (callbacks.count_audio_grain) {
                         callbacks.count_audio_grain();
@@ -459,6 +491,83 @@ bool acceptable_audio(const FlowDesc& flow)
     return flow.media_type == "audio/float32" && flow.channels > 0;
 }
 
+// Analyzer: when audio samples became readable. A thread with its own MXL reader polls the flow head
+// every half millisecond and keeps (head, time) marks, so an onset's arrival is the commit as seen by a
+// reader, not an estimate from the main loop's read time (which reads audio only after video grains).
+class AudioCommitWatch {
+public:
+    void follow(const std::string& domain_path, const std::string& flow_id)
+    {
+        std::lock_guard lock(mu_);
+        want_domain_ = domain_path;
+        want_flow_ = flow_id;
+    }
+    // TAI ms of the first observed head past `sample`; nothing when not observed (e.g. before the watch opened).
+    std::optional<double> arrival_ms(uint64_t sample) const
+    {
+        std::lock_guard lock(mu_);
+        if (!have_first_ || sample < first_head_) return std::nullopt;
+        for (const auto& mark : marks_) {
+            if (mark.first > sample) return static_cast<double>(mark.second) / 1e6;
+        }
+        return std::nullopt;
+    }
+    void run(const std::atomic<bool>& stop)
+    {
+        Domain domain;
+        std::string open_domain, open_flow;
+        uint64_t last = 0;
+        while (!stop.load()) {
+            std::string domain_path, flow_id;
+            {
+                std::lock_guard lock(mu_);
+                domain_path = want_domain_;
+                flow_id = want_flow_;
+            }
+            if (domain_path != open_domain || flow_id != open_flow) {
+                domain.close();
+                open_domain.clear();
+                open_flow.clear();
+                {
+                    std::lock_guard lock(mu_);
+                    marks_.clear();
+                    have_first_ = false;
+                }
+                std::string error;
+                if (!flow_id.empty() && domain.open(domain_path, &error) && domain.create_audio_reader(flow_id, nullptr, nullptr, &error)) {
+                    open_domain = domain_path;
+                    open_flow = flow_id;
+                    last = domain.audio_head();
+                    std::lock_guard lock(mu_);
+                    first_head_ = last;
+                    have_first_ = true;
+                } else {
+                    domain.close();
+                }
+            }
+            if (!open_flow.empty()) {
+                const uint64_t head = domain.audio_head();
+                if (head != last) {
+                    last = head;
+                    const uint64_t now = tai_now();
+                    std::lock_guard lock(mu_);
+                    marks_.emplace_back(head, now);
+                    while (marks_.size() > 1000) marks_.pop_front(); // > 2 s of 10 ms commits
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
+        domain.close();
+    }
+
+private:
+    mutable std::mutex mu_;
+    std::string want_domain_, want_flow_;
+    std::deque<std::pair<uint64_t, uint64_t>> marks_;
+    uint64_t first_head_ = 0;
+    bool have_first_ = false;
+};
+
 void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
 {
     Domain video_domain;
@@ -508,7 +617,10 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     ResultCaption caption;
     std::thread result_thread(run_result_writer, std::ref(stop), std::ref(callbacks), std::ref(caption));
 
+    AudioCommitWatch audio_watch;
+    std::thread audio_watch_thread([&] { audio_watch.run(stop); });
     auto close_readers = [&] {
+        audio_watch.follow("", "");
         video_domain.close();
         audio_domain.close();
         have_cursor = false;
@@ -632,6 +744,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 && video_domain.create_video_reader(video.flow_id, &video, &pace, &grain_rows, &grain_count, &error)
                 && audio_domain.open(audio.domain_path, &error)
                 && audio_domain.create_audio_reader(audio.flow_id, &audio_channels, &max_read, &error)) {
+                audio_watch.follow(audio.domain_path, audio.flow_id);
                 if (video.interlaced && video.height % 2 != 0) {
                     status.state = "format_mismatch";
                     status.detail = "odd interlaced height";
@@ -917,6 +1030,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                             static_cast<int64_t>(audio_cursor) + relative_sample));
                         observation.have_grain_time = true;
                         observation.grain_tai_ns = static_cast<int64_t>(time_of_index(Rate{48000, 1}, sample_index));
+                        if (const auto seen = audio_watch.arrival_ms(sample_index)) observation.arrival_ms = *seen;
                         pairer->observe_audio(observation);
                     }
                 }
@@ -957,6 +1071,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     const auto sample_index = static_cast<uint64_t>(std::llround(std::max(0.0, hit.sample_pos)));
                     heard_hit.have_grain_time = true;
                     heard_hit.grain_tai_ns = static_cast<int64_t>(time_of_index(Rate{48000, 1}, sample_index));
+                    if (const auto seen = audio_watch.arrival_ms(sample_index)) heard_hit.arrival_ms = *seen;
                     pairer->observe_audio(heard_hit);
                 }
                 audio_cursor += static_cast<uint64_t>(frames);
@@ -1009,6 +1124,9 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
     }
     close_readers();
+    if (audio_watch_thread.joinable()) {
+        audio_watch_thread.join();
+    }
     if (result_thread.joinable()) {
         result_thread.join();
     }
