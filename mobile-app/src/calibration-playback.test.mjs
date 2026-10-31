@@ -13,9 +13,9 @@ test('review and seeks use capture timestamps with a nonzero WAV origin and unev
 });
 test('shared audio/video playback, pause/seek, per-frame selection, end and replay',async()=>{
  const sound=fake();let now=0;const driver=new CalibrationPlayback(take,sound.create,()=>{},()=>now);
- driver.toggle();await turn();assert.equal(driver.playing,true);assert.equal(sound.commands[0].positionMillis,60);
- now=20;driver.tick();assert.equal(driver.position,1075);
- driver.step(-1);await turn();assert.equal(driver.playing,false);assert.equal(driver.position,1010);
+ driver.toggle();await turn();assert.equal(driver.playing,true);assert.equal(sound.commands[0].positionMillis,5);
+ now=20;driver.tick();assert.equal(driver.position,1020);
+ driver.step(-1);await turn();assert.equal(driver.playing,false);assert.equal(driver.position,1000);
  driver.seek(1100);await turn();driver.toggle();await turn();assert.equal(driver.position,1000);assert.equal(driver.playing,true);
  now+=110;driver.tick();await turn();assert.equal(driver.position,1100);assert.equal(driver.playing,false);
  driver.dispose();await turn();assert.equal(sound.unloads,1);
@@ -29,10 +29,15 @@ test('fast held-arrow seeks coalesce while loading, and disposal cancels late lo
 });
 test('buffering stops extrapolation and explicit errors keep manual frames usable',async()=>{
  const sound=fake();let now=0;const driver=new CalibrationPlayback(take,sound.create,()=>{},()=>now);driver.toggle();await turn();sound.emit({isLoaded:true,isPlaying:false,isBuffering:true,positionMillis:60});now=500;driver.tick();assert.equal(driver.position,1055);driver.dispose();
- const failed=new CalibrationPlayback(take,async()=>{throw Error('fixture failure');},()=>{});failed.toggle();await turn();assert.equal(failed.playing,false);assert.match(failed.error,/fixture failure/);failed.step(1);assert.equal(failed.snapshot().selected,3);failed.dispose();
+ const failed=new CalibrationPlayback(take,async()=>{throw Error('fixture failure');},()=>{});failed.toggle();await turn();assert.equal(failed.playing,false);assert.match(failed.error,/fixture failure/);failed.step(1);assert.equal(failed.snapshot().selected,1);failed.dispose();
 });
 
 test('waveform geometry preserves original bin positions when the review window is cropped',()=>{
  const bins=waveformBins({waveform:[.1,.8,.2],waveformStartMs:900,waveformDurationMs:300,waveformBinDurationMs:100},{start:1050,end:1150});
  assert.deepEqual(bins,[{value:.8,left:0,width:50},{value:.2,left:50,width:50}]);
+});
+
+test('initial playback includes the contact even if the preset selected frame is just after it',async()=>{
+ const sound=fake();const driver=new CalibrationPlayback(take,sound.create,()=>{});
+ assert.ok(driver.position>take.spikeTimeMs);driver.toggle();await turn();assert.ok(driver.position<take.spikeTimeMs);driver.seek(1055);await turn();driver.toggle();await turn();assert.equal(driver.position,1055);await driver.dispose();
 });

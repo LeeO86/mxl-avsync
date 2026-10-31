@@ -86,7 +86,8 @@ toward displayed reading age. No numerical jitter suppression was added.
 
 The waveform's left play/pause and the video overlay control the same recorded
 audio/video preview. Blue is playback position; orange marks the detected sound.
-Tap the waveform to seek, or hold a frame arrow to repeat one-frame steps with
+The first play starts at the clip beginning so the contact is audible; after
+a manual seek it starts at the chosen position. Tap the waveform to seek, or hold a frame arrow to repeat one-frame steps with
 acceleration. Stepping pauses playback; pause before saving the selected frame.
 The preview uses original captured images/timestamps and the WAV time origin,
 including nonzero audio/video start offsets. Live calibration exports a clipped

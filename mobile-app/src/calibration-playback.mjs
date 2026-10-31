@@ -17,17 +17,17 @@ export class CalibrationPlayback {
  constructor(take,createSound,onChange,now=()=>performance.now()) {
   Object.assign(this,{take,createSound,onChange,now});this.timeline=reviewTimeline(take);
   this.position=clamp(take.frames[nearestFrame(take.frames,take.spikeTimeMs)].timeMs,this.timeline.start,this.timeline.end);
-  this.playing=false;this.clockRunning=false;this.closed=false;this.revision=0;this.pending=null;this.busy=false;
+  this.playing=false;this.clockRunning=false;this.playFromStart=true;this.closed=false;this.revision=0;this.pending=null;this.busy=false;
  }
  snapshot(){return {position:this.position,selected:nearestFrame(this.take.frames,this.position),playing:this.playing,error:this.error};}
  notify(){if(!this.closed)this.onChange(this.snapshot());}
  seek(position,playing=false){
   if(this.closed)return;
-  this.position=clamp(position,this.timeline.start,this.timeline.end);this.playing=playing;this.clockRunning=false;this.error=null;
+  this.playFromStart=false;this.position=clamp(position,this.timeline.start,this.timeline.end);this.playing=playing;this.clockRunning=false;this.error=null;
   this.pending={position:this.position,playing,revision:++this.revision};this.notify();if(!this.busy)this.job=this.pump();
  }
  step(direction){const i=clamp(this.snapshot().selected+direction,0,this.take.frames.length-1);this.seek(this.take.frames[i].timeMs);}
- toggle(){this.seek(this.position>=this.timeline.end-1 && !this.playing ? this.timeline.start : this.position,!this.playing);}
+ toggle(){this.seek(!this.playing && (this.playFromStart || this.position>=this.timeline.end-1) ? this.timeline.start : this.position,!this.playing);}
  tick(){
   if(!this.clockRunning||this.busy||!this.playing||this.closed)return;
   this.position=clamp(this.anchor.position+this.now()-this.anchor.at,this.timeline.start,this.timeline.end);

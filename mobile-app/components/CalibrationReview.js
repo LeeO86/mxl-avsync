@@ -36,7 +36,7 @@ export default function CalibrationReview({take,onSave,onRepeat,onCancel}){
  },[take]);
  const exit=async action=>{if(closing.current)return;closing.current=true;setLeaving(true);stopHold();const selected=controller.current?.snapshot().selected ?? state.selected;await controller.current?.dispose();if(alive.current)action(selected);};
  const stopHold=()=>{if(hold.current)clearTimeout(hold.current);hold.current=null;};
- const startHold=direction=>{stopHold();const started=performance.now();controller.current?.step(direction);const repeat=()=>{controller.current?.step(direction);hold.current=setTimeout(repeat,repeatInterval(performance.now()-started));};hold.current=setTimeout(repeat,350);};
+ const startHold=direction=>{stopHold();const started=performance.now()-250;controller.current?.step(direction);const repeat=()=>{controller.current?.step(direction);hold.current=setTimeout(repeat,repeatInterval(performance.now()-started));};hold.current=setTimeout(repeat,90);};
  const prefetched=useRef(new Set());
  useEffect(()=>{for(const frame of take.frames.slice(Math.max(0,state.selected-2),state.selected+7)){if(!prefetched.current.has(frame.uri)){prefetched.current.add(frame.uri);Image.prefetch(frame.uri).catch(()=>{});}}},[take,state.selected]);
  const frame=take.frames[state.selected],delta=frame.timeMs-take.spikeTimeMs,driver=controller.current;
@@ -46,7 +46,7 @@ export default function CalibrationReview({take,onSave,onRepeat,onCancel}){
   <View><Image source={{uri:frame.uri}} resizeMode="contain" style={{width:'100%',height:280,backgroundColor:'#000',borderRadius:12}}/>
    <Pressable accessibilityRole="button" accessibilityLabel={state.playing?'Pause video':'Play video'} onPress={()=>driver?.toggle()} style={{position:'absolute',right:12,bottom:12,padding:12,borderRadius:24,backgroundColor:'#1c2128e8'}}><Ionicons name={state.playing?'pause':'play'} size={25} color={ink}/></Pressable>
   </View>
-  <View style={{flexDirection:'row',gap:12,marginTop:10}}>{[-1,1].map(direction=><Pressable key={direction} accessibilityRole="button" accessibilityLabel={direction<0?'Previous frame':'Next frame'} accessibilityActions={[{name:'activate'}]} onPressIn={()=>startHold(direction)} onPressOut={stopHold} onAccessibilityAction={()=>controller.current?.step(direction)} style={{flex:1,alignItems:'center',padding:14,borderRadius:8,backgroundColor:'#2a3644',opacity:(direction<0&&state.selected===0||direction>0&&state.selected===take.frames.length-1) ? .45 : 1}}><Ionicons name={direction<0?'chevron-back':'chevron-forward'} size={25} color={ink}/></Pressable>)}</View>
+  <View style={{flexDirection:'row',gap:12,marginTop:10}}>{[-1,1].map(direction=><Pressable key={direction} accessibilityRole="button" accessibilityLabel={direction<0?'Previous frame':'Next frame'} onPress={()=>controller.current?.step(direction)} onLongPress={()=>startHold(direction)} delayLongPress={250} onPressOut={stopHold} style={{flex:1,alignItems:'center',padding:14,borderRadius:8,backgroundColor:'#2a3644',opacity:(direction<0&&state.selected===0||direction>0&&state.selected===take.frames.length-1) ? .45 : 1}}><Ionicons name={direction<0?'chevron-back':'chevron-forward'} size={25} color={ink}/></Pressable>)}</View>
   <Text style={{...text,marginTop:10}}>Frame {state.selected+1}/{take.frames.length} · {delta>=0?'+':''}{delta.toFixed(1)} ms from sound</Text>
   <Text style={{color:muted,fontSize:12}}>{take.fps.toFixed(0)} fps · audio and video play together</Text>
   {driver && <Waveform take={take} driver={driver} state={state}/>}
