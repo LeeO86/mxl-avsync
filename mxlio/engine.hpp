@@ -58,7 +58,9 @@ struct LiveCallbacks {
     std::function<void(bool video)> count_late;
     std::function<void(bool video, uint64_t grains)> count_missed; // grain indices skipped, never written
     std::function<void()> count_resync;
-    std::function<void(double ms)> video_commit; // generator: commit time - grain timestamp of each video grain
+    std::function<void(uint64_t grains)> count_input_skipped; // analyzer: input video grains not analysed (invalid, overwritten, or jumped over)
+    std::function<void(double ms)> video_commit;
+    std::function<void(double seconds)> video_render; // generator: picture render + pack time of each grain // generator: commit time - grain timestamp of each video grain
 };
 
 // Blocks until stop is set. Generator writes video and audio. Analyzer reads them.

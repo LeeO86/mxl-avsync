@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.4 (unreleased)
+
+- Generator render cost: the AVS2 picture is no longer drawn and packed in full on every grain. Bars, icon and titles are drawn once per settings change; each grain redraws and repacks only what changed (sync scale, flash edges, QR and event line per event, GIF frames), byte-identical to a full render. 1080p50: 7.9 → 0.84 ms per grain (p99 10.8 → 3.7 ms); the v210 packer is also faster (2.5 → 1.6 ms for a full frame). Lab, node-like load (two bursty busy loops per generator CPU plus four memory-bandwidth threads, 5 min): 2.0.3 missed 805 grains/min (27 %) and committed p50 +37 / p99 +118 ms after `T_k` at 0.48 core; 2.0.4 missed 0, commit p50 −16.8 / p99 −7.2 ms (before `T_k`), 0.14 core.
+- New `mxl_avsync_generator_render_seconds` histogram (render + pack per video grain).
+- Analyzer reads every input grain in order and catches up after a stall, instead of jumping to the newest grain whenever it was one behind. Jumping skipped the grain with an event's first flash frame under CPU load and gave events one frame off (lab node-like load: 34 of 602 → 0 of 607). New `mxl_avsync_input_grains_skipped_total{essence="video"}` counts grains not analysed (written invalid by a source that missed them, overwritten, or a stall longer than half the flow history).
+- `mxl_avsync_events_total{result}` is a real counter: every closed event is counted once, under `paired` or its reason. Before, it counted the last 1000 retained events, so it stopped growing after about 8 minutes (and `AVSyncNoEvents`, `rate(...paired[1m]) == 0`, could fire on a healthy analyzer). New results `quality` and `other`. An audio event that no video event claims within its window is now reported as `missing_video` (it was dropped silently); with a 2.0.3 generator missing 27 % of grains, 14 of 361 events were lost this way in 3 min and are now counted.
+- Live analyzer pairing keeps only open events and recent observations; before, its history grew for the life of the process.
+
 ## 2.0.3 (2026-10-30)
 
 - Audio correlation is the best sub-sample match of the expected chirp. The AVS2 decoder correlates at 8 kHz, where the generator's chirp sits half a sample off the grid, and took the value at the integer lag: a bit-exact MXL path read 0.80, while a resampling path (x264 + AAC over SRT) read up to about 0.98. It is now the maximum over sub-sample shifts of the reference (±0.5 sample, 1/20 steps); the timecode is not in the 30 ms window. Bit-exact AVS2 0.796 → 1.000, AAC 128k 0.976 → 1.000, Opus 128k 0.796 → 1.000, legacy 0.994 → 1.000; added noise lowers it. Timing is unchanged (identical offsets in every case).

@@ -199,9 +199,8 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
     });
 
-    Yuv422p10 picture;
-    picture.resize(format->width, grain_rows);
-    std::vector<uint8_t> packed(v210_line_bytes(format->width) * static_cast<size_t>(grain_rows));
+    LivePicture live_picture; // redraws only what changed since the last grain
+    const std::vector<uint8_t>* packed = nullptr;
     uint64_t qr_seq = ~0ULL;
     std::string qr_cached;
     int writer_rate = config.event_rate;
@@ -227,6 +226,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             callbacks.count_missed(true, slot.skipped); // grains never written
         }
         if (!halted) {
+            const auto render_start = std::chrono::steady_clock::now();
             const Period period = plan_period(*format, config.event_rate);
             const uint64_t seq = index / static_cast<uint64_t>(std::max(1, period.grains));
             const int frame_in_period = static_cast<int>(index % static_cast<uint64_t>(std::max(1, period.grains)));
@@ -270,8 +270,11 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             info.qr_json = qr_cached;
             const auto source_clip = callbacks.source_image ? callbacks.source_image() : nullptr;
             info.source_image = source_clip ? source_clip->at(ms) : nullptr;
-            render_picture(picture, info, seq, frame_in_period, period.grains, config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
-            pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format->width, grain_rows, format->width, packed.data());
+            packed = &live_picture.render(format->width, grain_rows, info, seq, frame_in_period, period.grains,
+                config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
+            if (callbacks.video_render) {
+                callbacks.video_render(std::chrono::duration<double>(std::chrono::steady_clock::now() - render_start).count());
+            }
         }
         const uint64_t stamp = time_of_index(pace, index);
         const uint64_t due = stamp - video_lead_ns;
@@ -284,12 +287,12 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (halted) {
             domain.write_silence_grain(index);
         } else {
-            const bool wrote = domain.write_grain(index, packed.size(), [&](uint8_t* dst, size_t size) {
-                std::memcpy(dst, packed.data(), std::min(size, packed.size()));
+            const bool wrote = domain.write_grain(index, packed->size(), [&](uint8_t* dst, size_t size) {
+                std::memcpy(dst, packed->data(), std::min(size, packed->size()));
             });
             if (wrote) {
                 callbacks.count_video_grain();
-                note_preview_v210("generated", packed.data(), format->width, grain_rows);
+                note_preview_v210("generated", packed->data(), format->width, grain_rows);
                 const Period period = plan_period(*format, config.event_rate);
                 if (index % static_cast<uint64_t>(std::max(1, period.grains)) == 0) {
                     callbacks.count_generator_event();
@@ -731,13 +734,25 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             continue;
         }
 
-        const uint64_t want = !have_cursor || cursor + 1 < head ? head : cursor + 1;
+        // Read every grain in order. A short stall (CPU contention) is caught up, because skipping the
+        // grain with an event's first flash frame would report that event one frame off. Jump to the
+        // head only when more than half the flow history behind, and count the grains passed over.
+        const uint64_t max_lag = grain_count > 4 ? grain_count / 2 : 1;
+        const bool jump = !have_cursor || head > cursor + max_lag;
+        const uint64_t want = jump ? head : cursor + 1;
+        if (jump && have_cursor && head > cursor + 1 && callbacks.count_input_skipped) {
+            callbacks.count_input_skipped(head - cursor - 1);
+        }
         bool flow_invalid = false;
         uint64_t grain_index = 0;
         if (!video_domain.copy_grain(want, 40000000, grain_rows, video.width, grain_count, &packed, &flow_invalid, &grain_index) || flow_invalid) {
             if (flow_invalid) {
                 callbacks.count_resync();
                 close_readers();
+            } else if (have_cursor && video_domain.video_head() >= want) {
+                // Written as invalid (the writer skipped it) or already overwritten: pass over it.
+                cursor = want;
+                if (callbacks.count_input_skipped) callbacks.count_input_skipped(1);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
@@ -960,6 +975,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
         if (pairer) {
             pairer->set_reference(current_reference(video.domain_id));
+            pairer->set_live_stream(true);
             for (const auto& event : pairer->poll(static_cast<double>(tai_now()) / 1e6)) {
                 {
                     std::lock_guard lock(caption.mu);

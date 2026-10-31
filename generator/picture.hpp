@@ -63,6 +63,35 @@ struct Yuv422p10 {
 
 void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int frame_in_period, int period_frames, bool marker_white);
 
+// The live generator's picture: the same v210 as render_picture + pack_v210, but for the AVS2 layout the
+// static parts are drawn once per settings change and each grain redraws and repacks only the parts whose
+// inputs changed (the sync scale every grain, the flash on its edges, QR and event line once per event).
+// The legacy layout is drawn in full every grain.
+class LivePicture {
+public:
+    const std::vector<uint8_t>& render(int width, int rows, const PictureInfo& info, uint64_t seq, int frame_in_period, int period_frames,
+        bool marker_white);
+    const Yuv422p10& frame() const { return frame_; }
+
+private:
+    struct Rect {
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    };
+    struct Inputs {
+        std::string qr_json, offset_line;
+        uint64_t seq = 0;
+        int frame_in_period = -1;
+        bool marker_white = false;
+        const SourceStill* source_image = nullptr;
+    };
+    std::string key_;
+    Yuv422p10 base_;
+    Yuv422p10 frame_;
+    std::vector<uint8_t> packed_;
+    std::vector<Rect> rects_;
+    Inputs last_;
+};
+
 // Decodes the QR in the top-left of a 10-bit luma plane. Empty if none.
 std::optional<std::string> decode_qr_text(const uint16_t* luma, int width, int height, int stride);
 

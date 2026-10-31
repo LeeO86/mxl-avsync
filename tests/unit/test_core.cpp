@@ -781,3 +781,50 @@ TEST_CASE("audio robustness table")
     run_case("chirps 40ms apart", close, plan);
     CHECK(snr0.hits >= 0);
 }
+
+TEST_CASE("live pairer reports audio no video claimed and keeps bounded history")
+{
+    Pairer pairer(500, GradeWindows{}, ReferenceInfo{}, "LIVE", "t");
+    pairer.set_live_stream(true);
+    CHECK(pairer.poll(0).empty());
+    auto audio_for = [](uint64_t k) {
+        AudioObservation a;
+        a.timecode = true;
+        a.source_id = 9;
+        a.event_time_ns = static_cast<int64_t>(k) * 500000000LL;
+        a.audio_send_ns = a.event_time_ns;
+        a.time_ms = static_cast<double>(k) * 500.0;
+        a.quality = "good";
+        a.correlation = 1.0;
+        return a;
+    };
+    size_t paired = 0, missing = 0;
+    for (uint64_t k = 1; k <= 400; ++k) {
+        pairer.observe_audio(audio_for(k));
+        if (k % 10 != 0) { // every tenth event: the flash was never seen
+            VideoObservation v;
+            v.event = true;
+            v.timecode = true;
+            v.source_id = 9;
+            v.event_time_ns = static_cast<int64_t>(k) * 500000000LL;
+            v.seq = k;
+            v.time_ms = static_cast<double>(k) * 500.0;
+            v.quality = "good";
+            pairer.observe_video(v, 0);
+        }
+        for (const auto& m : pairer.poll(static_cast<double>(k) * 500.0 + 100.0)) {
+            if (m.reason == "missing_video") {
+                ++missing;
+                CHECK(m.seq % 10 == 0);
+            } else if (m.av_offset_ms) {
+                ++paired;
+            }
+        }
+    }
+    for (const auto& m : pairer.poll(400 * 500.0 + 20000.0)) {
+        if (m.reason == "missing_video") ++missing;
+    }
+    CHECK(paired == 360);
+    CHECK(missing == 40);
+    CHECK(pairer.results().empty());
+}
