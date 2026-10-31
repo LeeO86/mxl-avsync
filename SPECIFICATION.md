@@ -788,9 +788,9 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `latency_abs_seconds` | histogram (buckets 1, 2, 5, 10, 20, 50, 100, 200, 500 ms, 1, 2, 5 s, +Inf), every event since start | `essence` | ana (2.0.6) |
 | `emit_offset_mismatch_total` | counter | `essence` | ana; events with a chain latency below 0 beyond its uncertainty, so no absolute value (2.0.6) |
 | `grade` | gauge 1 for the grade | `grade` (`pass`, `warn`, `fail`, `invalid`) | ana |
-| `av_offset_ms` | gauge (median of the grade window) | | ana |
-| `av_offset_deviation_ms` | gauge | | ana |
-| `av_offset_seconds` | histogram (signed buckets ±5, 15, 40, 60, 100, 200, 500 ms) | | ana |
+| `av_offset_ms` | gauge (median of the grade window: the last `AVSYNC_GRADE_EVENTS` valid events; before 2.0.6 the last event) | | ana |
+| `av_offset_deviation_ms` | gauge (median of the grade window; before 2.0.6 always 0) | | ana |
+| `av_offset_seconds` | histogram (signed buckets ±5, 15, 40, 60, 100, 200, 500 ms), every paired event since start (before 2.0.6: the last 1000 retained events) | | ana |
 | `video_latency_ms`, `audio_latency_ms` | gauge (median), absent without a reference | | ana |
 | `video_index_shift_ms`, `audio_index_shift_ms` | gauge | | ana |
 | `video_drops_total`, `video_duplicates_total` | counter | | ana |

@@ -153,6 +153,10 @@ assert 0 <= metrics['mxl_avsync_latency_abs_ms{essence="video"}'] <= 25, metrics
 assert metrics['mxl_avsync_latency_abs_uncertainty_ms{essence="audio"}'] > 1.5, metrics
 assert metrics['mxl_avsync_latency_abs_seconds_count{essence="video"}'] >= 6, metrics
 assert metrics['mxl_avsync_latency_abs_seconds_bucket{essence="video",le="0.05"}'] == metrics['mxl_avsync_latency_abs_seconds_count{essence="video"}'], metrics
+# AV offset gauge: median over the grade window; the histogram counts every paired event, like events_total.
+assert abs(metrics["mxl_avsync_av_offset_ms"]) < 0.1, metrics
+assert metrics["mxl_avsync_av_offset_seconds_count"] == metrics['mxl_avsync_events_total{result="paired"}'] >= 10, metrics
+assert metrics['mxl_avsync_av_offset_seconds_bucket{le="0.005"}'] == metrics["mxl_avsync_av_offset_seconds_count"], metrics
 assert metrics['mxl_avsync_emit_offset_mismatch_total{essence="video"}'] >= 1 and metrics['mxl_avsync_emit_offset_mismatch_total{essence="audio"}'] == 0, metrics
 ptp = get(aapi + "/api/v1/status")["ptp"]
 assert ptp["gm_identity"] == "ec4670fffe00fe77" and ptp["port_state"] == "SLAVE" and ptp["path_delay_ns"] == 7670, ptp

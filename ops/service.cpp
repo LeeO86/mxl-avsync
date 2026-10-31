@@ -77,6 +77,10 @@ struct Runtime {
     std::array<double, 2> abs_count{};
     std::array<double, 2> abs_sum_s{};
     std::array<double, 2> mismatch_total{};
+    // av_offset_seconds: every paired event since start (cumulative, not the retained list).
+    std::array<double, 14> av_bucket{};
+    double av_count = 0;
+    double av_sum_s = 0;
     std::string media_detail;
     std::string video_flow;
     std::string audio_flow;
@@ -123,6 +127,8 @@ std::string event_result(const Measurement& event)
 
 // latency_abs_seconds buckets: 1 ms to 5 s, so a direct link (a few ms) and an SRT or gateway chain
 // (hundreds of ms) both land in resolved buckets.
+constexpr std::array<double, 14> kAvOffsetBuckets{-0.5, -0.2, -0.1, -0.06, -0.04, -0.015, -0.005, 0.005, 0.015, 0.04, 0.06, 0.1, 0.2, 0.5};
+
 constexpr std::array<double, 12> kAbsBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5};
 
 constexpr std::array<double, 8> kRenderBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08, 0.16};
@@ -359,40 +365,28 @@ std::string metrics_text(Runtime& rt)
     for (const char* name : {"pass", "warn", "fail", "invalid"}) {
         os << "mxl_avsync_grade{grade=\"" << name << "\"} " << (ana && grade == name ? 1 : 0) << "\n";
     }
-    double offset = 0;
-    if (!rt.events.empty() && rt.events.back().av_offset_ms) {
-        offset = *rt.events.back().av_offset_ms;
+    // AV offset and deviation: median over the grade window (the last AVSYNC_GRADE_EVENTS valid events),
+    // the same events the grade uses; 0 before the first one.
+    std::vector<double> offsets, deviations;
+    if (ana) {
+        for (auto it = rt.events.rbegin(); it != rt.events.rend() && static_cast<int>(offsets.size()) < std::max(1, rt.config.grade_events); ++it) {
+            if (!it->av_offset_ms || it->grade == "invalid") continue;
+            offsets.push_back(*it->av_offset_ms);
+            deviations.push_back(it->deviation_ms.value_or(*it->av_offset_ms));
+        }
     }
     os << "# TYPE mxl_avsync_av_offset_ms gauge\n";
+    os << "mxl_avsync_av_offset_ms " << (offsets.empty() ? 0.0 : percentile(offsets, 0.5)) << "\n";
     os << "# TYPE mxl_avsync_av_offset_deviation_ms gauge\n";
-    os << "mxl_avsync_av_offset_ms " << offset << "\nmxl_avsync_av_offset_deviation_ms 0\n";
+    os << "mxl_avsync_av_offset_deviation_ms " << (deviations.empty() ? 0.0 : percentile(deviations, 0.5)) << "\n";
     os << "# TYPE mxl_avsync_av_offset_seconds histogram\n";
     {
-        const double edges[] = {-0.5, -0.2, -0.1, -0.06, -0.04, -0.015, -0.005, 0.005, 0.015, 0.04, 0.06, 0.1, 0.2, 0.5};
         const char* labels[] = {"-0.5", "-0.2", "-0.1", "-0.06", "-0.04", "-0.015", "-0.005", "0.005", "0.015", "0.04", "0.06", "0.1", "0.2", "0.5"};
-        int cumulative[14] = {};
-        double sum = 0;
-        int count = 0;
-        if (ana) {
-            for (const auto& event : rt.events) {
-                if (!event.av_offset_ms || event.grade == "invalid") {
-                    continue;
-                }
-                const double seconds = *event.av_offset_ms / 1000.0;
-                sum += seconds;
-                ++count;
-                for (int i = 0; i < 14; ++i) {
-                    if (seconds <= edges[i]) {
-                        ++cumulative[i];
-                    }
-                }
-            }
+        for (size_t i = 0; i < kAvOffsetBuckets.size(); ++i) {
+            os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << labels[i] << "\"} " << rt.av_bucket[i] << "\n";
         }
-        for (int i = 0; i < 14; ++i) {
-            os << "mxl_avsync_av_offset_seconds_bucket{le=\"" << labels[i] << "\"} " << cumulative[i] << "\n";
-        }
-        os << "mxl_avsync_av_offset_seconds_bucket{le=\"+Inf\"} " << count << "\n";
-        os << "mxl_avsync_av_offset_seconds_sum " << sum << "\nmxl_avsync_av_offset_seconds_count " << count << "\n";
+        os << "mxl_avsync_av_offset_seconds_bucket{le=\"+Inf\"} " << rt.av_count << "\n";
+        os << "mxl_avsync_av_offset_seconds_sum " << rt.av_sum_s << "\nmxl_avsync_av_offset_seconds_count " << rt.av_count << "\n";
     }
     {
         const char* essences[2] = {"video", "audio"};
@@ -1272,6 +1266,14 @@ int run_service(Config config)
             apply_source_emit(rt.events.back(), effective_emit(rt), clock_accuracy_ms(rt.clock_status));
             rt.event_results[event_result(event)] += 1;
             const Measurement& stored = rt.events.back();
+            if (stored.av_offset_ms && stored.grade != "invalid") {
+                const double seconds = *stored.av_offset_ms / 1000.0;
+                for (size_t i = 0; i < kAvOffsetBuckets.size(); ++i) {
+                    if (seconds <= kAvOffsetBuckets[i]) rt.av_bucket[i] += 1;
+                }
+                rt.av_count += 1;
+                rt.av_sum_s += seconds;
+            }
             const std::optional<double>* chains[2] = {&stored.video_chain_latency_ms, &stored.audio_chain_latency_ms};
             const std::optional<double>* values[2] = {&stored.video_latency_abs_ms, &stored.audio_latency_abs_ms};
             for (size_t e = 0; e < 2; ++e) {

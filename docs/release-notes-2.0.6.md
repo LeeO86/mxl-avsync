@@ -26,6 +26,26 @@ All of them are exported from the first scrape.
   The buckets cover both a direct link (a few ms) and an SRT chain (about
   0.5 s).
 
+## Changed AV offset metrics
+
+- **`mxl_avsync_av_offset_ms`** is now the **median over the grade window**:
+  the last `AVSYNC_GRADE_EVENTS` valid events (default 10), the same events
+  the grade uses. Until 2.0.5 it was the **last event**, although the
+  specification said median.
+  - A single outlier event no longer shows in the gauge.
+  - A step change shows after about half the window (5 events, 2.5 s at
+    2 events/s).
+  - Dashboards or alerts that rely on the gauge jumping with one event should
+    use the event API or `av_offset_seconds` instead.
+- **`mxl_avsync_av_offset_deviation_ms`** is the window's median deviation
+  from the expected offset. It was always 0.
+- **`mxl_avsync_av_offset_seconds`** now counts every paired event since
+  start. Before, it counted the last 1000 retained events, so its `_count`
+  and `_sum` stopped growing after about 8 minutes and `rate()` /
+  `increase()` on it read 0 from then on. Queries with
+  `histogram_quantile(…, rate(…_bucket[…]))` now work. Its `_count` equals
+  `events_total{result="paired"}`.
+
 ## Alerts
 
 - **`AVSyncGeneratorRenderSlow`** now fires when the render p99 is above 75 %
