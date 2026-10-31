@@ -172,6 +172,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Foreground screen wake lifecycle
+        run: |
+          swiftc mobile-app/modules/avsync/ios/ScreenAwakeState.swift mobile-app/tests/native/screen-awake.swift -o /tmp/avsync-screen-awake
+          /tmp/avsync-screen-awake
       - name: Camera rate and capture telemetry
         run: |
           swiftc mobile-app/modules/avsync/ios/CaptureProfile.swift mobile-app/tests/native/capture-profile.swift -o /tmp/avsync-capture-profile

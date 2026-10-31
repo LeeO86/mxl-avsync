@@ -1,4 +1,4 @@
-# Phone capture comparison (mobile 2.0.6)
+# Phone capture comparison (mobile 2.0.6+)
 
 Settings → Camera frame rate selects 60, 120, 240 fps or Maximum. The initial
 selection is 120 fps. Maximum retains the previous fastest-supported behavior.
@@ -58,3 +58,14 @@ It requires identity and onset within one capture interval. This is not a test
 of Vision recognition or of a physical phone camera. Existing native recording
 tests cover the decoder separately; actual lower-rate stability needs the
 controlled phone/player comparison above.
+
+## Screen awake (mobile 2.0.7)
+
+Settings → Keep screen awake defaults on for iOS. Live permitted capture and
+all calibration steps, including frame review, prevent idle dimming/locking.
+The generator holds its own request only while output runs. Pausing measurement,
+stopping output, leaving capture or backgrounding releases the relevant request.
+The original idle timer is restored after the final request. Disabling the
+setting opts out for both modes; stored results/calibration are unaffected.
+Measurement does not force maximum brightness or alter the system auto-lock
+preference. A manual press of the lock button still locks the device.

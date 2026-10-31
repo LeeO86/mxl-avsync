@@ -1134,3 +1134,21 @@ flash onset; average delivered fps alone does not establish jitter's cause.
 The UI distinguishes current clock qualification from an immutable reading's
 acquisition reference. See docs/phone-capture.md for the comparison protocol.
 Container/core version and wire format stay 2.0.5.
+
+
+## Foreground phone screen wake (mobile 2.0.7, 2026-10-31)
+
+Maintainer request: prevent idle dimming/locking during AVsync operation, with
+an app setting. New persisted `keepScreenAwake` defaults true. JS requests an
+iOS wake lease during foreground live capture (with permissions) or calibration,
+including frame review after the camera unmounts. A separate native generator
+lease follows actual start/stop and the same preference. No dependency update.
+
+A main-thread owner coordinator restores the captured idle-timer state after
+the last release, suspends requests while inactive and restores only remaining
+requests on foreground return. This replaces the generator's independent global
+idle-timer save/restore, avoiding cross-owner interference. Teardown releases
+leases. Measurement brightness stays unchanged; existing generator brightness
+handling stays separate. Future Android capture needs its native equivalent;
+no new Android capture/generator capability is claimed. Container behavior and
+platform test/deployment state are unaffected.

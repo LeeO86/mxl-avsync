@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Image, Linking, Modal, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Linking, Modal, PermissionsAndroid, Platform, Pressable, SafeAreaView, ScrollView, Share, StatusBar, Switch, Text, TextInput, View } from 'react-native';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { requireNativeViewManager } from 'expo-modules-core';
@@ -7,6 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import native from './modules/avsync';
 import { receiveReading, readingPresentation, savedReading } from './src/reading.mjs';
 import { CAPTURE_RATES, captureRate, captureRateLabel, captureStatus } from './src/capture.mjs';
+import { screenAwakeEnabled, measurementNeedsScreen } from './src/screen-awake.mjs';
 import { generatorOptions } from './src/generator.mjs';
 import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
 import { applyTimeReference, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, measurementSourceKey, referenceSummary, synchronizeClock } from './src/time-reference.mjs';
@@ -112,8 +113,11 @@ export default function App() {
  const generatorImage = useMemo(() => session.generatorImageId && native?.generatorImageInfo ? native.generatorImageInfo(session.generatorImageId) : null, [session.generatorImageId]);
  const [settings, setSettings] = useState(false), [flow, setFlow] = useState(null), [take, setTake] = useState(null);
  const [running, setRunning] = useState(true), [status, setStatus] = useState({ message: 'Looking for test signal…' }), [notice, setNotice] = useState(null);
+ const [foreground, setForeground] = useState(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
  const [cameraPermission, requestCamera] = useCameraPermissions(), [micPermission, requestMic] = useMicrophonePermissions();
  const camera = useRef(null), lastReportAt = useRef(-Infinity);
+ const keepAwake = measurementNeedsScreen({enabled:screenAwakeEnabled(session),foreground,flow,tab,running,captureAvailable:Boolean(NativeCamera),cameraGranted:cameraPermission?.granted,micGranted:micPermission?.granted});
+ useEffect(() => { native?.setScreenAwake?.(keepAwake);return () => native?.setScreenAwake?.(false); }, [keepAwake]);
  const [tick, setTick] = useState(() => performance.now());
  const clockGeneration = useRef(0), clockInFlight = useRef(false);
  const [clockCheck, setClockCheck] = useState(null), [clockBusy, setClockBusy] = useState(false), [clockError, setClockError] = useState(null);
@@ -129,6 +133,7 @@ export default function App() {
  const [taiDraft, setTaiDraft] = useState(String(taiUtcSeconds));
  useEffect(() => { if (settings) setTaiDraft(String(taiUtcSeconds)); }, [settings, taiUtcSeconds]);
  useEffect(() => { const subscription = AppState.addEventListener('change', value => {
+  setForeground(value === 'active');
   // Core Media host time need not advance across device sleep. Never carry its UTC mapping through backgrounding.
   if(value !== 'active') { clockGeneration.current += 1;setClockCheck(null); }
  });return () => {clockGeneration.current += 1;subscription.remove();}; }, []);
@@ -188,7 +193,7 @@ export default function App() {
   setGenerating(true); setNotice(null);
   try {
    const rate = session.generatorRate === 1 ? 1 : 2;
-   const result = native.generateStyled ? await native.generateStyled(rate, taiUtcSeconds, {...generatorOptions(session), ...generatorClockOptions(clockCheck, native.clockNow?.(), timeSettings.maxUncertaintyMs)}) : await native.generate(rate, taiUtcSeconds);
+   const result = native.generateStyled ? await native.generateStyled(rate, taiUtcSeconds, {...generatorOptions(session), keepAwake:screenAwakeEnabled(session) ? 'true' : 'false', ...generatorClockOptions(clockCheck, native.clockNow?.(), timeSettings.maxUncertaintyMs)}) : await native.generate(rate, taiUtcSeconds);
    setNotice(`Signal stopped · ${result.skippedDisplayFrames} skipped display frames · output timing estimated`);
   } catch (error) { setNotice(error.message); }
   finally { setGenerating(false); }
@@ -234,6 +239,8 @@ export default function App() {
     <View style={{ maxHeight: '90%', backgroundColor: '#1c2128', borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 36 }}>
       <Text accessibilityRole="header" style={{ ...text, fontSize: 20 }}>Settings</Text>
+      {native?.setScreenAwake && <><View style={{flexDirection:'row',alignItems:'center',marginTop:12}}><Text style={{...text,flex:1}}>Keep screen awake</Text><Switch accessibilityLabel="Keep screen awake" value={screenAwakeEnabled(session)} onValueChange={value=>setSession(previous=>({...previous,keepScreenAwake:value}))} /></View>
+      <Text style={{color:muted,fontSize:12,marginTop:4}}>Prevent automatic dimming and locking during measurement, calibration and test signal output. Pause or leave the app to use normal auto-lock.</Text></>}
       <View style={{ backgroundColor: bg, borderRadius: 10, padding: 14, marginTop: 16 }}>
        <Text style={{ color: muted, fontSize: 12 }}>CALIBRATION</Text>
        <Text style={{ color: correction.state === 'active' ? ink : orange, fontSize: 21, marginTop: 5 }}>Current correction {offsetText(correction.appliedOffsetMs)}</Text>
