@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name = 'Avsync'
-  s.version = '2.0.5'
+  s.version = '2.0.6'
   s.summary = 'Recorded AV sync analysis using avsync-core'
   s.description = s.summary
   s.license = 'MIT'

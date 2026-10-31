@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased (mobile)
+## Mobile 2.0.6 (2026-10-31)
+
+- Select 60/120/240 fps or Maximum in Settings. Default to 120 fps for a
+  controlled lower-load comparison; preserve the fastest mode's raster when
+  supported. A rate change resets live acquisition, retains saved results and
+  keeps calibration compatibility tied to the actual capture mode.
+- Persist bounded capture diagnostics: recent delivered rate, PTS frame gaps,
+  AVFoundation drop reasons, callback/poll durations and gaps around measured
+  video events. Drop callbacks and PTS-inferred losses are separate evidence.
+- Display acquisition-time clock evidence separately from the current phone
+  reference. No change to pulse timing, pairing or latency smoothing.
+
+## Mobile 2.0.5 (2026-10-31)
 
 - Native iOS SNTP and Android GNSS time references, with clock/timebase identity,
   age, RTT/uncertainty, expiry and configurable server/qualification limit.

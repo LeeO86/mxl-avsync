@@ -48,6 +48,7 @@ public class AvsyncModule: Module {
     View(AvsyncCameraView.self) {
       Events("onReport")
       Prop("active") { (view: AvsyncCameraView, active: Bool) in view.setActive(active) }
+      Prop("captureFps") { (view: AvsyncCameraView, fps: Double) in view.setRequestedFps(fps) }
       Prop("taiUtcOffset") { (view: AvsyncCameraView, seconds: Double) in view.setTaiUtcOffset(seconds) }
       AsyncFunction("beginCalibration") { (view: AvsyncCameraView) in view.beginCalibration() }
       AsyncFunction("resumeAnalysis") { (view: AvsyncCameraView) in view.resumeAnalysis() }

@@ -172,6 +172,12 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Camera rate and capture telemetry
+        run: |
+          swiftc mobile-app/modules/avsync/ios/CaptureProfile.swift mobile-app/tests/native/capture-profile.swift -o /tmp/avsync-capture-profile
+          /tmp/avsync-capture-profile
+          clang++ -std=c++20 -O2 -I . -I core/include -I third_party/pocketfft mobile-app/tests/native/capture-cadence.cpp mobile-app/modules/avsync/ios/Core_*.cpp -o /tmp/avsync-capture-cadence
+          /tmp/avsync-capture-cadence
       - name: Swift SNTP protocol and real local UDP exchange
         run: python3 mobile-app/tests/native/clock.py
       - name: Experimental device-calibration maths bridge

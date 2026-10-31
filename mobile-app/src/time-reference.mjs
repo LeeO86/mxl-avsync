@@ -125,3 +125,10 @@ export function applyTimeReference(report, reference, settings = clockSettings()
  }
  return { ...report, latency, clockReference: clock, reference: { type: 'none', phone_clock: clock.source }, accuracy: 'unvalidated' };
 }
+
+// A held reading keeps the clock it actually used, even after a later sync.
+export function measurementClockLabel(clock) {
+ if (!clock || clock.source === 'device-utc') return 'Device UTC · uncorrected';
+ const name=clock.source==='gnss' ? 'GNSS' : `NTP ${clock.server || ''}`.trim();
+ return `${name} · ${clockRadiusText(clock.uncertaintyMs)} at acquisition`;
+}

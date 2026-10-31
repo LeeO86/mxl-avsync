@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTimeReference, bindReference, clockRadiusText, clockSettings, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
+import { applyTimeReference, bindReference, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
 import { receiveReading, savedReading } from './reading.mjs';
 const epoch = 1793450000000;
 const sample = {source:'ntp',server:'lab.example',referenceUnixMs:epoch,referenceMonotonicMs:1000,deviceUnixMs:epoch-100,uncertaintyMs:2,roundTripMs:2,clockId:'boot-a',timebase:'ios-host'};
@@ -96,4 +96,12 @@ test('small clock uncertainty is not rounded into a claim of zero error', () => 
  assert.equal(clockRadiusText(.001),'<0.1 ms');
  assert.equal(clockRadiusText(2.5),'±2.5 ms');
  assert.equal(clockRadiusText(NaN),'unknown');
+});
+
+test('measurement clock label uses frozen acquisition evidence, not a later current reference',()=>{
+ const saved=applyTimeReference(report,null).clockReference;
+ const current=applyTimeReference(report,reference).clockReference;
+ assert.match(measurementClockLabel(saved),/Device UTC.*uncorrected/);
+ assert.match(measurementClockLabel(current),/NTP lab.example.*acquisition/);
+ assert.match(measurementClockLabel(saved),/Device UTC/);
 });

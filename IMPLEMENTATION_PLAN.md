@@ -1115,3 +1115,22 @@ do not reuse another source's offsets. New capture calibration records bind to
 model/OS/audio route/sample rate/camera mode; incompatible old records remain
 stored but inactive. No new calibration wizard or autonomous two-device flow.
 See docs/phone-clock.md for checks and remaining hardware validation.
+
+
+## Phone capture-rate comparison (mobile 2.0.6, 2026-10-31)
+
+Maintainer request: diagnose video latency variation with stable audio, retrieve
+TestFlight diagnostics and compare a lower camera rate. Default changes from
+maximum to 120 fps; Settings selects 60/120/240 or Maximum. Prefer the previous
+fastest mode's raster to avoid confounding rate and pixel count; report actual
+format/rate when hardware falls back. Mode changes drain/reset capture state;
+results/settings/calibration are retained, with existing compatibility checks.
+No frame-time smoothing or adjustment of the measured flash timestamp.
+
+Bounded native telemetry records delivered PTS gaps, AVFoundation didDrop reasons
+and callback/poll work. The inferred missing-frame count and drop callbacks
+overlap and are never added. Event-local gaps support testing burst loss at
+flash onset; average delivered fps alone does not establish jitter's cause.
+The UI distinguishes current clock qualification from an immutable reading's
+acquisition reference. See docs/phone-capture.md for the comparison protocol.
+Container/core version and wire format stay 2.0.5.

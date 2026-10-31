@@ -11,6 +11,9 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private var preview: AVCaptureVideoPreviewLayer!
   private var configured = false
   private var targetFps = 0.0
+  private var requestedFps = 120.0
+  private var cameraDevice: AVCaptureDevice?
+  private let telemetry = CaptureTelemetry()
   private var lastPoll = 0.0
   private var taiUtcSeconds = 37.0
   private let qrWorker = DispatchQueue(label: "avsync.qr", qos: .utility)
@@ -91,10 +94,36 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     control.async { if old.isRunning { old.stopRunning() } }
   }
   func setActive(_ value: Bool) { active = value; updateRunning() }
+  func setRequestedFps(_ fps: Double) {
+    guard [0,60,120,240].contains(fps) else { return }
+    control.async { [weak self] in
+      guard let self, fps != self.requestedFps else { return }
+      let old=self.requestedFps
+      guard self.configured, let device=self.cameraDevice else { self.requestedFps=fps;return }
+      let wasRunning=self.session.isRunning
+      if wasRunning { self.session.stopRunning() }
+      self.samples.sync {} // Drain the previous mode before changing report identity.
+      self.requestedFps=fps
+      do {
+        self.session.beginConfiguration()
+        do { try self.applyFrameRate(device) } catch { self.session.commitConfiguration();throw error }
+        self.session.commitConfiguration()
+        self.samples.sync { self.generation += 1;self.processor.reset();self.telemetry.reset(fps:self.targetFps) }
+        DispatchQueue.main.async { self.clearOutline() }
+        self.samples.async { self.emit(["kind":"status","fps":0,"message":"Capture rate changed · collecting fresh events"]) }
+      } catch {
+        self.requestedFps=old
+        self.samples.async { self.emit(["kind":"error","message":error.localizedDescription,"requestedFps":fps,"captureRateRejected":old]) }
+      }
+      if wasRunning { self.session.startRunning() }
+    }
+  }
+
   func beginCalibration() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.beginCalibration() } }
   func resumeAnalysis() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.reset() } }
   private func emit(_ value: [String: Any]) {
-    var report = value; report["configuredFps"] = targetFps; report["captureContext"] = captureContext()
+    var report = value; report["configuredFps"] = targetFps; report["captureContext"] = captureContext();report["requestedFps"] = value["requestedFps"] ?? requestedFps
+    report["captureStats"] = telemetry.snapshot(events:value["events"] as? [[String:Any]] ?? [])
     if let captureMs = value["timeMs"] as? Double, let clock = session.masterClock,
        let offsetMs = value["deviceUtcOffsetMs"] as? Double {
       let host = CMSyncConvertTime(CMTime(seconds:captureMs/1000,preferredTimescale:1_000_000_000), from:clock, to:CMClockGetHostTimeClock())
@@ -126,8 +155,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       if shouldRun {
         do {
           if !self.configured { try self.configure() }
-          if !self.session.isRunning { self.samples.async { self.generation += 1; self.processor.reset() }; self.session.startRunning() }
-        } catch { self.emit(["kind": "error", "message": error.localizedDescription]) }
+          if !self.session.isRunning { self.samples.sync { self.generation += 1; self.processor.reset();self.telemetry.reset(fps:self.targetFps) }; self.session.startRunning() }
+        } catch { self.samples.async { self.emit(["kind": "error", "message": error.localizedDescription]) } }
       } else if self.session.isRunning {
         self.session.stopRunning()
         self.samples.async { self.generation += 1 }
@@ -168,26 +197,47 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
     }
     DispatchQueue.main.async { [weak self] in self?.preview.connection?.videoOrientation = .portrait }
-    let choices = device.formats.flatMap { format in format.videoSupportedFrameRateRanges.map { (format, $0) } }
-    guard let best = choices.max(by: { a, b in
-      if a.1.maxFrameRate != b.1.maxFrameRate { return a.1.maxFrameRate < b.1.maxFrameRate }
-      let x = CMVideoFormatDescriptionGetDimensions(a.0.formatDescription), y = CMVideoFormatDescriptionGetDimensions(b.0.formatDescription)
-      return Int64(x.width) * Int64(x.height) < Int64(y.width) * Int64(y.height)
-    }) else { throw NSError(domain: "Avsync", code: 5, userInfo: [NSLocalizedDescriptionKey: "No supported camera format."]) }
-    try device.lockForConfiguration()
-    device.activeFormat = best.0
-    let dimensions = CMVideoFormatDescriptionGetDimensions(best.0.formatDescription)
-    captureMode = "\(dimensions.width)x\(dimensions.height)@\(best.1.maxFrameRate)"
-    device.activeVideoMinFrameDuration = best.1.minFrameDuration
-    device.activeVideoMaxFrameDuration = best.1.minFrameDuration
-    device.unlockForConfiguration()
-    targetFps = best.1.maxFrameRate
+    try applyFrameRate(device)
+    cameraDevice=device
+    samples.sync { telemetry.reset(fps:targetFps) }
     configured = true
-    emit(["kind": "status", "fps": 0, "message": "Camera ready. Live analysis starts as frames and audio arrive."])
+    samples.async { self.emit(["kind": "status", "fps": 0, "message": "Camera ready. Live analysis starts as frames and audio arrive."]) }
+  }
+  private func applyFrameRate(_ device: AVCaptureDevice) throws {
+    let formats=device.formats
+    var ranges=[CaptureFormatRange](), source=[(AVCaptureDevice.Format, AVFrameRateRange)]()
+    for (index,format) in formats.enumerated() {
+      let size=CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+      for range in format.videoSupportedFrameRateRanges {
+        ranges.append(CaptureFormatRange(format:index,width:Int(size.width),height:Int(size.height),minFps:range.minFrameRate,maxFps:range.maxFrameRate))
+        source.append((format,range))
+      }
+    }
+    guard let choice=chooseCaptureFormat(ranges,cap:requestedFps) else {
+      throw NSError(domain:"Avsync",code:5,userInfo:[NSLocalizedDescriptionKey:"Requested camera rate is unsupported. Choose another rate."])
+    }
+    let selected=source[choice.range]
+    try device.lockForConfiguration()
+    defer { device.unlockForConfiguration() }
+    device.activeFormat=selected.0
+    let duration=abs(choice.fps-selected.1.maxFrameRate)<0.0001 ? selected.1.minFrameDuration : CMTime(seconds:1/choice.fps,preferredTimescale:1_000_000_000)
+    device.activeVideoMinFrameDuration=duration;device.activeVideoMaxFrameDuration=duration
+    targetFps=choice.fps
+    let size=CMVideoFormatDescriptionGetDimensions(selected.0.formatDescription)
+    captureMode="\(size.width)x\(size.height)@\(choice.fps)"
+  }
+  func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    guard output is AVCaptureVideoDataOutput else { return }
+    let value=CMGetAttachment(sampleBuffer,key:kCMSampleBufferAttachmentKey_DroppedFrameReason,attachmentModeOut:nil) as? String
+    let reason=value == kCMSampleBufferDroppedFrameReason_FrameWasLate as String ? "late" : value == kCMSampleBufferDroppedFrameReason_OutOfBuffers as String ? "outOfBuffers" : value == kCMSampleBufferDroppedFrameReason_Discontinuity as String ? "discontinuity" : "unknown"
+    telemetry.drop(reason:reason)
   }
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    let started=PhoneClock.nowMs(),isVideo=output is AVCaptureVideoDataOutput
+    defer { telemetry.processing(isVideo ? "video" : "audio",ms:PhoneClock.nowMs()-started) }
     autoreleasepool {
-      if output is AVCaptureVideoDataOutput {
+      if isVideo {
+        telemetry.frame(at:CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))*1000)
         processor.pushVideo(sampleBuffer)
         let scanTime = ProcessInfo.processInfo.systemUptime
         if !qrBusy && scanTime - lastQrScan >= 0.1, let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
@@ -219,7 +269,10 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
         processor.setTaiUtcOffset(taiUtcSeconds)
         let picture = processor.pictureObservation() as? [String: Any] ?? [:]
         DispatchQueue.main.async { [weak self] in self?.observePicture(picture, at:now) }
-        if let report = processor.poll() as? [String: Any] { emit(report) }
+        let pollStart=PhoneClock.nowMs()
+        let report=processor.poll() as? [String:Any]
+        telemetry.processing("poll",ms:PhoneClock.nowMs()-pollStart)
+        if let report { emit(report) }
       }
     }
   }
