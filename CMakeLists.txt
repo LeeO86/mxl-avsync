@@ -56,6 +56,7 @@ add_library(avsync-core STATIC
     core/src/phone.cpp
     core/src/phone_generator.cpp
     core/src/picture_reader.cpp
+    core/src/two_way.cpp
     third_party/nayuki/qrcodegen.cpp
 )
 target_include_directories(avsync-core
