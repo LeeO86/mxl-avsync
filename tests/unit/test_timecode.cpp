@@ -301,3 +301,93 @@ TEST_CASE("legacy chirps keep their correlation and timing") {
         CHECK(std::abs(hits[0].sample_pos - centre) < 0.1);
     }
 }
+
+#include "avsync/two_way.hpp"
+
+namespace {
+
+// Two simulated phones A and B in one room. World time = A's clock; B's clock = world + theta.
+struct Room {
+    double d = 2.0, d_aa = 0.05, d_bb = 0.08;
+    double out_a = 12.0, in_a = 8.0, out_b = 25.0, in_b = 5.5, theta = 137.25;
+    double t_a = 1000.0, t_b = 1600.0; // emissions: A at t_a (A clock), B at t_b (world)
+    uint32_t id_a = 11, id_b = 22;
+};
+
+void place(std::vector<float>& x, const std::vector<float>& wave, double onset_ms)
+{
+    const auto start = static_cast<size_t>(std::llround(onset_ms * 48.0));
+    for (size_t i = 0; i < wave.size() && start + i < x.size(); ++i) x[start + i] += wave[i];
+}
+
+// The two recordings, each on its own device's clock.
+std::pair<std::vector<float>, std::vector<float>> record(const Room& r, double noise)
+{
+    const double c = kSpeedOfSoundMs / 1000.0; // m/ms
+    // Each packet carries its emission time on the emitter's own clock.
+    const auto pa = timecode_waveform(encode_timecode(r.id_a, static_cast<int64_t>(r.t_a * 1e6), 0, true), 1200, 48000, -12);
+    const auto pb = timecode_waveform(encode_timecode(r.id_b, static_cast<int64_t>((r.t_b + r.theta) * 1e6), 0, true), 1200, 48000, -12);
+    std::vector<float> a(48000 * 3, 0.f), b(48000 * 3, 0.f);
+    place(a, pa, r.t_a + r.out_a + r.d_aa / c + r.in_a);
+    place(a, pb, r.t_b + r.out_b + r.d / c + r.in_a);
+    place(b, pa, r.t_a + r.out_a + r.d / c + r.in_b + r.theta);
+    place(b, pb, r.t_b + r.out_b + r.d_bb / c + r.in_b + r.theta);
+    uint32_t seed = 5;
+    for (auto* x : {&a, &b})
+        for (auto& v : *x) {
+            seed = seed * 1664525u + 1013904223u;
+            v += static_cast<float>(noise * (double(seed >> 8) / double(1 << 24) - 0.5) * 2.0);
+        }
+    return {a, b};
+}
+
+} // namespace
+
+TEST_CASE("two-way acoustic ranging recovers distance and clock offset from two recordings") {
+    for (double noise : {0.0, 0.02}) {
+        Room r;
+        const auto [rec_a, rec_b] = record(r, noise);
+        const auto a = onsets_from_recording(rec_a.data(), rec_a.size(), 48000, r.id_a, r.id_b);
+        const auto b = onsets_from_recording(rec_b.data(), rec_b.size(), 48000, r.id_b, r.id_a);
+        REQUIRE(a);
+        REQUIRE(b);
+        const auto t = two_way_acoustic(*a, *b, r.d_aa, r.d_bb);
+        CHECK(std::abs(t.distance_m - r.d) < 0.02); // 2 cm
+        // Acoustics alone give theta plus the input-latency difference, never theta alone.
+        CHECK(std::abs(t.clock_offset_plus_input_skew_ms - (r.theta + r.in_b - r.in_a)) < 0.05);
+    }
+}
+
+TEST_CASE("cross runs give the round trip; a trusted clock plus one reference latency split it per device") {
+    Room r;
+    const auto [rec_a, rec_b] = record(r, 0.0);
+    const auto pa_on_a = decode_timecodes(rec_a.data(), rec_a.size(), 48000, 0);
+    const auto pb_on_b = decode_timecodes(rec_b.data(), rec_b.size(), 48000, 0);
+    auto find = [](const std::vector<AudioTimecode>& packets, uint32_t id) {
+        for (const auto& p : packets) if (p.source_id == id) return p;
+        FAIL("packet missing");
+        return AudioTimecode{};
+    };
+    // Arrival (receiver clock) minus the emission time the packet carries (sender clock).
+    const auto a_on_b = find(pb_on_b, r.id_a), b_on_a = find(pa_on_a, r.id_b);
+    const auto a_on_a = find(pa_on_a, r.id_a), b_on_b = find(pb_on_b, r.id_b);
+    CrossInput in;
+    in.m_ab_ms = a_on_b.time_ms - a_on_b.audio_send_ns / 1e6;
+    in.m_ba_ms = b_on_a.time_ms - b_on_a.audio_send_ns / 1e6;
+    in.loopback_a_ms = a_on_a.time_ms - a_on_a.audio_send_ns / 1e6;
+    in.loopback_b_ms = b_on_b.time_ms - b_on_b.audio_send_ns / 1e6;
+    in.self_distance_a_m = r.d_aa;
+    in.self_distance_b_m = r.d_bb;
+    const OwnRecording oa{a_on_a.time_ms, b_on_a.time_ms}, ob{b_on_b.time_ms, a_on_b.time_ms};
+    in.distance_m = two_way_acoustic(oa, ob, r.d_aa, r.d_bb).distance_m;
+    const auto unknown = device_cross(in);
+    CHECK(std::abs(unknown.round_trip_ms - (r.out_a + r.in_a + r.out_b + r.in_b)) < 0.1);
+    CHECK(std::abs(unknown.theta_plus_asymmetry_ms - (r.theta + ((r.out_a + r.in_b) - (r.out_b + r.in_a)) / 2)) < 0.05);
+    CHECK(std::abs(unknown.consistency_ms) < 0.1);
+    CHECK(!unknown.split);
+    const auto known = device_cross(in, r.theta, r.in_a);
+    REQUIRE(known.split);
+    CHECK(std::abs(known.split->out_a_ms - r.out_a) < 0.05);
+    CHECK(std::abs(known.split->in_b_ms - r.in_b) < 0.05);
+    CHECK(std::abs(known.split->out_b_ms - r.out_b) < 0.1);
+}
