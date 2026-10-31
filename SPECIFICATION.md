@@ -161,7 +161,7 @@ Arrival time has the resolution of the reader's wake-up (target ≤ 1 ms, measur
 ### 3.4 Resolution
 
 - **Audio:** chirp peak by matched filter with sub-sample interpolation; target ≤ 0.1 ms on the PCM path, measured in M0 per condition (§14.1).
-- **Video:** one grain. The generator puts every video event exactly at a grain origin, so on a path without frame-rate conversion the video index time is exact. With a frame-rate conversion or a frame drop near an event, the uncertainty is one input frame, and the result says so. Sub-frame video timing is not claimed in 1.0. (The sweep bar of §5.3 MAY give sub-frame timing to the phone app later; only after a test shows it.)
+- **Video:** one grain. The generator puts every video event exactly at a grain origin, so on a path without frame-rate conversion the video index time is exact. Legacy: when the reader sees the marker change late (grains dropped or skipped before it), the event time is taken from the strip's position in the period (flag `event_time_from_strip`, 2.0.5). With a frame-rate conversion or a frame drop near an event, the uncertainty is one input frame, and the result says so. Sub-frame video timing is not claimed in 1.0. (The sweep bar of §5.3 MAY give sub-frame timing to the phone app later; only after a test shows it.)
 - **Interlaced:** one MXL grain is one field (height / 2 lines, indices at field rate, grain 2k = first field), following the shared MXL interlaced convention (https://github.com/LeeO86/mxl-multiviewer/blob/main/docs/mxl-interlaced.md). Video events fall on a first field; resolution is one field. Bottom-field-first input is refused (`format_mismatch`), as in the siblings.
 
 ---

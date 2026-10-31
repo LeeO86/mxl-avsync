@@ -50,6 +50,38 @@ p95 +4.8) on the direct link. Two causes, both fixed:
   A 2.0.5 analyzer can then flag `emit_offset_mismatch` for audio. Upgrade the
   generator together with the analyzers.
 
+## Legacy pairing under load
+
+With an on-time generator, the platform's legacy A/B still showed 10–23 % fail
+and AV down to −240 ms, and AVS2 was clean.
+
+- **Cause:** a CPU-starved analyzer sees the legacy marker change late. It took
+  the event time from the first grain it saw, so the event came out one to six
+  frames off. The flags `video_drop` / `video_drop_near` were set, but the
+  event was still graded.
+- **Why 2.0.4+ is worse than 2.0.1:** since 2.0.4 the analyzer catches up
+  before it jumps (up to half the flow history), so its gaps were longer.
+- **Why AVS2 is clean:** its flash tracker keeps the first edge with the
+  original frame index.
+- **Fix:** the legacy strip carries each grain's position in the period, and
+  the marker changes on position 0. The event time is now taken from the strip
+  (`event_time_from_strip`).
+- **A second fix:** a chirp the legacy detector finds again on a rescan, next
+  to one already paired, is no longer counted as `missing_video`.
+
+Lab, 3 min, legacy, on-time generator, analyzer sharing two CPUs with three
+busy loops each and two memory-bandwidth threads:
+
+| | before | after |
+|---|---|---|
+| pass / warn / fail | 223 / 60 / 83 | 358 / 0 / 0 |
+| AV p5 / min | −100 / −120 ms | 0 / 0 ms |
+| missing_video | 40 | 0 |
+| other | — | 8 out_of_range, 1 missing_audio (audio skipped during long stalls) |
+
+The legacy generator still draws its picture in full every grain (about
+0.8 core in the lab under load); only the AVS2 layout is incremental.
+
 ## Where the source emit offsets come from
 
 Per essence, in this order:

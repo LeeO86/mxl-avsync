@@ -279,6 +279,32 @@ TEST_CASE("gray code, marker, drops and a half-transition frame")
     CHECK(drops.drops() >= 2);
 }
 
+TEST_CASE("legacy event seen late after skipped grains takes its time from the strip")
+{
+    const auto fmt = fmt50();
+    std::vector<uint16_t> luma;
+    const int period = 25;
+    for (int skip : {0, 1, 3, 6}) {
+        MarkerTracker tracker(fmt, 2);
+        std::vector<VideoObservation> events;
+        for (int frame = 0; frame < 3 * period; ++frame) {
+            const uint64_t seq = static_cast<uint64_t>(1 + frame / period);
+            const int pos = frame % period;
+            // The reader passed over the first `skip` grains of the second period (a stalled analyzer).
+            if (frame >= period && frame < period + skip) continue;
+            render_grain(luma, fmt, seq, pos, period, (seq % 2) == 1);
+            auto obs = tracker.push(luma.data(), fmt.width, frame, frame * 20.0, static_cast<int64_t>(frame) * 20000000);
+            if (obs.event) events.push_back(obs);
+        }
+        const auto it = std::find_if(events.begin(), events.end(), [&](const VideoObservation& e) { return e.seq == 2; });
+        REQUIRE(it != events.end());
+        CHECK(it->time_ms == doctest::Approx(period * 20.0)); // the event frame, not the first frame seen
+        CHECK(it->tai_ns == static_cast<int64_t>(period) * 20000000);
+        const bool corrected = std::find(it->flags.begin(), it->flags.end(), "event_time_from_strip") != it->flags.end();
+        CHECK(corrected == (skip > 0));
+    }
+}
+
 TEST_CASE("live video schedule commits ahead and skips only after four grains")
 {
     const Rate rate{50, 1};
