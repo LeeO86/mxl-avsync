@@ -182,15 +182,20 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             }
             bool commit_onset = false;
             uint64_t onset_ns = 0;
+            uint64_t commit_at = 0;
+            // Synthesis of the onset block (an AVS2 packet waveform) takes a millisecond or two: wake this
+            // much before the onset's commit time, render, then commit on time.
+            constexpr uint64_t prepare_ns = 3000000ULL;
             if (onset) {
                 onset_ns = time_of_index(audio_rate, *onset);
                 const uint64_t due = onset_ns - std::min(onset_ns, lead_ns + block_ns / 2);
-                if (now + 200000 < due) {
+                if (now + prepare_ns + 200000 < due) {
                     if (target > *onset) target = *onset;
-                    if (due < next_wake) next_wake = due;
+                    if (due - prepare_ns < next_wake) next_wake = due - prepare_ns;
                 } else if (onset_ns <= time_of_index(audio_rate, target) + block_ns) {
                     target = std::max(target, *onset + static_cast<uint64_t>(48 * kAudioBlockMs / 2));
                     commit_onset = true;
+                    commit_at = due;
                 }
             }
             if (target > audio_written && max_write > 0) {
@@ -214,6 +219,9 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                             samples[static_cast<size_t>(frame * audio_config.audio_channels + channel)] = mono[static_cast<size_t>(frame)];
                         }
                     }
+                }
+                if (commit_onset && tai_now() < commit_at) {
+                    sleep_until_tai(commit_at);
                 }
                 if (domain.write_samples(audio_written + static_cast<uint64_t>(frames), samples.data(), frames, audio_config.audio_channels, max_write)) {
                     if (commit_onset && onset && *onset >= audio_written && *onset < audio_written + static_cast<uint64_t>(frames) && callbacks.audio_onset_commit) {

@@ -72,6 +72,11 @@ struct Runtime {
     double resyncs = 0;
     double input_skipped = 0;
     std::map<std::string, double> event_results; // events_total{result}: counted when an event closes
+    // Absolute latency per essence (0 video, 1 audio): cumulative histogram and mismatch counter.
+    std::array<std::array<double, 12>, 2> abs_bucket{};
+    std::array<double, 2> abs_count{};
+    std::array<double, 2> abs_sum_s{};
+    std::array<double, 2> mismatch_total{};
     std::string media_detail;
     std::string video_flow;
     std::string audio_flow;
@@ -115,6 +120,10 @@ std::string event_result(const Measurement& event)
     }
     return "other";
 }
+
+// latency_abs_seconds buckets: 1 ms to 5 s, so a direct link (a few ms) and an SRT or gateway chain
+// (hundreds of ms) both land in resolved buckets.
+constexpr std::array<double, 12> kAbsBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5};
 
 constexpr std::array<double, 8> kRenderBuckets{0.001, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08, 0.16};
 
@@ -310,6 +319,20 @@ std::string metrics_text(Runtime& rt)
     os << "mxl_avsync_generator_render_seconds_bucket{le=\"+Inf\"} " << rt.render_count << "\n";
     os << "mxl_avsync_generator_render_seconds_sum " << rt.render_sum_s << "\n";
     os << "mxl_avsync_generator_render_seconds_count " << rt.render_count << "\n";
+    {
+        // A grain's render starts at the previous grain's commit (T_{k-1} - lead) and is late after T_k:
+        // its budget is one grain period plus the video lead (0 on an analyzer).
+        double budget = 0;
+        if (rt.config.role == "generator") {
+            if (const auto format = parse_video_format(rt.config.video_format)) {
+                const Rate pace = format->grain_rate();
+                budget = static_cast<double>(pace.den) / static_cast<double>(pace.num) + std::max(0, rt.config.video_lead_ms) / 1000.0;
+            }
+        }
+        os << "# HELP mxl_avsync_generator_render_budget_seconds Render time per video grain before the grain is late: grain period + AVSYNC_VIDEO_LEAD_MS\n";
+        os << "# TYPE mxl_avsync_generator_render_budget_seconds gauge\n";
+        os << "mxl_avsync_generator_render_budget_seconds " << budget << "\n";
+    }
     os << "# TYPE mxl_avsync_input_state gauge\n";
     for (const char* state : {"waiting", "no_signal", "not_routed", "running", "format_mismatch"}) {
         const int on = ana && rt.input_state == state ? 1 : 0;
@@ -370,6 +393,52 @@ std::string metrics_text(Runtime& rt)
         }
         os << "mxl_avsync_av_offset_seconds_bucket{le=\"+Inf\"} " << count << "\n";
         os << "mxl_avsync_av_offset_seconds_sum " << sum << "\nmxl_avsync_av_offset_seconds_count " << count << "\n";
+    }
+    {
+        const char* essences[2] = {"video", "audio"};
+        // Gauges: the median over the grade window (the last AVSYNC_GRADE_EVENTS events with a value),
+        // NaN until there is one, so a missing latency never reads as 0.
+        std::array<std::vector<double>, 2> recent, recent_u;
+        if (ana) {
+            for (auto it = rt.events.rbegin(); it != rt.events.rend(); ++it) {
+                const std::optional<double>* v[2] = {&it->video_latency_abs_ms, &it->audio_latency_abs_ms};
+                const std::optional<double>* u[2] = {&it->video_latency_abs_uncertainty_ms, &it->audio_latency_abs_uncertainty_ms};
+                for (size_t e = 0; e < 2; ++e) {
+                    if (v[e]->has_value() && static_cast<int>(recent[e].size()) < std::max(1, rt.config.grade_events)) {
+                        recent[e].push_back(**v[e]);
+                        recent_u[e].push_back(u[e]->value_or(0.0));
+                    }
+                }
+                if (static_cast<int>(recent[0].size()) >= rt.config.grade_events && static_cast<int>(recent[1].size()) >= rt.config.grade_events) break;
+            }
+        }
+        os << "# HELP mxl_avsync_latency_abs_ms Absolute latency (emission to arrival), median over the grade window; NaN without a source emit offset\n";
+        os << "# TYPE mxl_avsync_latency_abs_ms gauge\n";
+        for (size_t e = 0; e < 2; ++e) {
+            os << "mxl_avsync_latency_abs_ms{essence=\"" << essences[e] << "\"} ";
+            if (recent[e].empty()) os << "NaN\n"; else os << percentile(recent[e], 0.5) << "\n";
+        }
+        os << "# HELP mxl_avsync_latency_abs_uncertainty_ms Half-width of the absolute latency (median over the grade window); NaN without a value\n";
+        os << "# TYPE mxl_avsync_latency_abs_uncertainty_ms gauge\n";
+        for (size_t e = 0; e < 2; ++e) {
+            os << "mxl_avsync_latency_abs_uncertainty_ms{essence=\"" << essences[e] << "\"} ";
+            if (recent_u[e].empty()) os << "NaN\n"; else os << percentile(recent_u[e], 0.5) << "\n";
+        }
+        os << "# HELP mxl_avsync_latency_abs_seconds Absolute latency of every event with a value since start\n";
+        os << "# TYPE mxl_avsync_latency_abs_seconds histogram\n";
+        for (size_t e = 0; e < 2; ++e) {
+            for (size_t i = 0; i < kAbsBuckets.size(); ++i) {
+                os << "mxl_avsync_latency_abs_seconds_bucket{essence=\"" << essences[e] << "\",le=\"" << kAbsBuckets[i] << "\"} " << rt.abs_bucket[e][i] << "\n";
+            }
+            os << "mxl_avsync_latency_abs_seconds_bucket{essence=\"" << essences[e] << "\",le=\"+Inf\"} " << rt.abs_count[e] << "\n";
+            os << "mxl_avsync_latency_abs_seconds_sum{essence=\"" << essences[e] << "\"} " << rt.abs_sum_s[e] << "\n";
+            os << "mxl_avsync_latency_abs_seconds_count{essence=\"" << essences[e] << "\"} " << rt.abs_count[e] << "\n";
+        }
+        os << "# HELP mxl_avsync_emit_offset_mismatch_total Events whose chain latency was below 0 beyond its uncertainty (wrong source emit offset or clock)\n";
+        os << "# TYPE mxl_avsync_emit_offset_mismatch_total counter\n";
+        for (size_t e = 0; e < 2; ++e) {
+            os << "mxl_avsync_emit_offset_mismatch_total{essence=\"" << essences[e] << "\"} " << rt.mismatch_total[e] << "\n";
+        }
     }
     os << "# TYPE mxl_avsync_video_drops_total counter\n";
     os << "# TYPE mxl_avsync_video_duplicates_total counter\n";
@@ -1202,6 +1271,21 @@ int run_service(Config config)
             rt.events.push_back(event);
             apply_source_emit(rt.events.back(), effective_emit(rt), clock_accuracy_ms(rt.clock_status));
             rt.event_results[event_result(event)] += 1;
+            const Measurement& stored = rt.events.back();
+            const std::optional<double>* chains[2] = {&stored.video_chain_latency_ms, &stored.audio_chain_latency_ms};
+            const std::optional<double>* values[2] = {&stored.video_latency_abs_ms, &stored.audio_latency_abs_ms};
+            for (size_t e = 0; e < 2; ++e) {
+                if (values[e]->has_value()) {
+                    const double seconds = **values[e] / 1000.0;
+                    for (size_t i = 0; i < kAbsBuckets.size(); ++i) {
+                        if (seconds <= kAbsBuckets[i]) rt.abs_bucket[e][i] += 1;
+                    }
+                    rt.abs_count[e] += 1;
+                    rt.abs_sum_s[e] += seconds;
+                } else if (chains[e]->has_value()) {
+                    rt.mismatch_total[e] += 1; // a chain latency but no absolute value: emit_offset_mismatch
+                }
+            }
             if (rt.events.size() > 1000) {
                 rt.events.erase(rt.events.begin(), rt.events.begin() + static_cast<std::ptrdiff_t>(rt.events.size() - 1000));
             }

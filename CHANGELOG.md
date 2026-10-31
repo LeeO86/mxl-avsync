@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.6 (unreleased)
+
+- Absolute-latency metrics per essence: `mxl_avsync_latency_abs_ms` and `mxl_avsync_latency_abs_uncertainty_ms` (gauges, median over the grade window of `AVSYNC_GRADE_EVENTS` events, `NaN` without a value), `mxl_avsync_latency_abs_seconds` (histogram of every event since start, 1 ms to 5 s, +Inf) and `mxl_avsync_emit_offset_mismatch_total` (counter). All exported from the first scrape.
+- `AVSyncGeneratorRenderSlow` fires at render p99 above 75 % of the new gauge `mxl_avsync_generator_render_budget_seconds` (grain period + video lead: 30 ms at 50p with the default 20 ms lead), not a fixed 10 ms that a healthy busy node (p99 17.6 ms, 0 late) exceeded permanently. New rule `AVSyncEmitOffsetMismatch`.
+- The audio onset block is rendered 3 ms ahead and committed on time: measured audio emit −24.94 ms (spread 0.02 ms); in 2.0.5 the packet synthesis delayed it to −24.2 … −22.5 ms.
+
 ## 2.0.5 (2026-10-31)
 
 - Absolute latency as the headline: `video_latency_abs_ms` / `audio_latency_abs_ms` (emission → arrival) with `*_latency_abs_uncertainty_ms`, never negative. A chain latency below 0 inside its uncertainty is 0 ("0 ± u"); further below 0 gives no value and the flag `emit_offset_mismatch`. The UI latency card and the widget show "v ± u ms" with the clock source, state and accuracy; "arrival vs timestamp", the source emit offsets and the raw chain latency move to a Diagnostics card. The measurement API adds `clock`, `latency_basis` and the absolute fields; all earlier fields stay.
