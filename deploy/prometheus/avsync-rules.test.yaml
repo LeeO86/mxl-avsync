@@ -30,6 +30,22 @@ tests:
         values: '0+3000x30'
       - series: 'mxl_avsync_generator_render_seconds_bucket{instance="g",le="+Inf"}'
         values: '0+3000x30'
+      - series: 'mxl_avsync_generator_render_budget_seconds{instance="g"}'
+        values: '0.04x30'
+      # generator h: p99 about 17.6 ms (the platform node), budget 40 ms: no alert
+      - series: 'mxl_avsync_generator_render_seconds_bucket{instance="h",le="0.01"}'
+        values: '0+1500x30'
+      - series: 'mxl_avsync_generator_render_seconds_bucket{instance="h",le="0.02"}'
+        values: '0+3000x30'
+      - series: 'mxl_avsync_generator_render_seconds_bucket{instance="h",le="+Inf"}'
+        values: '0+3000x30'
+      - series: 'mxl_avsync_generator_render_budget_seconds{instance="h"}'
+        values: '0.04x30'
+      # analyzer a: emit offset mismatches on audio
+      - series: 'mxl_avsync_emit_offset_mismatch_total{instance="a",essence="audio"}'
+        values: '0 0 0 0 0 0 0 0 0 0 1 2 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+      - series: 'mxl_avsync_emit_offset_mismatch_total{instance="a",essence="video"}'
+        values: '0x30'
     alert_rule_test:
       - eval_time: 20m
         alertname: AVSyncMissingEvents
@@ -55,4 +71,9 @@ tests:
         alertname: AVSyncGeneratorRenderSlow
         exp_alerts:
           - exp_labels: {severity: warning, instance: g}
-            exp_annotations: {summary: 'Generator picture render p99 above 10 ms (a grain is 20 ms at 50p)'}
+            exp_annotations: {summary: 'Generator picture render p99 above 75 % of its budget (grain period + video lead)'}
+      - eval_time: 15m
+        alertname: AVSyncEmitOffsetMismatch
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: a, essence: audio}
+            exp_annotations: {summary: 'Chain latency below 0 beyond its uncertainty; the source emit offset (entered or tag) or the clock is wrong'}

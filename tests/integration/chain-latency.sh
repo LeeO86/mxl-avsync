@@ -104,7 +104,7 @@ while time.time() < deadline and len(tagged) < 4:
     time.sleep(1)
     tagged = [e for e in events() if e.get("video_latency_abs_ms") is not None]
 assert len(tagged) >= 4 and all(e["video_source_emit_offset_ms"] == -20 and e["audio_source_emit_offset_ms"] == -25 for e in tagged), tagged[:1]
-# Tag (nominal -25): the direct link reads audio chain about +1 ms, never a mismatch.
+# Tag (nominal -25): the direct link reads audio chain 0..+1 ms, never a mismatch.
 chains = sorted(e["audio_chain_latency_ms"] for e in tagged)
 assert 0 <= chains[len(chains) // 2] <= 2 and all("emit_offset_mismatch" not in e.get("flags", []) for e in tagged), chains
 m = get(aapi + "/api/v1/measurement")
@@ -112,9 +112,9 @@ assert m["source_emit_offsets"]["source"] == "nmos-tag" and m["source_emit_offse
 # Entered values win over the tag (here the same numbers, so the source label is what changes).
 
 gen = get(gapi + "/api/v1/status")["emit_offsets"]
-# Each event's audio onset is committed at a fixed offset: within 1.5 ms of the nominal, spread under 1 ms.
+# Each event's audio onset is committed at a fixed offset: within 0.5 ms of the nominal (rendered ahead, committed on time).
 onset = gen["audio_commit_vs_onset_ms"]
-assert -25 <= onset["p50"] <= -23.5 and onset["max"] - onset["min"] < 1.0 and abs(gen["audio_ms"] - onset["p50"]) < 0.01, gen
+assert -25 <= onset["p50"] <= -24.5 and onset["max"] - onset["min"] < 0.5 and abs(gen["audio_ms"] - onset["p50"]) < 0.01, gen
 assert patch(aapi + "/api/v1/config", {"AVSYNC_SOURCE_EMIT_VIDEO_MS": str(gen["video_ms"]), "AVSYNC_SOURCE_EMIT_AUDIO_MS": str(gen["audio_ms"])}) in (200, 204)
 since = time.time()
 absolute = []
@@ -144,6 +144,16 @@ while time.time() < deadline and not flagged:
     time.sleep(1)
     flagged = [e for e in events() if e.get("video_source_emit_offset_ms") == 40]
 assert flagged and all("video_latency_abs_ms" not in e and "emit_offset_mismatch" in e["flags"] for e in flagged), flagged[:1]
+metrics = {}
+for line in urllib.request.urlopen(aapi + "/metrics", timeout=2).read().decode().splitlines():
+    if line and not line.startswith("#"):
+        name, _, value = line.rpartition(" ")
+        metrics[name] = float(value)
+assert 0 <= metrics['mxl_avsync_latency_abs_ms{essence="video"}'] <= 25, metrics
+assert metrics['mxl_avsync_latency_abs_uncertainty_ms{essence="audio"}'] > 1.5, metrics
+assert metrics['mxl_avsync_latency_abs_seconds_count{essence="video"}'] >= 6, metrics
+assert metrics['mxl_avsync_latency_abs_seconds_bucket{essence="video",le="0.05"}'] == metrics['mxl_avsync_latency_abs_seconds_count{essence="video"}'], metrics
+assert metrics['mxl_avsync_emit_offset_mismatch_total{essence="video"}'] >= 1 and metrics['mxl_avsync_emit_offset_mismatch_total{essence="audio"}'] == 0, metrics
 ptp = get(aapi + "/api/v1/status")["ptp"]
 assert ptp["gm_identity"] == "ec4670fffe00fe77" and ptp["port_state"] == "SLAVE" and ptp["path_delay_ns"] == 7670, ptp
 print("absolute latency video", round(absolute[0]["video_latency_abs_ms"], 2), "±", round(absolute[0]["video_latency_abs_uncertainty_ms"], 3),
