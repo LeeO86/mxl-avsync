@@ -6,9 +6,10 @@ import { requireNativeViewManager } from 'expo-modules-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import native from './modules/avsync';
 import { receiveReading, readingPresentation, savedReading } from './src/reading.mjs';
+import { CAPTURE_RATES, captureRate, captureRateLabel, captureStatus } from './src/capture.mjs';
 import { generatorOptions } from './src/generator.mjs';
 import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
-import { applyTimeReference, clockRadiusText, clockSettings, generatorClockOptions, measurementSourceKey, referenceSummary, synchronizeClock } from './src/time-reference.mjs';
+import { applyTimeReference, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, measurementSourceKey, referenceSummary, synchronizeClock } from './src/time-reference.mjs';
 import { offsetText, measureSentence, formatResultWhen } from './src/measure.mjs';
 import { validCalibration, calibrationSummary, makeCalibration, nearestFrame } from './src/workflow.mjs';
 
@@ -30,7 +31,8 @@ function LatencyPanel({ values, hint, clock, onCheck, checking, error, sampleNot
   <View style={{ flexDirection: 'row', gap: 24, marginTop: 5 }}><Text style={{ color: ink, fontSize: 17 }}>Video {format(values.video)}</Text><Text style={{ color: ink, fontSize: 17 }}>Audio {format(values.audio)}</Text></View>
   <Text style={{ color: muted, fontSize: 10, marginTop: 4 }}>{values.video === null ? hint : 'Source time → phone capture · includes phone capture delay'}</Text>
   {sampleNote && <Text style={{ color: orange, fontSize: 10, marginTop: 4 }}>{sampleNote}</Text>}
-  <Text style={{ color: error ? orange : muted, fontSize: 10, marginTop: 4 }}>{error || clock}</Text>
+  <Text style={{ color: error ? orange : muted, fontSize: 10, marginTop: 4 }}>{error || `Current reference: ${clock}`}</Text>
+  {details?.clock && <Text style={{color:details.clock.source==='device-utc' ? orange : muted,fontSize:10,marginTop:4}}>Measurement clock: {measurementClockLabel(details.clock)}</Text>}
   <Text style={{ color: muted, fontSize: 10, marginTop: 4 }}>{details?.clock?.uncertaintyMs != null ? `Clock contribution ${clockRadiusText(details.clock.uncertaintyMs)} · capture/source uncertainty unknown` : 'Capture, source and clock accuracy unknown'}</Text>
   <Text style={{ color: muted, fontSize: 10 }}>{details?.basis ? [...new Set(Object.values(details.basis))].join(' · ') : 'Relative to source timestamp'}</Text>
   {details?.flags?.some(flag => flag.endsWith('mismatch')) && <Text style={{color: orange, fontSize: 11}}>Clock or source emit offset mismatch · see diagnostics</Text>}
@@ -165,6 +167,8 @@ export default function App() {
  const ask = async () => { await requestCamera(); await requestMic(); };
  const cancelCalibration = () => { setFlow(null); camera.current?.resumeAnalysis(); };
  const report = event => {
+  if (Number.isFinite(event.nativeEvent.requestedFps) && event.nativeEvent.requestedFps !== captureRate(session)) return;
+  if (Number.isFinite(event.nativeEvent.captureRateRejected)) setSession(previous=>({...previous,captureFps:event.nativeEvent.captureRateRejected}));
   const sourceKey = measurementSourceKey(event.nativeEvent);
   if (sourceKey && !session.emitSourceId && (timeSettings.videoEmitMs !== null || timeSettings.audioEmitMs !== null)) setSession(previous => ({...previous,emitSourceId:sourceKey}));
   const value = applyTimeReference(event.nativeEvent, clockCheck, timeSettings);
@@ -206,10 +210,10 @@ export default function App() {
    : tab === 'measure' || flow ? <View style={{ flex: 1 }}>
     <View style={{ flex: 1, backgroundColor: '#000', margin: 12, borderRadius: 12, overflow: 'hidden', justifyContent: 'center' }}>
      {!NativeCamera ? <Text style={{ ...text, padding: 20 }}>{Platform.OS === 'android' ? 'Live AV measurement is not available on Android yet. GNSS time is available in Settings.' : 'Install the new native build to enable high-frame-rate live capture.'}</Text>
-      : cameraPermission?.granted && micPermission?.granted ? <NativeCamera ref={camera} active={running || Boolean(flow)} taiUtcOffset={taiUtcSeconds} onReport={report} style={{ flex: 1 }} />
+      : cameraPermission?.granted && micPermission?.granted ? <NativeCamera ref={camera} active={running || Boolean(flow)} taiUtcOffset={taiUtcSeconds} captureFps={captureRate(session)} onReport={report} style={{ flex: 1 }} />
       : <View style={{ padding: 20 }}><Text style={text}>Allow camera and microphone for live AV sync measurement.</Text><Button title="Allow access" onPress={ask} /></View>}
      {!flow && <View pointerEvents="none" style={{ position: 'absolute', left: 12, right: 12, top: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}><SignalPill value={feedback.audio} icon="pulse-outline" /><SignalPill value={feedback.picture} icon="scan-outline" /></View>}
-     {status.configuredFps > 0 && <Text style={{ position: 'absolute', left: 14, bottom: 12, color: ink, backgroundColor: '#0009', padding: 5, borderRadius: 5 }}>{status.configuredFps.toFixed(0)} fps camera · {(status.fps || 0).toFixed(0)} fps processed</Text>}
+     {status.configuredFps > 0 && <Text style={{ position: 'absolute', left: 14, bottom: 12, color: ink, backgroundColor: '#0009', padding: 5, borderRadius: 5 }}>{captureStatus(status)}</Text>}
      {flow && <View style={{ position: 'absolute', top: 12, left: 12, right: 12, padding: 12, borderRadius: 8, backgroundColor: '#121417db' }}><Text style={text}>{flow === 'listening' ? 'Listening… Capture continues for 700 ms AFTER the sound.' : 'Aim at one visible clap or tap. Start, wait a second, then make the sound.'}</Text></View>}
     </View>
     {flow ? <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>{flow === 'aim' && <Button title="Start calibration" disabled={!NativeCamera || !cameraPermission?.granted || !micPermission?.granted} onPress={() => { setFlow('listening'); camera.current?.beginCalibration(); }} />}<Button title="Cancel" onPress={cancelCalibration} />{notice && <Text style={{ color: orange }}>{notice}</Text>}</View>
@@ -235,6 +239,13 @@ export default function App() {
        <Text style={{ color: correction.state === 'active' ? ink : orange, fontSize: 21, marginTop: 5 }}>Current correction {offsetText(correction.appliedOffsetMs)}</Text>
        <Text style={{ color: muted, marginTop: 6, lineHeight: 19 }}>{correction.state === 'active' ? 'Applied to live AV sync measurements.' : correction.state === 'inactive' ? `Saved correction ${offsetText(correction.storedOffsetMs)} is no longer valid. Repeat calibration to use it again.` : 'No calibration saved. Measurements use 0 ms correction.'}</Text>
        {correction.savedAt !== null && <Text style={{ color: muted, fontSize: 12, marginTop: 6 }}>Saved {formatResultWhen(correction.savedAt)}</Text>}
+      </View>
+      <View style={{marginVertical:12}}>
+       <Text style={text}>Camera frame rate</Text>
+       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:8}}>{CAPTURE_RATES.map(fps => <Pressable key={fps} accessibilityRole="button" accessibilityLabel={`Camera ${captureRateLabel(fps)}`} accessibilityState={{selected:captureRate(session)===fps,disabled:Boolean(flow)}} disabled={Boolean(flow)} onPress={() => {setReadingSnapshot(null);setStatus({});setSession(previous=>({...previous,captureFps:fps}));setNotice('Capture rate changed · wait for fresh events');}} style={{padding:9,borderRadius:8,backgroundColor:captureRate(session)===fps ? '#386779' : '#2a3644',opacity:flow ? 0.4 : 1}}><Text style={text}>{captureRateLabel(fps)}</Text></Pressable>)}</View>
+       <Text style={{color:muted,fontSize:11,marginTop:6}}>120 fps comparison default · lower load, 8.3 ms frame interval. Maximum uses the fastest supported mode. A rate change starts a fresh measurement and may make the saved calibration inactive.</Text>
+       <Text style={{color:muted,fontSize:11,marginTop:6}}>{captureStatus(status)} · {status.captureContext?.cameraMode || 'format pending'}</Text>
+       {status.captureStats && <Text style={{color:muted,fontSize:11,marginTop:4}}>Max frame gap {status.captureStats.maxFrameGapMs?.toFixed(1)} ms · drop callbacks {status.captureStats.dropCallbacks} · poll max {status.captureStats.pollProcessingMaxMs?.toFixed(1)} ms</Text>}
       </View>
       <Text style={{ color: muted, fontSize: 12, marginTop: 12 }}>Latency uses matching live source TAI timestamps and the selected phone clock. Capture and source clock accuracy are unknown. Clock synchronization corrects UTC mapping only; it does not calibrate capture or physical source output.</Text><View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}><Text style={{ color: ink, flex: 1 }}>Source TAI−UTC (seconds)</Text><TextInput accessibilityLabel="Source TAI minus UTC seconds" keyboardType="number-pad" value={taiDraft} onChangeText={value => { if (/^\d{0,3}$/.test(value)) setTaiDraft(value); }} style={{ color: ink, backgroundColor: '#121417', borderRadius: 6, padding: 8, minWidth: 48, textAlign: 'center' }} /><Pressable accessibilityRole="button" disabled={!taiDraft || Number(taiDraft) > 100} onPress={() => { setSession(previous => ({ ...previous, taiUtcSeconds: Number(taiDraft) })); setStatus(previous => ({ ...previous, latency: { state: 'waiting_for_live_qr' } })); }} style={{ padding: 8 }}><Text style={{ color: !taiDraft || Number(taiDraft) > 100 ? muted : orange }}>Apply</Text></Pressable></View><View style={{marginVertical: 12}}>
        <Text style={text}>Time reference · {Platform.OS === 'android' ? 'GNSS' : 'NTP'}</Text>

@@ -2,7 +2,7 @@
   "expo": {
     "name": "AVsync",
     "slug": "mxl-avsync",
-    "version": "2.0.5",
+    "version": "2.0.6",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "platforms": [
