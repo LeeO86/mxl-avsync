@@ -138,7 +138,7 @@ The UI always shows the sign and a sentence: `+35 ms — audio 35 ms after video
 | Time | How | Meaning |
 | --- | --- | --- |
 | **Index time** `t_idx` | TAI time of the grain index (video) or of the sample index plus the sub-sample peak position (audio) | the media time the chain stamped on the content |
-| **Arrival time** `t_arr` | TAI clock (`mxlGetTime`) when the reader saw the grain or sample window become available | when the content was there to be read |
+| **Arrival time** `t_arr` | TAI clock (`mxlGetTime`) when the reader saw the grain or sample window become available. Since 2.0.5 (audio) and 2.0.7 (video) a watch thread with its own reader polls each flow's head every 0.5 ms, so the stamp is the commit as seen by a reader, independent of where the analyzer's main loop is | when the content was there to be read |
 
 From these:
 
@@ -807,12 +807,12 @@ Prefix `mxl_avsync_`. Every family is exported from the start, counters at 0 (da
 | `generator_render_seconds` | histogram (buckets 1, 2, 5, 10, 20, 40, 80, 160 ms, +Inf) | | gen; picture render and v210 pack per video grain (2.0.4) |
 | `generator_render_budget_seconds` | gauge | | gen; render time per grain before the grain is late: grain period + `AVSYNC_VIDEO_LEAD_MS` (40 ms at 50p), 0 on an analyzer (2.0.6) |
 | `latency_abs_ms`, `latency_abs_uncertainty_ms` | gauge (median over the grade window, the last `AVSYNC_GRADE_EVENTS` events with a value); `NaN` until there is one | `essence` | ana; absolute latency and its half-width (§3.3, 2.0.6) |
-| `latency_abs_seconds` | histogram (buckets 1, 2, 5, 10, 20, 50, 100, 200, 500 ms, 1, 2, 5 s, +Inf), every event since start | `essence` | ana (2.0.6) |
+| `latency_abs_seconds` | histogram, every event since start; buckets (2.0.7) 0.5 ms, 1 ms steps to 10 ms, 5 ms steps to 60 ms, 80, 100, 150 … 300 ms, 25 ms steps to 400 ms, 10 ms steps to 600 ms, 0.7, 0.8, 1, 1.5, 2, 3, 5, 10 s, +Inf (59 + 1) | `essence` | ana (2.0.6) |
 | `emit_offset_mismatch_total` | counter | `essence` | ana; events with a chain latency below 0 beyond its uncertainty, so no absolute value (2.0.6) |
 | `grade` | gauge 1 for the grade | `grade` (`pass`, `warn`, `fail`, `invalid`) | ana |
 | `av_offset_ms` | gauge (median of the grade window: the last `AVSYNC_GRADE_EVENTS` valid events; before 2.0.6 the last event) | | ana |
 | `av_offset_deviation_ms` | gauge (median of the grade window; before 2.0.6 always 0) | | ana |
-| `av_offset_seconds` | histogram (signed buckets ±5, 15, 40, 60, 100, 200, 500 ms), every paired event since start (before 2.0.6: the last 1000 retained events) | | ana |
+| `av_offset_seconds` | histogram, every paired event since start (before 2.0.6: the last 1000 retained events); signed buckets (2.0.7) 0, ±0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 40, 60, 100, 200, 300, 500 ms (the grade edges included) | | ana |
 | `video_latency_ms`, `audio_latency_ms` | gauge (median), absent without a reference | | ana |
 | `video_index_shift_ms`, `audio_index_shift_ms` | gauge | | ana |
 | `video_drops_total`, `video_duplicates_total` | counter | | ana |

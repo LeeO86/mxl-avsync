@@ -499,24 +499,27 @@ bool acceptable_audio(const FlowDesc& flow)
     return flow.media_type == "audio/float32" && flow.channels > 0;
 }
 
-// Analyzer: when audio samples became readable. A thread with its own MXL reader polls the flow head
-// every half millisecond and keeps (head, time) marks, so an onset's arrival is the commit as seen by a
-// reader, not an estimate from the main loop's read time (which reads audio only after video grains).
-class AudioCommitWatch {
+// Analyzer: when grains (video) or samples (audio) became readable. A thread with its own MXL reader
+// polls the flow head every half millisecond and keeps (head, time) marks, so an arrival is the commit as
+// seen by a reader, not the main loop's read time, which depends on where the loop was when the writer
+// committed (audio is read only after video grains; a busy or catching-up loop reads video late).
+class CommitWatch {
 public:
+    explicit CommitWatch(bool video) : video_(video) {}
     void follow(const std::string& domain_path, const std::string& flow_id)
     {
         std::lock_guard lock(mu_);
         want_domain_ = domain_path;
         want_flow_ = flow_id;
     }
-    // TAI ms of the first observed head past `sample`; nothing when not observed (e.g. before the watch opened).
-    std::optional<double> arrival_ms(uint64_t sample) const
+    // TAI ms when the head first covered `index` (video: head >= grain; audio: head > sample, the head is
+    // the end of the written range); nothing when not observed (e.g. before the watch opened).
+    std::optional<double> arrival_ms(uint64_t index) const
     {
         std::lock_guard lock(mu_);
-        if (!have_first_ || sample < first_head_) return std::nullopt;
+        if (!have_first_ || (video_ ? index <= first_head_ : index < first_head_)) return std::nullopt;
         for (const auto& mark : marks_) {
-            if (mark.first > sample) return static_cast<double>(mark.second) / 1e6;
+            if (video_ ? mark.first >= index : mark.first > index) return static_cast<double>(mark.second) / 1e6;
         }
         return std::nullopt;
     }
@@ -542,10 +545,13 @@ public:
                     have_first_ = false;
                 }
                 std::string error;
-                if (!flow_id.empty() && domain.open(domain_path, &error) && domain.create_audio_reader(flow_id, nullptr, nullptr, &error)) {
+                const bool reader = !flow_id.empty() && domain.open(domain_path, &error)
+                    && (video_ ? domain.create_video_reader(flow_id, nullptr, nullptr, nullptr, nullptr, &error)
+                               : domain.create_audio_reader(flow_id, nullptr, nullptr, &error));
+                if (reader) {
                     open_domain = domain_path;
                     open_flow = flow_id;
-                    last = domain.audio_head();
+                    last = video_ ? domain.video_head() : domain.audio_head();
                     std::lock_guard lock(mu_);
                     first_head_ = last;
                     have_first_ = true;
@@ -554,7 +560,7 @@ public:
                 }
             }
             if (!open_flow.empty()) {
-                const uint64_t head = domain.audio_head();
+                const uint64_t head = video_ ? domain.video_head() : domain.audio_head();
                 if (head != last) {
                     last = head;
                     const uint64_t now = tai_now();
@@ -569,6 +575,7 @@ public:
     }
 
 private:
+    const bool video_;
     mutable std::mutex mu_;
     std::string want_domain_, want_flow_;
     std::deque<std::pair<uint64_t, uint64_t>> marks_;
@@ -625,10 +632,13 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     ResultCaption caption;
     std::thread result_thread(run_result_writer, std::ref(stop), std::ref(callbacks), std::ref(caption));
 
-    AudioCommitWatch audio_watch;
+    CommitWatch audio_watch(false);
+    CommitWatch video_watch(true);
     std::thread audio_watch_thread([&] { audio_watch.run(stop); });
+    std::thread video_watch_thread([&] { video_watch.run(stop); });
     auto close_readers = [&] {
         audio_watch.follow("", "");
+        video_watch.follow("", "");
         video_domain.close();
         audio_domain.close();
         have_cursor = false;
@@ -753,6 +763,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 && audio_domain.open(audio.domain_path, &error)
                 && audio_domain.create_audio_reader(audio.flow_id, &audio_channels, &max_read, &error)) {
                 audio_watch.follow(audio.domain_path, audio.flow_id);
+                video_watch.follow(video.domain_path, video.flow_id);
                 if (video.interlaced && video.height % 2 != 0) {
                     status.state = "format_mismatch";
                     status.detail = "odd interlaced height";
@@ -881,7 +892,12 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         }
         cursor = want;
         have_cursor = true;
-        const uint64_t video_arrived_ns = tai_now();
+        // The commit as seen by the video watch; when the loop was already waiting for this grain the watch
+        // may not have its mark yet, and the loop's own time is then the arrival.
+        uint64_t video_arrived_ns = tai_now();
+        if (const auto seen = video_watch.arrival_ms(want)) {
+            video_arrived_ns = std::min(video_arrived_ns, static_cast<uint64_t>(std::llround(*seen * 1e6)));
+        }
         note_preview_v210("input", packed.data(), video.width, grain_rows);
         unpack_v210_luma(packed.data(), video.width, grain_rows, luma.data(), video.width);
         VideoFormat tracked;
@@ -1134,6 +1150,9 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     close_readers();
     if (audio_watch_thread.joinable()) {
         audio_watch_thread.join();
+    }
+    if (video_watch_thread.joinable()) {
+        video_watch_thread.join();
     }
     if (result_thread.joinable()) {
         result_thread.join();
