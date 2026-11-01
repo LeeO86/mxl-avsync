@@ -96,6 +96,26 @@ original selected frame timestamp, not the interpolated preview clock.
 
 ## On-device comparison diagnostics (unreleased)
 
+The fast path probes sparse finder/flash pixels on every frame. It does not
+rectify or decode a full raster per frame. QR-module evidence is gathered only
+on real white-pulse frames, and identity matching runs only when evidence changes.
+Slow Vision work prefers the period around an observed pulse and refreshes
+geometry within 350 ms; unknown/lost geometry retains 100-ms reacquisition.
+The prediction does not suppress unexpected pulses or synthesize timestamps.
+Unidentified full-raster acquisition is throttled until a QR or real legacy pose
+is acquired; calibration continues to retain every delivered frame.
+
+Profiling separates `videoLock/Probe/UnlockProcessing*Ms`, `qrVisionProcessing*Ms`
+(worker), its `qrVisionFirst/Fallback` revisions, `qrApplyProcessing*Ms` (capture
+queue) and `housekeepingProcessing*Ms`. Housekeeping includes any snapshot it
+triggers; those costs must not be added as independent totals. Each duration
+ring covers its last 128 calls, so different kinds cover different time ranges.
+`videoPaths` counts capture/reset paths, including skipped unidentified frames.
+`qrFlash` counts probes, module-check frames, matching work and detected/confirmed
+edges since source/reset. Its last 64 normalized photometry samples retain white
+and mixed transition frames plus sparse black references, with original capture
+times. Counters are workload/rejection evidence, not physical accuracy bounds.
+
 Settings and the scrollable Timing diagnostics sheet show delivered fps (camera
 callbacks, not QR recognition rate), recent p95/max PTS gaps, capture callback
 costs, snapshot-copy cost, worker-analysis cost and delivery delay. A live warning

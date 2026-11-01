@@ -28,6 +28,14 @@ export function captureDiagnostics(report = {}, ageMs = Infinity, active = true)
   `Snapshot copy max ${ms(stats.snapshotProcessingMaxMs)} · analysis max ${ms(stats.pollProcessingMaxMs)}`,
   `Analysis delivery delay ${ms(report.analysisDelayMs)} · ${report.analysisMode || 'mode unreported'}`,
   `AVFoundation drops ${stats.dropCallbacks ?? 'unknown'} · inferred missing ${stats.estimatedMissingFramesFromPts ?? 'unknown'} (overlap; do not add)`];
+ if(Number.isFinite(stats.videoLockProcessingMaxMs)) {
+  lines.push(`Video cost max · buffer lock ${ms(stats.videoLockProcessingMaxMs)} · probe ${ms(stats.videoProbeProcessingMaxMs)} · unlock ${ms(stats.videoUnlockProcessingMaxMs)}`);
+  lines.push(`QR worker max ${ms(stats.qrVisionProcessingMaxMs)} · QR apply max ${ms(stats.qrApplyProcessingMaxMs)} · housekeeping max ${ms(stats.housekeepingProcessingMaxMs)}`);
+ }
+ if(report.qrFlash) {
+  const q=report.qrFlash;
+  lines.push(`Since source/reset · ${q.probeFrames} flash probes · ${q.symbolFrames} QR pixel checks · ${q.emitted}/${q.edges} confirmed/detected edges`);
+ }
  if(edge) lines.push(`Latest paired video #${latest.seq} · capture bracket ${ms(edge.frameGapMs)}`);
  const warning=!stale && frameMs && Number.isFinite(stats.maxFrameGapMs) && stats.maxFrameGapMs>frameMs*2.5 ?
   'Capture gaps exceed two frame intervals. Missing camera samples can increase video timing variation; this does not identify WebRTC/display jitter.' : null;

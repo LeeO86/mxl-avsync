@@ -140,7 +140,8 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
         # No QR or test picture at the receiver: audio timecode still supplies latency.
         black=folder/'audio-only.mov'
         run(['ffmpeg','-v','error','-y','-i',movie,'-vf','drawbox=color=black:t=fill','-c:v','libx264','-c:a','copy',black])
-        audio_only=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(black)],text=True,env={**os.environ,'SIMCTL_CHILD_AVSYNC_TEST_WALL_OFFSET_MS':'1700000000120'}))
+        audio_only=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(black)],text=True,env={**os.environ,'SIMCTL_CHILD_AVSYNC_TEST_WALL_OFFSET_MS':'1700000000120','SIMCTL_CHILD_AVSYNC_TEST_SPARSE_ACQUISITION':'1'}))
+        assert audio_only[-1]['testVideoPaths']['warmupSkipped'] > 100, audio_only[-1]
         decoded=[row for row in audio_only if row.get('audioTimecode',{}).get('valid')]
         assert decoded and abs(decoded[-1]['latency']['audio_ms']-155)<1,audio_only
         assert all('video_ms' not in row['latency'] for row in decoded),decoded
@@ -174,6 +175,9 @@ with (nullcontext(artifact_dir) if artifact_dir else tempfile.TemporaryDirectory
                 readings=json.loads(subprocess.check_output(['xcrun','simctl','spawn',device,str(tmp/'live-runner'),str(target)],text=True,env={**os.environ,'SIMCTL_CHILD_AVSYNC_TEST_SCAN_QR':'1'}))
                 good=[row for row in readings if row.get('kind')=='reading']
                 assert good and abs(good[-1]['offset_ms']-35)<1,(event_rate,variant,readings)
+                assert good[-1]['testVideoPaths']['qrFlash']>0,good[-1]
+                q=good[-1]['qrFlash']
+                assert q['symbolFrames']<q['probeFrames']*.25 and q['moduleReads']==q['symbolFrames']*1089,q
         print('PASS: actual AVS2 pixels decoded in native file/live analyzers, cropped/rotated, 1/2 Hz; no injected QR metadata')
     print('PASS: compact LIVE audio timecode at 1/2 Hz, +35-ms AV, independent +120/+155-ms estimated latencies, audio-only without QR/image, actual generated FILE QR when AVSYNC_TESTFILE_TOOL is set.')
     print(f"PASS: +35 ms -> {report['offset_ms']:.6f} ms, {report['eventCount']} events; orientation metadata; live PCM16; conflicting offsets suppressed; 700-ms calibration tail; >100 frames at 240 fps; real calibration frames; missing-audio and missing-marker errors; independent chirp diagnostics; silent audio and stale picture status.")

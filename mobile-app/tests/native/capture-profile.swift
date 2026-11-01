@@ -19,6 +19,12 @@ import Foundation
     precondition(gap>40)
     precondition(stats["pollProcessingMaxMs"] as! Double==27)
     t.reset(fps:60);precondition(t.snapshot()["deliveredFrames"] as! Int==0)
+    for i in 0..<1000 { t.processing("qrVision",ms:Double(i));t.videoPath(4) }
+    let profiled=t.snapshot()
+    precondition(profiled["qrVisionProcessingMaxMs"] as! Double==999)
+    precondition(profiled["qrVisionProcessingP95Ms"] as! Double>980)
+    precondition((profiled["videoPaths"] as! [String:Int])["warmupSkipped"]==1000)
+    t.reset(fps:240);precondition((t.snapshot()["videoPaths"] as! [String:Int]).isEmpty)
     print("Capture profile/telemetry passed: stable raster, capped rates, real gap at pulse, independent drop/processing counters, reset")
   }
 }

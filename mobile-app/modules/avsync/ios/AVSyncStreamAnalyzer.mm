@@ -6,12 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <chrono>
 #include <memory>
 #if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
 #include "DiagnosticCapture.inc"
 #endif
 
 namespace {
+double work_now_ms() { return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 struct Frame { double time; int w,h; std::vector<uint8_t> luma; };
 struct StreamValues {
  bool calibration=false,complete=false;
@@ -20,12 +22,14 @@ struct StreamValues {
  std::optional<avsync::QrPayload> qr;
  double qrObservedMs=-1e30,wallOffsetMs=0,taiUtcSeconds=37;
  bool haveWallClock=false;
+ bool legacyAcquired=false;
 #if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
  std::shared_ptr<avsync_phone::DiagnosticCapture> diagnostic=avsync_phone::diagnostic_capture();
 #endif
  std::deque<Frame> pictures;
  std::vector<float> audio;
  double audioOrigin=-1;
+ double lastUnidentifiedVideo=-1e30;
 };
 struct Stream: StreamValues {
  std::unique_ptr<avsync::PhoneSession> session;
@@ -42,9 +46,10 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  return data;
 }
 }
-@implementation AVSyncStreamAnalyzer { std::unique_ptr<Stream> state; }
+@implementation AVSyncStreamAnalyzer { std::unique_ptr<Stream> state; BOOL sparseAcquisition; }
 - (instancetype)init { if((self=[super init])) [self reset]; return self; }
 - (void)reset { state=std::make_unique<Stream>(); }
+- (void)setSparseAcquisition:(BOOL)enabled { sparseAcquisition=enabled; }
 - (void)beginCalibration { [self reset];state->calibration=true; }
 - (void)setTaiUtcOffset:(double)seconds { if(std::isfinite(seconds)&&seconds>=0&&seconds<=100)state->taiUtcSeconds=seconds; }
 - (void)setClockAnchor:(double)captureTimeMs unixTimeMs:(double)unixTimeMs {
@@ -84,25 +89,38 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  if(decoded)result[@"codeSeq"]=@(*confirmed);
  return result;
 }
-- (void)pushVideo:(CMSampleBufferRef)sample {
+- (BOOL)qrScanSuggestedAt:(double)timeMs { return !state->calibration && state->session->qr_scan_suggested(timeMs); }
+- (AVSyncVideoWork)pushVideo:(CMSampleBufferRef)sample {
  auto&s=*state;
+ AVSyncVideoWork work={0,0,0,0};
  double time=CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))*1000;
- if(!std::isfinite(time))return;
+ if(!std::isfinite(time))return work;
  if(s.origin<0)s.origin=time;
  s.lastVideo=time;++s.frames;
- CVPixelBufferRef pixel=CMSampleBufferGetImageBuffer(sample);if(!pixel)return;
- CVPixelBufferLockBaseAddress(pixel,kCVPixelBufferLock_ReadOnly);
+ // Before any QR identity, retain only a 10-Hz legacy acquisition attempt.
+ // The independent Vision worker acquires AVS2; 240 full-raster searches/s
+ // on an unidentified scene cannot contribute a trusted AVS2 timestamp.
+ if(sparseAcquisition&&!s.calibration&&!s.qr&&!s.legacyAcquired&&time-s.lastUnidentifiedVideo<100){work.path=4;return work;}
+ s.lastUnidentifiedVideo=time;
+ CVPixelBufferRef pixel=CMSampleBufferGetImageBuffer(sample);if(!pixel)return work;
+ const double lockStart=work_now_ms();
+ const auto locked=CVPixelBufferLockBaseAddress(pixel,kCVPixelBufferLock_ReadOnly);
+ work.lockMs=work_now_ms()-lockStart;
+ if(locked!=kCVReturnSuccess)return work;
+ const double processStart=work_now_ms();
  int w=(int)CVPixelBufferGetWidthOfPlane(pixel,0),h=(int)CVPixelBufferGetHeightOfPlane(pixel,0),stride=(int)CVPixelBufferGetBytesPerRowOfPlane(pixel,0);
  const uint8_t*base=(const uint8_t*)CVPixelBufferGetBaseAddressOfPlane(pixel,0);
  int limit=s.calibration?640:1280,step=std::max(1,(std::max(w,h)+limit-1)/limit),sw=w/step,sh=h/step;
  s.videoWidth=sw;s.videoHeight=sh;
  if(s.calibration){
+  work.path=3;
   Frame f{time,sw,sh,std::vector<uint8_t>(sw*sh)};
   for(int y=0;y<sh;y++)for(int x=0;x<sw;x++)f.luma[y*sw+x]=base[y*step*stride+x*step];
   s.pictures.push_back(std::move(f));
   double oldest=s.spike>=0?s.spike-750:time-750;
   while(!s.pictures.empty()&&(s.pictures.front().time<oldest||s.pictures.size()>800))s.pictures.pop_front();
  }else if(s.session->qr_flash_active()){
+  work.path=2;
   // Sparse photometry directly in the camera plane; no conversion/rectification.
   s.videoWidth=w;s.videoHeight=h;
   s.session->push_video_u8(base,w,h,stride,time);
@@ -115,9 +133,11 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   }
 #endif
  }else{
+  work.path=1;
   std::vector<uint16_t> luma(sw*sh);
   for(int y=0;y<sh;y++)for(int x=0;x<sw;x++)luma[y*sw+x]=base[y*step*stride+x*step]*4;
   s.session->push_video(luma.data(),sw,sh,sw,time,0);
+  s.legacyAcquired=s.session->current_picture().found;
 #if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
   if(s.diagnostic&&s.diagnostic->accepting()){
    NSMutableDictionary *trace=[@{@"locatedFrames":@(s.session->located_frames()),@"validFrames":@(s.session->valid_frames()),@"picture":[self pictureObservation]} mutableCopy];
@@ -126,7 +146,11 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   }
 #endif
  }
+ work.processMs=work_now_ms()-processStart;
+ const double unlockStart=work_now_ms();
  CVPixelBufferUnlockBaseAddress(pixel,kCVPixelBufferLock_ReadOnly);
+ work.unlockMs=work_now_ms()-unlockStart;
+ return work;
 }
 - (void)pushAudio:(CMSampleBufferRef)sample {
  auto&s=*state;
@@ -241,6 +265,12 @@ NSData *wav(const std::vector<float>& samples,int rate) {
  NSMutableArray *chirps=[NSMutableArray array];double bestCorrelation=0;
  for(const auto&hit:report.audio_hits){bestCorrelation=std::max(bestCorrelation,hit.correlation);[chirps addObject:@{@"id":@(hit.chirp_id),@"timeMs":@(hit.time_ms),@"correlation":@(hit.correlation),@"quality":[NSString stringWithUTF8String:hit.quality.c_str()]}];}
  result[@"timeMs"]=@(now);result[@"picture"]=[self pictureObservation];
+ if(s.session->qr_flash_active()){
+  const auto&d=s.session->qr_flash_diagnostics();
+  NSMutableArray *trace=[NSMutableArray array];
+  for(const auto&sample:d.samples)[trace addObject:@{@"timeMs":@(sample.time_ms),@"level":@(sample.level),@"range":@(sample.range),@"phase":sample.phase==2?@"white":sample.phase==1?@"mixed":@"black"}];
+  result[@"qrFlash"]=@{@"scope":@"since source/reset",@"frames":@(d.frames),@"probeFrames":@(d.probe_frames),@"symbolFrames":@(d.symbol_frames),@"moduleReads":@(d.module_reads),@"matchCalls":@(d.match_calls),@"symbolComparisons":@(d.symbol_comparisons),@"mixedFrames":@(d.mixed_frames),@"finderRejections":@(d.finder_rejections),@"geometryRejections":@(d.geometry_rejections),@"edges":@(d.edges),@"emitted":@(d.emitted),@"trace":trace};
+ }
  if(s.haveWallClock)result[@"deviceUtcOffsetMs"]=@(s.wallOffsetMs);
  if(s.qr)result[@"signalIdentity"]=[NSString stringWithUTF8String:(s.qr->test_id+":"+std::to_string(s.qr->source_id)).c_str()];
  NSMutableDictionary *latency=[@{@"state":@"waiting_for_live_qr",@"estimated":@YES,@"taiUtcSeconds":@(s.taiUtcSeconds),@"clockAccuracy":@"unknown",@"videoState":@"waiting_for_live_qr",@"audioState":@"waiting_for_audio_timecode"}mutableCopy];

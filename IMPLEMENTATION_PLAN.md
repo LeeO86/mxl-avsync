@@ -1,5 +1,37 @@
 # mxl-avsync — Implementation plan
 
+## Event-focused phone capture at 240 fps (local work, 2026-11-01)
+
+Maintainer requests profiling and a fast all-frame path with deeper work only
+near real flashes. Existing sparse photometry already reads only finder/panel
+samples; the local baseline at 240 fps measured sub-microsecond median black
+probes and about 14-microsecond white processing on the development Mac. These
+are core-only CPU costs, not phone callback or physical-timing measurements.
+
+Remove unchanged identity-match retries on black frames and stop comparing a
+candidate at its first contradictory module, preserving the exact zero-wrong/
+80%-known gate. All original frame/arrival timestamps and late-QR matching stay.
+Only QR-worker scheduling uses prior edges/declared rate: prefer the pre-pulse
+and post-transition window, wait for the eligible 25-ms identity interval, and
+refresh geometry within 350 ms. Unknown/lost geometry reacquires at the existing
+100-ms retry cap. Every capture frame still receives a cheap flash probe, so
+early/late or unexpected flashes cannot be excluded by a predicted window.
+
+The live view opts into throttled full-raster acquisition on unidentified scenes;
+once a real legacy pose or QR is acquired, its normal path resumes. Calibration
+remains full rate and does not run QR searches. Core/native callers retain the
+old default. Capture telemetry mutates duration rings in place to avoid array
+COW allocation, and distinguishes buffer lock/probe/unlock, Vision revisions,
+QR application and housekeeping. Bounded core counters and normalized flash
+photometry traces expose observed edges versus accepted identities without raw
+media or predicted events. No source/container version, numeric smoothing,
+TestFlight installation, EAS Cloud build or pipeline rollout is implied.
+
+Validation covers adaptive/fixed QR cadence at 60/120/240 fps and 1/2 Hz with
+unexpected ±35-ms pulse shifts; original timestamp/identity gates; native
+AVFoundation acquisition/latency/calibration; local Release builds. Actual
+sustained 240-fps phone delivery still requires the physical same-setup run.
+
 ## Clock clarity and capture diagnostics (local preparation, 2026-11-01)
 
 Maintainer reports the clock status increasing 0.1 ms per two seconds and

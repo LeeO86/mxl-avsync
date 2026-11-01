@@ -1,7 +1,7 @@
 // Explicit metadata allowlist: calibration media, waveform bins, image paths
 // and unrelated persisted state never enter the diagnostic share sheet.
 const fields=['kind','stage','timeMs','diagnosticVersion','signalIdentity','requestedFps','configuredFps','fps',
- 'captureStats','captureContext','analysisMode','analysisDelayMs','clockMapping','clockReference','latency',
+ 'captureStats','captureContext','qrFlash','analysisMode','analysisDelayMs','clockMapping','clockReference','latency',
  'audioPeakDbfs','audioHits','audioSamples','audioTimecode','chirps','events','offset_ms','raw_offset_ms',
  'eventCount','spread_ms','quality','bestCorrelation','videoEvents','lockedSeq','decodedSeq','validFrames',
  'locatedFrames','recentValidFrames','recentLocatedFrames','lastValidFrameAgeMs','lastVideoEventAgeMs',

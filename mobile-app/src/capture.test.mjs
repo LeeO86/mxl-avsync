@@ -42,3 +42,10 @@ test('display and Save both count worker delay when a near-boundary reading beco
  assert.equal(captureReportAge({},100,120),20);
  assert.equal(captureReportAge({},-Infinity,120),Infinity);
 });
+
+test('detailed profiling separates pixel-buffer, QR-worker and capture-queue work',()=>{
+ const value=captureDiagnostics({configuredFps:240,captureStats:{videoLockProcessingMaxMs:.2,videoProbeProcessingMaxMs:.3,videoUnlockProcessingMaxMs:.1,qrVisionProcessingMaxMs:15,qrApplyProcessingMaxMs:.5,housekeepingProcessingMaxMs:1},qrFlash:{probeFrames:2400,symbolFrames:160,emitted:19,edges:20}},0,true);
+ assert.ok(value.lines.some(line=>line.includes('buffer lock 0.2 ms')&&line.includes('probe 0.3 ms')));
+ assert.ok(value.lines.some(line=>line.includes('QR worker max 15.0 ms')&&line.includes('QR apply max 0.5 ms')));
+ assert.ok(value.lines.some(line=>line.includes('160 QR pixel checks')&&line.includes('19/20')));
+});

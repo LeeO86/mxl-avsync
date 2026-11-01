@@ -2,6 +2,15 @@
 
 ## Mobile (unreleased)
 
+- Focus slow QR work around actual pulses with geometry refresh/reacquisition;
+  retain cheap photometry on every frame, including unexpected early/late
+  flashes. Eliminate unchanged black-frame identity retries and stop mismatching
+  candidates early without relaxing the identity gate or altering timestamps.
+- Throttle unidentified full-raster acquisition and avoid duration-ring COW
+  allocations. Add buffer/probe/QR/housekeeping timings, workload counts and
+  bounded normalized flash traces. Sustained 240-fps device delivery remains
+  a hardware check; no cloud build or phone installation is performed here.
+
 - Distinguish the measured sync uncertainty from the assumed 50-ppm holdover
   allowance. The allowance is not measured phone drift and does not increase
   clock correction or latency. Independent repeat checks compare references at
