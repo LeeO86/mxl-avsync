@@ -637,6 +637,14 @@ See [phone time reference](docs/phone-clock.md) for algorithms and limits.
 
 ### 12.3 Calibration
 
+Mobile 2.0.8 review provides synchronized audio/recorded-frame playback, a
+waveform-side play/pause control, blue playhead, waveform tap seeking, and
+accelerating held-arrow single-frame stepping. Saving uses the original
+capture timestamp of the selected frame; preview timing is not calibration
+evidence. The retained pre/post-contact window keeps a matching audio origin.
+Native live DSP uses a separate bounded snapshot worker; capture timestamps
+stay unchanged, and obsolete source/route/reset results are discarded.
+
 The camera and microphone have different capture latencies (OS buffers, exposure, rolling shutter, audio timestamping). They are not assumed to be in sync.
 
 - **Calibration rig:** a small reference device that drives an LED and a piezo click from one microcontroller pin at the same instant (well under 0.1 ms apart), pulsing at the event rate. It is the independent reference the draft asks for; a phone measuring its own playback is not one. `TODO_` build it in M-P1 (parts list and firmware in `mobile-app/calibration/`).

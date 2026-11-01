@@ -8,6 +8,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private let control = DispatchQueue(label: "avsync.camera.control")
   private let samples = DispatchQueue(label: "avsync.camera.samples", qos: .userInitiated)
   private let processor = AVSyncStreamAnalyzer()
+  private let analysis = DispatchQueue(label:"avsync.analysis",qos:.userInitiated,autoreleaseFrequency:.workItem)
+  private var analysisBusy = false
   private var preview: AVCaptureVideoPreviewLayer!
   private var configured = false
   private var targetFps = 0.0
@@ -102,7 +104,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       guard self.configured, let device=self.cameraDevice else { self.requestedFps=fps;return }
       let wasRunning=self.session.isRunning
       if wasRunning { self.session.stopRunning() }
-      self.samples.sync {} // Drain the previous mode before changing report identity.
+      self.samples.sync { self.generation += 1 } // Invalidate old DSP before changing mode/report identity.
       self.requestedFps=fps
       do {
         self.session.beginConfiguration()
@@ -158,8 +160,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
           if !self.session.isRunning { self.samples.sync { self.generation += 1; self.processor.reset();self.telemetry.reset(fps:self.targetFps) }; self.session.startRunning() }
         } catch { self.samples.async { self.emit(["kind": "error", "message": error.localizedDescription]) } }
       } else if self.session.isRunning {
+        self.samples.sync { self.generation += 1 }
         self.session.stopRunning()
-        self.samples.async { self.generation += 1 }
         DispatchQueue.main.async { self.clearOutline() }
       }
     }
@@ -269,10 +271,27 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
         processor.setTaiUtcOffset(taiUtcSeconds)
         let picture = processor.pictureObservation() as? [String: Any] ?? [:]
         DispatchQueue.main.async { [weak self] in self?.observePicture(picture, at:now) }
-        let pollStart=PhoneClock.nowMs()
-        let report=processor.poll() as? [String:Any]
-        telemetry.processing("poll",ms:PhoneClock.nowMs()-pollStart)
-        if let report { emit(report) }
+        if let report=processor.pollCalibration() as? [String:Any] { emit(report) }
+        else if !analysisBusy {
+          let copyStart=PhoneClock.nowMs()
+          if let snapshot=processor.liveSnapshotForPolling() {
+            telemetry.processing("snapshot",ms:PhoneClock.nowMs()-copyStart)
+            analysisBusy=true
+            let captureGeneration=generation
+            let captureSignature=captureContext()
+            analysis.async { [weak self] in
+              let started=PhoneClock.nowMs()
+              let report=snapshot.poll() as? [String:Any]
+              let elapsed=PhoneClock.nowMs()-started
+              self?.samples.async { [weak self] in
+                guard let self else { return };self.analysisBusy=false
+                guard self.generation == captureGeneration, NSDictionary(dictionary:captureSignature).isEqual(to:self.captureContext()), self.processor.acceptLiveAnalysis(snapshot) else { return }
+                self.telemetry.processing("poll",ms:elapsed)
+                if var report { report["analysisMode"]="async-snapshot-v1";report["analysisDelayMs"]=PhoneClock.nowMs()-copyStart;self.emit(report) }
+              }
+            }
+          }
+        }
       }
     }
   }

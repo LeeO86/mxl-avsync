@@ -176,6 +176,10 @@ jobs:
         run: |
           swiftc mobile-app/modules/avsync/ios/ScreenAwakeState.swift mobile-app/tests/native/screen-awake.swift -o /tmp/avsync-screen-awake
           /tmp/avsync-screen-awake
+      - name: Deferred audio decode and immutable snapshots
+        run: |
+          clang++ -std=c++20 -O2 -I core/include -I third_party/pocketfft mobile-app/tests/native/deferred-audio.cpp mobile-app/modules/avsync/ios/Core_*.cpp -o /tmp/avsync-deferred-audio
+          /tmp/avsync-deferred-audio
       - name: Camera rate and capture telemetry
         run: |
           swiftc mobile-app/modules/avsync/ios/CaptureProfile.swift mobile-app/tests/native/capture-profile.swift -o /tmp/avsync-capture-profile

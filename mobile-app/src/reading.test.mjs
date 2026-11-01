@@ -45,3 +45,10 @@ test('QR identity changes also clear a retained reading when the audio lease is 
  assert.equal(last.state,'held');assert.equal(last.ageMs,30400);
  assert.equal(savedReading(s,last,130000).offset_ms,-26);
 });
+
+test('worker delivery delay counts toward reading freshness',()=>{
+ const value={kind:'reading',offset_ms:0,eventCount:3,timeMs:2000,events:[{valid:true,offset_ms:0,videoTimeMs:1900,audioTimeMs:1900}],analysisDelayMs:2100};
+ const snapshot=receiveReading(null,value,null,1000,100);
+ assert.equal(snapshot.eventAgeMs,2200);
+ assert.equal(readingPresentation(snapshot,value,0,100,true).state,'held');
+});

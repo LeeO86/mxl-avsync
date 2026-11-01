@@ -13,8 +13,7 @@
 
 namespace {
 struct Frame { double time; int w,h; std::vector<uint8_t> luma; };
-struct Stream {
- std::unique_ptr<avsync::PhoneSession> session;
+struct StreamValues {
  bool calibration=false,complete=false;
  double origin=-1,lastVideo=-1,lastAudio=-1,lastReport=-1,spike=-1,floor=0.002;
  int frames=0,rate=48000,previousLocated=0,previousValid=0,videoWidth=0,videoHeight=0;
@@ -27,7 +26,11 @@ struct Stream {
  std::deque<Frame> pictures;
  std::vector<float> audio;
  double audioOrigin=-1;
+};
+struct Stream: StreamValues {
+ std::unique_ptr<avsync::PhoneSession> session;
  Stream(){session=std::make_unique<avsync::PhoneSession>(2,avsync::GradeWindows{});}
+ Stream(const Stream& other):StreamValues(other),session(std::make_unique<avsync::PhoneSession>(*other.session)){}
 };
 NSData *wav(const std::vector<float>& samples,int rate) {
  uint32_t length=(uint32_t)samples.size()*2, size=36+length, fmt=16, bytes=rate*2;
@@ -161,11 +164,29 @@ NSData *wav(const std::vector<float>& samples,int rate) {
    s.spike=time+peakIndex*1000.0/s.rate;
   if(s.spike<0)s.floor=0.97*s.floor+0.03*rms;
  }else{
-  s.session->push_audio(samples.data(),samples.size(),time,s.rate);
+  s.session->push_audio(samples.data(),samples.size(),time,s.rate,true);
 #if DEBUG || AVSYNC_DIAGNOSTIC_CAPTURE
   if(s.diagnostic)s.diagnostic->audio(std::move(samples),s.rate,time);
 #endif
  }
+}
+- (BOOL)acceptLiveAnalysis:(AVSyncStreamAnalyzer *)snapshot {
+ const auto&a=state->qr;const auto&b=snapshot->state->qr;
+ if(bool(a)!=bool(b)||(a&&b&&(a->source_id!=b->source_id||a->test_id!=b->test_id)))return NO;
+ state->session->merge_audio_analysis(*snapshot->state->session);
+ return YES;
+}
+- (NSDictionary *)pollCalibration { return state->calibration ? [self poll] : nil; }
+- (AVSyncStreamAnalyzer *)liveSnapshotForPolling {
+ auto&s=*state;
+ const double now=std::max(s.lastVideo,s.lastAudio);
+ if(s.calibration||s.origin<0||now-s.origin<1500||now-s.lastReport<1000)return nil;
+ AVSyncStreamAnalyzer *snapshot=[AVSyncStreamAnalyzer new];
+ snapshot->state=std::make_unique<Stream>(s); // All mutable DSP buffers are independent.
+ s.lastReport=now;
+ s.previousLocated=s.session->located_frames();s.previousValid=s.session->valid_frames();
+ s.session->trim_before(now-12000); // Maintain the same bounded history as synchronous polling.
+ return snapshot;
 }
 - (NSDictionary *)poll {
  auto&s=*state;
@@ -192,12 +213,19 @@ NSData *wav(const std::vector<float>& samples,int rate) {
     [frames addObject:@{@"timeMs":@(f.time-s.origin),@"uri":[NSURL fileURLWithPath:path].absoluteString}];
    if(image)CGImageRelease(image);CGColorSpaceRelease(space);CGDataProviderRelease(provider);
   }
-  NSMutableArray *wave=[NSMutableArray array];size_t bucket=std::max((size_t)1,s.audio.size()/120);
-  for(size_t i=0;i<s.audio.size();i+=bucket){float peak=0;for(size_t j=i;j<std::min(s.audio.size(),i+bucket);j++)peak=std::max(peak,std::abs(s.audio[j]));[wave addObject:@(peak)];}
+  if(frames.count!=s.pictures.size())return @{@"kind":@"error",@"message":@"Could not save calibration frames. Check available storage and repeat."};
+  const double clipStart=std::max(s.audioOrigin,s.pictures.front().time);
+  const double clipEnd=std::min(s.lastAudio,s.pictures.back().time+1000.0/std::max(1.0,s.frames*1000.0/std::max(1.0,s.lastVideo-s.origin)));
+  const size_t first=std::min(s.audio.size(),size_t(std::max(0.0,std::round((clipStart-s.audioOrigin)*s.rate/1000))));
+  const size_t last=std::clamp(size_t(std::max(0.0,std::round((clipEnd-s.audioOrigin)*s.rate/1000))),first,s.audio.size());
+  std::vector<float> reviewAudio(s.audio.begin()+first,s.audio.begin()+last);
+  const double audioStart=s.audioOrigin+first*1000.0/s.rate-s.origin;
+  NSMutableArray *wave=[NSMutableArray array];size_t bucket=std::max((size_t)1,reviewAudio.size()/256);
+  for(size_t i=0;i<reviewAudio.size();i+=bucket){float peak=0;for(size_t j=i;j<std::min(reviewAudio.size(),i+bucket);j++)peak=std::max(peak,std::abs(reviewAudio[j]));[wave addObject:@(peak)];}
   NSString* path=[dir stringByAppendingPathComponent:@"sound.wav"];
-  [wav(s.audio,s.rate)writeToFile:path atomically:YES];
+  if(![wav(reviewAudio,s.rate)writeToFile:path atomically:YES])return @{@"kind":@"error",@"message":@"Could not save calibration audio. Check available storage and repeat."};
   double fps=s.frames*1000.0/std::max(1.0,s.lastVideo-s.origin);
-  return @{@"kind":@"calibration",@"frames":frames,@"spikeTimeMs":@(s.spike-s.origin),@"fps":@(fps),@"framesBefore":@(before),@"framesAfter":@(after),@"waveform":wave,@"durationMs":@(duration),@"waveformStartMs":@(s.audioOrigin-s.origin),@"waveformDurationMs":@(s.audio.size()*1000.0/s.rate),@"uri":[NSURL fileURLWithPath:path].absoluteString};
+  return @{@"kind":@"calibration",@"frames":frames,@"spikeTimeMs":@(s.spike-s.origin),@"fps":@(fps),@"framesBefore":@(before),@"framesAfter":@(after),@"waveform":wave,@"durationMs":@(duration),@"audioStartMs":@(audioStart),@"waveformStartMs":@(audioStart),@"waveformBinDurationMs":@(bucket*1000.0/s.rate),@"waveformDurationMs":@(reviewAudio.size()*1000.0/s.rate),@"uri":[NSURL fileURLWithPath:path].absoluteString};
  }
  if(duration<1500||now-s.lastReport<1000)return nil;
  s.lastReport=now;

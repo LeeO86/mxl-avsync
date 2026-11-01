@@ -23,7 +23,7 @@ export function receiveReading(previous, report, calibration, wallMs, monoMs) {
  if (!Number.isFinite(report.offset_ms) || !report.eventCount) return previous;
  const eventTimeMs = newestPairTime(report);
  if (previous && eventTimeMs !== null && previous.eventTimeMs !== null && eventTimeMs <= previous.eventTimeMs) return previous;
- const eventAgeMs = Number.isFinite(report.timeMs) && eventTimeMs !== null ? Math.max(0, report.timeMs - eventTimeMs) : 0;
+ const eventAgeMs = (Number.isFinite(report.timeMs) && eventTimeMs !== null ? Math.max(0, report.timeMs - eventTimeMs) : 0) + Math.max(0, report.analysisDelayMs || 0);
  return { reading: prepareReading(report, calibration, wallMs), sourceKeys: keys,
   receivedMonoMs: monoMs, eventTimeMs, eventAgeMs };
 }

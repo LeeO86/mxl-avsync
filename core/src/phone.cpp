@@ -219,7 +219,7 @@ void PhoneSession::push_video(const uint16_t* luma, int width, int height, int s
     videos_.push_back(obs);
 }
 
-void PhoneSession::push_audio(const float* samples, size_t count, double start_ms, int sample_rate)
+void PhoneSession::push_audio(const float* samples, size_t count, double start_ms, int sample_rate, bool defer_timecode_scan)
 {
     if (count == 0 || samples == nullptr || sample_rate <= 0) {
         return;
@@ -228,7 +228,7 @@ void PhoneSession::push_audio(const float* samples, size_t count, double start_m
         const size_t n = std::min(count - at, size_t(sample_rate / 10));
         const double time = start_ms + at * 1000.0 / sample_rate;
         timecode_stream_.push(samples + at, n, sample_rate, time, time);
-        for (const auto& packet : timecode_stream_.scan()) {
+        if (!defer_timecode_scan) for (const auto& packet : timecode_stream_.scan()) {
             const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };
             if (std::none_of(timecodes_.begin(), timecodes_.end(), same)) timecodes_.push_back(packet);
         }
@@ -246,6 +246,15 @@ void PhoneSession::push_audio(const float* samples, size_t count, double start_m
         }
     }
     audio_.insert(audio_.end(), samples, samples + count);
+}
+
+void PhoneSession::merge_audio_analysis(const PhoneSession& analyzed)
+{
+    // Only immutable decoded packets return from the worker; capture/QR/clock state never does.
+    for (const auto& packet : analyzed.timecodes_) {
+        const auto same = [&](const AudioTimecode& p) { return p.source_id == packet.source_id && p.video_send_ns == packet.video_send_ns && p.audio_send_ns == packet.audio_send_ns; };
+        if (std::none_of(timecodes_.begin(), timecodes_.end(), same)) timecodes_.push_back(packet);
+    }
 }
 
 void PhoneSession::trim_before(double time_ms)
