@@ -1,5 +1,20 @@
 # Changelog
 
+## Mobile (unreleased)
+
+- Distinguish the measured sync uncertainty from the assumed 50-ppm holdover
+  allowance. The allowance is not measured phone drift and does not increase
+  clock correction or latency. Independent repeat checks compare references at
+  the same native time without claiming oscillator accuracy.
+- Show capture frame gaps, delivered fps, callback/snapshot/analysis costs and
+  event-local brackets in Timing diagnostics and Settings. Share a metadata-only
+  snapshot distinguishing the current report/reference from the held reading.
+- Invalidate an in-flight clock result when time settings change. Preserve saved
+  readings, capture timestamps and the existing clock qualification policy.
+- Count worker delivery delay consistently in display, Save and diagnostic ages,
+  so saving cannot relabel a held reading as live at the freshness boundary.
+- Local validation/build only; no EAS Cloud build or TestFlight upload.
+
 ## Mobile 2.0.8 (2026-11-01)
 
 - Calibration review plays recorded frames with the audio clock: waveform-side

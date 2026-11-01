@@ -1,5 +1,30 @@
 # mxl-avsync — Implementation plan
 
+## Clock clarity and capture diagnostics (local preparation, 2026-11-01)
+
+Maintainer reports the clock status increasing 0.1 ms per two seconds and
+confirms it is the ± display. This exactly matches the declared 50-ppm holdover
+allowance; it is not measured phone drift. Keep the existing UTC mapping,
+five-minute expiry and qualification policy; separate fixed sample uncertainty
+from the assumed age allowance in UI and acquisition metadata. Independent
+repeat checks compare at a common native time with combined sample uncertainty;
+network/server effects remain possible. In-flight checks are invalidated when
+time settings change, as already done for foreground changes.
+
+Finish the on-device A/B diagnostics: show delivered camera fps, PTS gap window,
+capture callback and snapshot/worker timings, latest paired-event bracket and
+overlapping drop counters. Share metadata-only current/held snapshots without
+calibration media or silently re-correcting old readings. No detector/onset
+smoothing, new protocol or container version. Keep the current physical test
+setup unchanged while the maintainer compares TestFlight build 9.
+
+Validation uses JS regressions, actual native fake-server SNTP, production JS
+export and a local iOS Release build. Visual and physical timing validation stay
+separate. Per maintainer instruction there is no EAS Cloud build, publication or
+TestFlight upload for this work; mobile version remains 2.0.8 with unreleased
+source changes. Android capture/generator and the two-device acquisition wizard
+remain separate ports/workflows, not claimed by these diagnostics.
+
 This plan comes before any code. It is updated as the work goes on: every decision and every deviation from `SPECIFICATION.md` is recorded here, as in the sibling repos.
 
 ## Status (2026-10-24)

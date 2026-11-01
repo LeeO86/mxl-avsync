@@ -627,6 +627,14 @@ Android capture remains a separate port. The calibration UI is unchanged;
 new corrections are scoped to model/OS/route/sample rate/camera mode.
 See [phone time reference](docs/phone-clock.md) for algorithms and limits.
 
+The phone clock UI separates sync-sample uncertainty from the assumed holdover
+allowance (50 ppm, 0.1 ms per two seconds). That allowance never changes the UTC
+correction or latency. Repeat checks compare mappings at a common native time
+with combined sample uncertainty, without claiming measured oscillator drift.
+Capture diagnostics name delivered fps, frame gaps and capture/worker costs
+separately. Shared snapshots distinguish current state from held acquisition
+and exclude recorded calibration media.
+
 ### 12.2 Technology
 
 - **Expo** (React Native) for the UI, one code base for iOS and Android, with an **Expo native module** per platform for capture and timing.

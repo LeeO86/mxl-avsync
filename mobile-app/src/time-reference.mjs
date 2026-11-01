@@ -45,9 +45,12 @@ export function referenceAt(reference, mapping, maxUncertaintyMs = 20) {
      !Number.isFinite(mapping.monotonicMs)) return { state: 'unavailable' };
  const ageMs = mapping.monotonicMs-reference.referenceMonotonicMs;
  if (ageMs < 0 || ageMs > CLOCK_MAX_AGE_MS) return { state: 'expired', ageMs };
- const uncertaintyMs = reference.uncertaintyMs + ageMs * CLOCK_DRIFT_PPM / 1e6;
+ const sampleUncertaintyMs = reference.uncertaintyMs;
+ const holdoverUncertaintyMs = ageMs * CLOCK_DRIFT_PPM / 1e6;
+ const uncertaintyMs = sampleUncertaintyMs + holdoverUncertaintyMs;
  const unixMs = reference.referenceUnixMs + ageMs;
- return { state: uncertaintyMs <= maxUncertaintyMs ? 'estimated' : 'uncertain', ageMs, uncertaintyMs, unixMs };
+ return { state: uncertaintyMs <= maxUncertaintyMs ? 'estimated' : 'uncertain', ageMs, uncertaintyMs,
+  sampleUncertaintyMs, holdoverUncertaintyMs, holdoverDriftPpm: CLOCK_DRIFT_PPM, unixMs };
 }
 
 export function clockRadiusText(ms) {
@@ -63,7 +66,30 @@ export function referenceSummary(reference, jsMono = performance.now(), limitMs 
  const radius = reference.uncertaintyMs+age*CLOCK_DRIFT_PPM/1e6;
  const name = reference.source === 'gnss' ? 'GNSS' : `NTP ${reference.server}`;
  if (age > CLOCK_MAX_AGE_MS) return `${name} · expired · synchronize again`;
- return `${name} · estimated clock ${clockRadiusText(radius)}${radius > limitMs ? ' · above limit' : ''} · ${Math.floor(age/1000)} s old`;
+ return `${name} · sync estimate ${clockRadiusText(reference.uncertaintyMs)} · holdover +${(age*CLOCK_DRIFT_PPM/1e6).toFixed(1)} ms · ${Math.floor(age/1000)} s old${radius > limitMs ? ' · above limit' : ''}`;
+}
+
+// Compare two independent checks at a common native time. The difference can
+// contain network asymmetry/server error; it is not a measured oscillator rate.
+export function compareClockReferences(current, previous) {
+ if (!current?.clockId || !previous?.clockId || current.clockId !== previous.clockId || current.timebase !== previous.timebase ||
+     current.source !== previous.source || current.server !== previous.server) return null;
+ if (![current.uncertaintyMs,previous.uncertaintyMs].every(value=>Number.isFinite(value)&&value>=0)) return null;
+ const elapsedMs = current.referenceMonotonicMs-previous.referenceMonotonicMs;
+ if (!Number.isFinite(elapsedMs) || elapsedMs < 1000 || elapsedMs > CLOCK_MAX_AGE_MS) return null;
+ const changeMs = current.referenceUnixMs-(previous.referenceUnixMs+elapsedMs);
+ const uncertaintyMs = current.uncertaintyMs+previous.uncertaintyMs;
+ if (![changeMs,uncertaintyMs].every(Number.isFinite) || uncertaintyMs < 0) return null;
+ return {changeMs,uncertaintyMs,elapsedMs,resolved:Math.abs(changeMs)>uncertaintyMs};
+}
+
+export function clockCheckDetails(reference) {
+ if (!reference) return null;
+ const signed = value => `${value < 0 ? '−' : '+'}${Math.abs(value).toFixed(1)} ms`;
+ const offset = Number.isFinite(reference.offsetMs) ? `NTP−device UTC at sync ${signed(reference.offsetMs)}. ` : '';
+ const comparison = reference.comparison;
+ return offset+(comparison ? `Change since previous check ${signed(comparison.changeMs)} (${clockRadiusText(comparison.uncertaintyMs)} combined estimate) · ${comparison.resolved ? 'outside estimated uncertainty; network/server or clock change' : 'no change resolved within estimated uncertainty'}. ` : '')+
+  `Holdover assumes ${CLOCK_DRIFT_PPM} ppm (0.1 ms per 2 s). This grows the uncertainty allowance, not the clock correction or latency. Actual phone drift is not measured.`;
 }
 
 export function generatorClockOptions(reference, nativeNow, limitMs = 20) {
@@ -89,6 +115,8 @@ export function applyTimeReference(report, reference, settings = clockSettings()
  const correction = usable ? estimate.unixMs-mapping.deviceUnixMs : 0;
  const clock = { state: usable ? 'estimated' : estimate.state, source: usable ? reference.source : 'device-utc',
   correctionMs: usable ? correction : null, uncertaintyMs: usable ? estimate.uncertaintyMs : null,
+  sampleUncertaintyMs: usable ? estimate.sampleUncertaintyMs : null, holdoverUncertaintyMs: usable ? estimate.holdoverUncertaintyMs : null,
+  holdoverDriftPpm: usable ? estimate.holdoverDriftPpm : null,
   ageMs: estimate.ageMs ?? null, utcAtReportMs: usable ? estimate.unixMs : null, roundTripMs: usable && Number.isFinite(reference.roundTripMs) ? reference.roundTripMs : null,
   server: usable ? reference.server : null, reference: usable ? reference : null,
   authenticated: false, captureUncertaintyMs: null, sourceClockUncertaintyMs: null, physicalAccuracy: 'unvalidated' };

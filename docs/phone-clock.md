@@ -53,6 +53,17 @@ restored from disk. They are invalidated on backgrounding (iOS host time may
 not advance across sleep) and an in-flight check cannot reinstate a pre-sleep
 reference. They expire after five minutes. The uncertainty grows by
 an explicit 50-ppm holdover assumption (not a device accuracy guarantee).
+That is exactly 0.1 ms per two seconds: it increases the uncertainty allowance,
+never the UTC correction or the measured latency. The UI separates the fixed
+**sync estimate** from the growing **holdover allowance**. Settings names the
+assumption and displays the NTP-minus-device-UTC offset measured at sync.
+Repeat checks from the same server, process and timebase, one second to five
+minutes apart, compare their UTC mappings at a common native timestamp. Their
+difference and combined sample uncertainty are shown separately. Agreement
+within that estimate cannot establish oscillator drift; a resolved difference
+can also come from network asymmetry or the server. A new check resets the age
+allowance because it supplies a new reference, not because the phone clock
+has been corrected. Time-settings changes invalidate an in-flight old check.
 The default qualification threshold is 20 ms, configurable from 1–500 ms.
 An expired, incompatible or over-limit reference is not used for correction.
 The app keeps timestamp-relative estimates from device UTC visibly unvalidated.
@@ -86,7 +97,8 @@ remain `estimated`, `accuracy: unvalidated`; AV offset remains independent.
 
 ## Capture calibration and device-to-device preparation
 
-The existing calibration UI is unchanged pending the maintainer's next design.
+Mobile 2.0.8 calibration review supports synchronized audio/frame playback,
+waveform seeking and accelerated held-arrow steps; see [capture](phone-capture.md).
 New corrections carry model, OS, audio route types (not personal device names),
 sample rate and configured camera mode. A mismatch disables the correction,
 retaining the saved value; older corrections without a context also become

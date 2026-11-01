@@ -93,3 +93,23 @@ The preview uses original captured images/timestamps and the WAV time origin,
 including nonzero audio/video start offsets. Live calibration exports a clipped
 WAV and dense waveform for the retained pre/post-contact window. Save uses the
 original selected frame timestamp, not the interpolated preview clock.
+
+## On-device comparison diagnostics (unreleased)
+
+Settings and the scrollable Timing diagnostics sheet show delivered fps (camera
+callbacks, not QR recognition rate), recent p95/max PTS gaps, capture callback
+costs, snapshot-copy cost, worker-analysis cost and delivery delay. A live warning
+flags a gap greater than 2.5 configured frame intervals. The latest accepted AV
+event's bracketing gap is displayed only when present in the retained window;
+an old event's bracket is never reused for a newer event. These observations
+help compare capture load; they do not isolate display or WebRTC jitter.
+
+Share diagnostic snapshot opens the system share sheet with metadata from the
+current report/reference and the last accepted reading, explicitly separated
+with their own ages. Paused/stale reports are labelled. Calibration WAVs, captured
+images, waveform samples and unrelated saved state are excluded. Saving or
+exporting does not reapply the current reference to a held acquisition.
+
+For an A/B run keep the source pipeline unchanged between app builds. A local
+development build does not replace a TestFlight build unless deliberately
+installed on the phone. This change is prepared and built locally only.
