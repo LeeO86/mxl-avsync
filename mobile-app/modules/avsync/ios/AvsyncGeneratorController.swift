@@ -41,8 +41,11 @@ final class AvsyncGeneratorController: UIViewController {
   private var utcMinusHost = 0.0
   private let clockReference: [String:String]
   private var usingReference = false
+  private let peerClockEnabled: Bool
+  private var peerHost: PeerClockHost?
 
-  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil, clockReference: [String:String] = [:], keepScreenAwake: Bool = true) {
+  init(rate: Int, taiUtc: Double, name: String = "iPhone", subtitle: String = "", image: UIImage? = nil, clockReference: [String:String] = [:], keepScreenAwake: Bool = true, peerClockEnabled: Bool=false) {
+    self.peerClockEnabled=peerClockEnabled
     self.keepScreenAwake = keepScreenAwake
     self.clockReference = clockReference
     self.rate = rate; self.taiUtc = taiUtc; self.sourceName = name; self.subtitle = subtitle; self.sourceImage = image
@@ -152,6 +155,12 @@ final class AvsyncGeneratorController: UIViewController {
       plan.setSource(name: sourceName, subtitle: subtitle, image: sourceImage)
       syncForeground.contents = plan.syncForeground().cgImage
       let geometry = plan.geometry()
+      peerHost?.stop();peerHost=nil
+      if peerClockEnabled,let source=(geometry["sourceId"] as? NSNumber)?.uint32Value {
+        let host=PeerClockHost(sourceId:source,unixMs:(referenceUtcMinusHost+after)*1000,
+          monotonicMs:after*1000,taiUtcSeconds:taiUtc)
+        try host.start();peerHost=host
+      }
       func n(_ key: String) -> CGFloat { CGFloat((geometry[key] as? NSNumber)?.doubleValue ?? 0) }
       marker.frame = CGRect(x: n("markerX"), y: n("markerY"), width: n("markerSide"), height: n("markerSide"))
       for (i, cell) in cells.enumerated() { cell.frame = CGRect(x: n("stripX") + CGFloat(i)*n("stripWidth"), y: n("stripY"), width: n("stripWidth"), height: n("stripHeight")) }
@@ -231,9 +240,11 @@ final class AvsyncGeneratorController: UIViewController {
         stop("Phone clock changed. Tap Start to create a fresh clock mapping."); return
       }
       status.text = "TEST SIGNAL ACTIVE · 1200 baud · \(rate)/s · frame skips \(lateFrames)\nEstimated output timing · \(usingReference ? "NTP UTC" : "device UTC") · audio lead \(Int((outputLatency*1000).rounded())) ms"
+      if let peerHost {let info=peerHost.info();status.text! += "\nDirect clock \(peerHost.code) · \(info["ready"] as? Bool==true ? "ready":"starting — allow Local Network")"}
     }
   }
   private func stop(_ message: String) {
+    peerHost?.stop();peerHost=nil
     link?.invalidate(); link = nil; renderGeneration += 1
     player.stop(); engine.stop(); plan = nil; images.removeAll()
     CATransaction.begin(); CATransaction.setDisableActions(true)

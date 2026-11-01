@@ -32,6 +32,15 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private let diagnostics = DispatchQueue(label: "avsync.diagnostics")
   private var diagnosticReports: [[String: Any]] = []
   private var notifications: [NSObjectProtocol] = []
+  private var routeSignature: String?
+  private var contextCache: [String:Any]?
+  private static let deviceIdentity: [String:String] = {
+    var system=utsname();uname(&system)
+    let model=Mirror(reflecting:system.machine).children.compactMap { item -> String? in
+      guard let value=item.value as? Int8,value != 0 else{return nil};return String(UnicodeScalar(UInt8(bitPattern:value)))
+    }.joined()
+    return ["platform":"ios","model":model,"os":UIDevice.current.systemVersion]
+  }()
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -52,21 +61,21 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     outlineWatchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.drawPicture() }
     notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = true; self?.updateRunning() })
     notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = false; self?.updateRunning() })
-    notifications.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object:nil, queue:.main) { [weak self] _ in
+    notifications.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object:nil, queue:nil) { [weak self] _ in
       guard let self else { return }
-      self.clearOutline()
-      self.samples.async { self.generation += 1; self.processor.reset(); self.emit(["kind":"error","message":"Audio route changed · capture restarted; check calibration compatibility"]) }
+      DispatchQueue.main.async { [weak self] in self?.clearOutline() }
+      self.samples.async { self.generation += 1;self.routeSignature=nil;self.contextCache=nil;self.processor.reset(); self.emit(["kind":"error","message":"Audio route changed · capture restarted; check calibration compatibility"]) }
     })
   }
   private func captureContext() -> [String:Any] {
-    var system = utsname(); uname(&system)
-    let model = Mirror(reflecting:system.machine).children.compactMap { item -> String? in
-      guard let value = item.value as? Int8, value != 0 else { return nil }; return String(UnicodeScalar(UInt8(bitPattern:value)))
-    }.joined()
-    let audio = AVAudioSession.sharedInstance()
-    let route = audio.currentRoute.inputs.map { $0.portType.rawValue }.sorted().joined(separator:"+") + "/" + audio.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator:"+")
-    return ["platform":"ios","model":model,"os":UIDevice.current.systemVersion,"audioRoute":route,
-            "sampleRate":capturedSampleRate,"cameraMode":captureMode]
+    if let contextCache,contextCache["sampleRate"] as? Double==capturedSampleRate,contextCache["cameraMode"] as? String==captureMode,routeSignature != nil {return contextCache}
+    if routeSignature==nil {
+      let route=AVAudioSession.sharedInstance().currentRoute
+      routeSignature=route.inputs.map{$0.portType.rawValue}.sorted().joined(separator:"+")+"/"+route.outputs.map{$0.portType.rawValue}.sorted().joined(separator:"+")
+    }
+    var result:[String:Any]=Self.deviceIdentity
+    result["audioRoute"]=routeSignature;result["sampleRate"]=capturedSampleRate;result["cameraMode"]=captureMode
+    contextCache=result;return result
   }
   override func layoutSubviews() { super.layoutSubviews(); preview.frame = bounds; drawPicture() }
   private func observePicture(_ value: [String: Any], at now: Double) {
@@ -302,6 +311,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
               let elapsed=PhoneClock.nowMs()-started
               self?.samples.async { [weak self] in
                 guard let self else { return };self.analysisBusy=false
+                let deliveryStarted=PhoneClock.nowMs()
+                defer { self.telemetry.processing("reportDelivery",ms:PhoneClock.nowMs()-deliveryStarted) }
                 guard self.generation == captureGeneration, NSDictionary(dictionary:captureSignature).isEqual(to:self.captureContext()), self.processor.acceptLiveAnalysis(snapshot) else { return }
                 self.telemetry.processing("poll",ms:elapsed)
                 if var report { report["analysisMode"]="async-snapshot-v1";report["analysisDelayMs"]=PhoneClock.nowMs()-copyStart;self.emit(report) }

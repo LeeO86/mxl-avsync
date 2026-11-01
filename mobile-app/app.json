@@ -14,12 +14,17 @@
       "infoPlist": {
         "NSCameraUsageDescription": "See the AV sync test picture.",
         "NSMicrophoneUsageDescription": "Hear the AV sync chirps.",
-        "NSLocalNetworkUsageDescription": "Synchronize the measurement clock with a time server on your local network."
+        "NSLocalNetworkUsageDescription": "Synchronize measurement time with local time servers and nearby AVsync senders.",
+        "NSBonjourServices": [
+          "_avsync-peer._udp"
+        ]
       },
       "config": {
         "usesNonExemptEncryption": false
       },
-      "icon": "./assets/icon.png"
+      "icon": "./assets/icon.png",
+      "supportsTablet": true,
+      "requireFullScreen": true
     },
     "android": {
       "package": "io.leeo86.mxl.avsync",

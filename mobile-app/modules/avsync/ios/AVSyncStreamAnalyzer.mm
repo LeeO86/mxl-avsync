@@ -269,7 +269,16 @@ NSData *wav(const std::vector<float>& samples,int rate) {
   const auto&d=s.session->qr_flash_diagnostics();
   NSMutableArray *trace=[NSMutableArray array];
   for(const auto&sample:d.samples)[trace addObject:@{@"timeMs":@(sample.time_ms),@"level":@(sample.level),@"range":@(sample.range),@"phase":sample.phase==2?@"white":sample.phase==1?@"mixed":@"black"}];
-  result[@"qrFlash"]=@{@"scope":@"since source/reset",@"frames":@(d.frames),@"probeFrames":@(d.probe_frames),@"symbolFrames":@(d.symbol_frames),@"moduleReads":@(d.module_reads),@"matchCalls":@(d.match_calls),@"symbolComparisons":@(d.symbol_comparisons),@"mixedFrames":@(d.mixed_frames),@"finderRejections":@(d.finder_rejections),@"geometryRejections":@(d.geometry_rejections),@"edges":@(d.edges),@"emitted":@(d.emitted),@"trace":trace};
+  NSMutableArray *details=[NSMutableArray array];
+  NSArray *reasons=@[@"waiting_for_second_white",@"waiting_for_qr",@"qr_time_window",@"qr_seen_before_edge",@"qr_pixels_unconfirmed",@"duplicate_sequence",@"confirmed"];
+  for(const auto&e:d.edge_details){
+   NSMutableDictionary *row=[@{@"edgeId":@(e.id),@"whiteTimeMs":@(e.white_ms),@"reason":reasons[std::clamp(e.reason,0,6)],@"matchAttempts":@(e.attempts),@"knownModules":@(e.max_known_modules)} mutableCopy];
+   NSArray *keys=@[@"threshold10Ms",@"threshold30Ms",@"threshold50Ms",@"threshold70Ms"];
+   for(int i=0;i<4;++i)if(e.crossings_ms[i]>=0)row[keys[i]]=@(e.crossings_ms[i]);
+   if(e.first_qr_ms>=0){row[@"candidateSeq"]=@(e.sequence);row[@"firstQrTimeMs"]=@(e.first_qr_ms);}
+   [details addObject:row];
+  }
+  result[@"qrFlash"]=@{@"scope":@"since source/reset",@"timestampPolicy":@"white70-v1",@"frames":@(d.frames),@"probeFrames":@(d.probe_frames),@"symbolFrames":@(d.symbol_frames),@"moduleReads":@(d.module_reads),@"matchCalls":@(d.match_calls),@"symbolComparisons":@(d.symbol_comparisons),@"mixedFrames":@(d.mixed_frames),@"finderRejections":@(d.finder_rejections),@"geometryRejections":@(d.geometry_rejections),@"edges":@(d.edges),@"emitted":@(d.emitted),@"trace":trace,@"edgeDetails":details};
  }
  if(s.haveWallClock)result[@"deviceUtcOffsetMs"]=@(s.wallOffsetMs);
  if(s.qr)result[@"signalIdentity"]=[NSString stringWithUTF8String:(s.qr->test_id+":"+std::to_string(s.qr->source_id)).c_str()];

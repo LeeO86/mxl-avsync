@@ -1100,3 +1100,14 @@ Title control is removed; legacy API keys remain accepted. The moving sync
 box has a vertical black centerline. White scale ticks are foreground and the
 box travels underneath them in both native and server renderers. None of
 these decorative regions changes QR/flash geometry or audio timing.
+
+### Local native direct-device timing isolation (2026-11-01)
+
+The mobile receiver MAY use an explicitly selected native sender-relative LAN
+clock for a direct iPhone/iPad/Mac picture-and-sound comparison without WebRTC.
+It MUST bind correction to source/session identity, reject inconsistent samples,
+expire/invalidate stale or incompatible references and identify unknown physical
+I/O accuracy. It MUST NOT represent this pairing as verified UTC/PTP or complete
+acoustic/device calibration. See [direct-device protocol](docs/device-to-device.md).
+Optical threshold candidates are diagnostic frame times; the primary 70% onset
+and existing QR identity gates remain unchanged pending physical validation.

@@ -1,5 +1,20 @@
 # Changelog
 
+## Mobile 2.0.8 build 11 (2026-11-01)
+
+- Enable native iPad support for the same full-screen receiver/source test.
+- Add explicit sender-relative LAN clock pairing for native iPhone/iPad sources
+  and a native Mac test player. The four-timestamp exchange is bound to source
+  and process/session identity, expires, and never claims PTP or physical I/O
+  calibration. Direct picture/sound testing bypasses WebRTC.
+- Record observed 10/30/50/70% optical crossing candidates and per-edge QR
+  rejection reasons; preserve the existing 70% primary timestamp and identity
+  gates. Cache static capture context and audio-route details until invalidated;
+  expose worker-report delivery cost. Physical timing remains unvalidated.
+- Distributed through one explicitly authorized EAS build and TestFlight upload
+  from `799445af0026e7bb8b446bb3cfc18ef4ab7e0867`. Apple confirms VALID /
+  IN_BETA_TESTING. Both iOS devices need this build for direct pairing.
+
 ## Mobile 2.0.8 build 10 (2026-11-01)
 
 - Focus slow QR work around actual pulses with geometry refresh/reacquisition;

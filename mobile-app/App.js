@@ -3,6 +3,7 @@ import { AppState, Image, Linking, Modal, PermissionsAndroid, Platform, Pressabl
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import CalibrationReview from './components/CalibrationReview';
 import CaptureDiagnostics from './components/CaptureDiagnostics';
+import PeerClockPanel from './components/PeerClockPanel';
 import { requireNativeViewManager } from 'expo-modules-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import native from './modules/avsync';
@@ -12,7 +13,7 @@ import { CAPTURE_RATES, captureRate, captureRateLabel, captureReportAge, capture
 import { screenAwakeEnabled, measurementNeedsScreen } from './src/screen-awake.mjs';
 import { generatorOptions } from './src/generator.mjs';
 import { signalFeedback, latencyValues, latencyHint } from './src/feedback.mjs';
-import { applyTimeReference, clockCheckDetails, compareClockReferences, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, measurementSourceKey, referenceSummary, synchronizeClock } from './src/time-reference.mjs';
+import { applyTimeReference, bindReference, clockCheckDetails, compareClockReferences, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, measurementSourceKey, referenceSummary, synchronizeClock } from './src/time-reference.mjs';
 import { offsetText, measureSentence, formatResultWhen } from './src/measure.mjs';
 import { validCalibration, calibrationSummary, makeCalibration } from './src/workflow.mjs';
 
@@ -39,6 +40,7 @@ function LatencyPanel({ values, hint, clock, onCheck, checking, error, sampleNot
   <Text style={{ color: muted, fontSize: 10, marginTop: 4 }}>{details?.clock?.uncertaintyMs != null ? `Clock contribution ${clockRadiusText(details.clock.uncertaintyMs)} · capture/source uncertainty unknown` : 'Capture, source and clock accuracy unknown'}</Text>
   <Text style={{ color: muted, fontSize: 10 }}>{details?.basis ? [...new Set(Object.values(details.basis))].join(' · ') : 'Relative to source timestamp'}</Text>
   {details?.flags?.some(flag => flag.endsWith('mismatch')) && <Text style={{color: orange, fontSize: 11}}>Clock or source emit offset mismatch · see diagnostics</Text>}
+  {details?.flags?.includes('peer_clock_belongs_to_another_source') && <Text style={{color:orange,fontSize:11}}>Different sender · pair its clock in Settings</Text>}
   {details?.flags?.includes('source_emit_offsets_belong_to_another_source') && <Text style={{color:orange,fontSize:11}}>Source changed · enter emit offsets for this source</Text>}
   {details && <Pressable accessibilityRole="button" onPress={() => setDiagnostics(value => !value)}><Text style={{color: muted,fontSize: 11,marginTop: 5}}>{diagnostics ? 'Hide diagnostics' : 'Timing diagnostics'}</Text></Pressable>}
   <Modal visible={diagnostics} transparent animationType="fade" onRequestClose={()=>setDiagnostics(false)}>
@@ -66,6 +68,7 @@ function GeneratorPanel({ rate, onRate, onStart, busy, clock, checking, clockErr
    <Text style={{ color: muted, lineHeight: 22, marginTop: 10 }}>Show the full picture to an external camera and keep this phone's speaker audible. Route that camera's picture and sound to the analyzer.</Text>
    <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>{[1, 2].map(value => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: rate === value }} onPress={() => onRate(value)} style={{ flex: 1, padding: 13, borderRadius: 10, borderWidth: 1, borderColor: rate === value ? orange : '#394454', alignItems: 'center' }}><Text style={{ color: rate === value ? orange : ink }}>{value} chirp{value === 1 ? '' : 's'} / second</Text></Pressable>)}</View>
    <Text style={{ color: muted, marginTop: 12, fontSize: 12 }}>1200 baud · full audio timecode · white flash at chirp onset</Text>
+   {native?.synchronizePeerClock && <><View style={{flexDirection:'row',alignItems:'center',marginTop:12}}><Text style={{...text,flex:1}}>Direct clock for another device</Text><Switch accessibilityLabel="Advertise direct sender clock" disabled={busy} value={session.generatorPeerClock===true} onValueChange={value=>onChange('generatorPeerClock',value)}/></View><Text style={{color:muted,fontSize:12}}>The fullscreen signal shows a pairing code. On the receiving device use Settings → Direct device test.</Text></>}
    <Text style={{ color: muted, marginTop: 18, marginBottom: 6 }}>Title</Text>
    <TextInput accessibilityLabel="Generator title" editable={!busy} maxLength={64} placeholder="iPhone" placeholderTextColor={muted} value={session.generatorName || ''} onChangeText={value => onChange('generatorName', value)} style={{ ...text, backgroundColor: '#121417', padding: 12, borderRadius: 8 }} />
    <Text style={{ color: muted, marginTop: 12, marginBottom: 6 }}>Subtitle</Text>
@@ -73,7 +76,7 @@ function GeneratorPanel({ rate, onRate, onStart, busy, clock, checking, clockErr
    {image && <Image accessibilityLabel="Generator image preview" source={{ uri: image.uri }} resizeMode="contain" style={{ width: 72, height: 72, marginTop: 12, borderRadius: 8, backgroundColor: '#121417' }} />}
    <Button title={picking ? 'Importing image…' : image ? 'Change image' : 'Choose image'} disabled={busy || picking || !native?.pickGeneratorImage} onPress={onPickImage} />
    {session.generatorImageId && <Button title="Remove image" disabled={busy || picking} onPress={() => onChange('generatorImageId', '')} />}
-   <Text style={{ color: muted, marginTop: 8, fontSize: 12 }}>Name, subtitle and image stay on this phone. Keep all four markers visible when filming.</Text>
+   <Text style={{ color: muted, marginTop: 8, fontSize: 12 }}>Name, subtitle and image stay on this phone. Keep the QR code and adjacent flash square fully visible when filming.</Text>
    {!native?.generateStyled && <Text style={{ color: orange, marginTop: 8 }}>Install the updated native build for color bars, sync scale and custom labels.</Text>}
    <Button title={busy ? 'Signal is open…' : 'Start fullscreen signal'} disabled={busy || picking || !native?.supportsGenerator?.()} onPress={onStart} />
    {!native?.supportsGenerator?.() && <Text style={{ color: orange, marginTop: 10 }}>Install the updated native development build. Expo Go cannot generate this signal.</Text>}
@@ -81,7 +84,7 @@ function GeneratorPanel({ rate, onRate, onStart, busy, clock, checking, clockErr
   <View style={{ marginTop: 20, padding: 16, borderRadius: 12, backgroundColor: '#1c2128' }}>
    <Text style={{ color: orange, fontWeight: '600' }}>ESTIMATED LATENCY</Text>
    <Text style={{ color: muted, lineHeight: 21, marginTop: 8 }}>AV sync includes this phone's display and speaker plus the camera and transport path. Absolute latency uses the phone clock and scheduled output. Its physical accuracy is unknown.</Text>
-   <Text style={{ color: muted, lineHeight: 21, marginTop: 8 }}>Camera/microphone calibration in Measure does not calibrate this source. Keep all four corner markers visible and use the phone speaker.</Text>
+   <Text style={{ color: muted, lineHeight: 21, marginTop: 8 }}>Camera/microphone calibration in Measure does not calibrate this source. Keep the QR code and flash square visible and use the phone speaker.</Text>
    <Text style={{ color: clockError ? orange : muted, fontSize: 12, marginTop: 10 }}>{clockError || clock}</Text>
    <Button title={checking ? 'Checking clock…' : 'Check phone clock'} disabled={checking} onPress={onCheck} />
   </View>
@@ -152,6 +155,19 @@ export default function App() {
   } catch(error) { setClockCheck(null);setClockError(`Clock unavailable: ${error.message}`); }
   finally { clockInFlight.current = false;setClockBusy(false); }
  };
+ const runPeerCheck=async peer=>{
+  if(clockInFlight.current)return;clockInFlight.current=true;setClockBusy(true);setClockError(null);
+  const generation=clockGeneration.current;
+  try{
+   const sample=await native.synchronizePeerClock(peer.name,peer.code);
+   if(generation!==clockGeneration.current||AppState.currentState!=='active')throw new Error('Clock context changed. Keep AVsync open and try again.');
+   const value=bindReference(sample,native.clockNow(),performance.now());
+   setTick(performance.now());setClockCheck(previous=>({...value,comparison:compareClockReferences(value,previous)}));
+   setSession(previous=>({...previous,taiUtcSeconds:value.taiUtcSeconds}));setReadingSnapshot(null);
+   setNotice(`Sender ${peer.code} synchronized · aim at that sender's QR code and flash`);
+  }catch(error){setClockCheck(null);setClockError(`Direct clock unavailable: ${error.message}`);}
+  finally{clockInFlight.current=false;setClockBusy(false);}
+ };
  const os = native?.deviceVersion?.() || String(Platform.Version);
  const now = Date.now();
  const calibration = validCalibration(session.calibration, os, now, status.captureContext);
@@ -182,7 +198,10 @@ export default function App() {
   setGenerating(true); setNotice(null);
   try {
    const rate = session.generatorRate === 1 ? 1 : 2;
-   const result = native.generateStyled ? await native.generateStyled(rate, taiUtcSeconds, {...generatorOptions(session), keepAwake:screenAwakeEnabled(session) ? 'true' : 'false', ...generatorClockOptions(clockCheck, native.clockNow?.(), timeSettings.maxUncertaintyMs)}) : await native.generate(rate, taiUtcSeconds);
+   const generation=clockGeneration.current;
+   if(session.generatorPeerClock && native.discoverPeerClocks)await native.discoverPeerClocks();
+   const activeClock=generation===clockGeneration.current?clockCheck:null;
+   const result = native.generateStyled ? await native.generateStyled(rate, taiUtcSeconds, {...generatorOptions(session),peerClock:session.generatorPeerClock?'true':'false', keepAwake:screenAwakeEnabled(session) ? 'true' : 'false', ...generatorClockOptions(activeClock, native.clockNow?.(), timeSettings.maxUncertaintyMs)}) : await native.generate(rate, taiUtcSeconds);
    setNotice(`Signal stopped · ${result.skippedDisplayFrames} skipped display frames · output timing estimated`);
   } catch (error) { setNotice(error.message); }
   finally { setGenerating(false); }
@@ -257,6 +276,7 @@ export default function App() {
        <Button title={clockBusy ? 'Synchronizing…' : `Synchronize ${Platform.OS === 'android' ? 'GNSS' : 'NTP'} clock`} disabled={clockBusy || timeDraftChanged} onPress={runClockCheck} />
        {timeDraftChanged && <Text style={{color:orange,fontSize:11}}>Apply time settings before synchronizing.</Text>}
        {clockError && <Text style={{color:orange,fontSize:12}}>{clockError}</Text>}
+       <PeerClockPanel native={native} busy={clockBusy} disabled={timeDraftChanged} onSync={runPeerCheck}/>
        <Text style={{color:muted,fontSize:11,marginTop:8}}>Only when requested · reference expires after 5 min · no system clock changes. ± is estimated uncertainty, not a measured clock error. The 50 ppm holdover allowance is an assumption; capture/source timing remains unvalidated.</Text>
       </View><CaptureDiagnostics report={status} ageMs={age} active={running && !flow} onShare={shareDiagnostics}/>{[['Repeat calibration', startCalibration], ['Clear saved calibration (use 0 ms)', () => { setSession(s => ({ ...s, calibration: null })); setReadingSnapshot(null); setSettings(false); }], ['Clear results', () => setSession(s => ({ ...s, results: [] }))], ['Privacy policy & support', () => { setSettings(false); Linking.openURL('https://leeo86.github.io/mxl-avsync/privacy-en.html').catch(() => setNotice('Open https://leeo86.github.io/mxl-avsync/privacy-en.html for privacy and support.')); }], ['Close', () => setSettings(false)]].map(([label, onPress]) => <Pressable key={label} onPress={onPress} style={{ paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#2c3540' }}><Text style={text}>{label}</Text></Pressable>)}
      </ScrollView>

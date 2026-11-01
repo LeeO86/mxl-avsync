@@ -542,6 +542,7 @@ TEST_CASE("AVS2 cannot relabel a pulse with frozen or later unrelated QR identit
             VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),1280,720,1280,f);
             CHECK(tracker.take_events().empty());
         }
+        if(frozen) {REQUIRE(tracker.diagnostics().edge_details.size()==1);CHECK(tracker.diagnostics().edge_details[0].reason==3);}
     }
 }
 
@@ -678,4 +679,30 @@ TEST_CASE("v210 region packing matches the full packer and touches only its grou
                 CHECK((inside ? part[i] == full[i] : part[i] == 0xAB));
             }
     }
+}
+
+TEST_CASE("AVS2 records optical threshold candidates without moving the primary timestamp") {
+    QrFlashTracker tracker;Yuv422p10 picture;picture.resize(640,360);
+    const auto g=qr_flash_geometry(640,360);
+    std::vector<VideoObservation> events;
+    for(int i=0;i<36;++i) {
+        const double time=i*1000.0/240;
+        QrPayload p;p.timecode=p.qr_flash=true;p.k=i<20?7:8;p.tk=1000000000+int64_t(p.k-7)*500000000;
+        p.source_id=77;p.test_id="threshold-ramp";p.format="720p60";
+        PictureInfo info;info.qr_json=qr_payload_text(p);info.period_ms=500;
+        render_picture(picture,info,p.k,10,30,false);
+        const double level=i<20?0:i==20?.15:i==21?.4:i==22?.6:i<31?.9:0;
+        for(int y=g.marker_y;y<g.marker_y+g.marker_side;++y)
+            std::fill_n(picture.y.data()+size_t(y)*640+g.marker_x,g.marker_side,uint16_t(kYBlack+level*(kYWhite-kYBlack)));
+        if(i%4==0||i==23) {auto q=decode_qr_signal(picture.y.data(),640,360,640);REQUIRE(q);tracker.observe(*q,time);}
+        VideoObservation f;f.time_ms=time;f.have_arrival=true;f.arrival_ms=time+3;f.grain_index=i;
+        tracker.push(picture.y.data(),640,360,640,f);
+        auto out=tracker.take_events();events.insert(events.end(),out.begin(),out.end());
+    }
+    REQUIRE(events.size()==1);
+    CHECK(events[0].seq==8);CHECK(events[0].time_ms==doctest::Approx(23*1000.0/240));
+    CHECK(events[0].arrival_ms==doctest::Approx(events[0].time_ms+3));
+    const auto& details=tracker.diagnostics().edge_details;REQUIRE(details.size()==1);
+    CHECK(details[0].reason==6);CHECK(details[0].sequence==8);CHECK(details[0].max_known_modules>=872);
+    for(int j=0;j<4;++j)CHECK(details[0].crossings_ms[j]==doctest::Approx((20+j)*1000.0/240));
 }

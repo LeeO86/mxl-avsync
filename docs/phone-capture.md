@@ -134,3 +134,24 @@ For an A/B run keep the source pipeline unchanged between app builds. A local
 development build does not replace a TestFlight build unless deliberately
 installed on the phone. The diagnostic update is distributed as TestFlight
 2.0.8 (10); installation and a controlled device run are separate steps.
+
+## Optical transition diagnostics (local, 2026-11-01)
+
+`qrFlash.timestampPolicy` remains `white70-v1`. Bounded `edgeDetails` include
+the original 70% timestamp and observed uniform-patch 10/30/50% crossing-frame
+times in the preceding 80 ms (absent when unavailable), QR first-seen time,
+matching attempts and known-module count. These candidate times are neither
+interpolated nor substituted into measurements. Reasons distinguish waiting
+for two whites, QR/window, QR already visible before the edge, contradictory
+pixels, duplicate sequence and confirmed identity. They describe the latest
+matching state, not disjoint loss counters. This separates slow optical
+transitions from identity rejection while retaining all measurement gates.
+Capture context caches immutable device details and route signature; sample
+rate, camera mode and route changes invalidate the relevant context.
+
+An experimental alternative is adjacent complementary bright/dark fields
+that swap at onset: constant total luminance and a differential measurement
+may reduce common exposure effects. This is not yet a new wire format or an
+accuracy claim; display response and rolling shutter still need validation.
+Original slow-motion files help inspect transition shape; their audio/editing
+timeline is not an independently calibrated AV reference.

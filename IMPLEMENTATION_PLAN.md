@@ -1,5 +1,57 @@
 # mxl-avsync — Implementation plan
 
+## Direct-device TestFlight preparation (2026-11-01)
+
+After local validation, the maintainer explicitly authorizes one EAS Cloud
+iOS build and TestFlight delivery for direct-device testing. Enable native
+iPad support with full-screen portrait app layout; generator rotates its raster
+as on iPhone. Verify universal device family, Bonjour purposes and the exact
+archive before spending the build. This supersedes the local-only distribution
+constraint for this delivery only; physical accuracy and full acoustic device
+calibration remain unvalidated/separate.
+
+Delivery verified: mobile 2.0.8 (11), source
+`799445af0026e7bb8b446bb3cfc18ef4ab7e0867`, EAS build
+`647b9210-ffaf-442e-a860-95c59638fa54`, submission
+`b891b210-708d-40cf-aeab-10ce4efa633b`. The downloaded signed store IPA verifies
+universal device family 1/2, full-screen iPad, Bonjour declarations, new native
+peer/optical code, production JS and resources. Apple reports VALID /
+IN_BETA_TESTING. No physical-phone app/data replacement or container deployment.
+
+## Direct-device clock and optical isolation (2026-11-01, local implementation)
+
+Maintainer asks to isolate the remaining optical jitter and test a direct
+device source without WebRTC. Add per-edge observed 10/30/50/70% crossing times
+and explicit QR-confirmation rejection reasons alongside the existing primary
+white timestamp. Candidates are original frame times, not interpolated or
+silently substituted measurements. Reduce capture-context construction/RPC
+work on capture; route/mode/sample-rate invalidation must remain correct.
+
+Direct-device sync is an explicit local four-timestamp clock exchange between
+a running source and receiver. The source freezes one host/UTC mapping for
+signal scheduling and replies, advertises an ephemeral Bonjour pairing code,
+and binds the result to its source and clock-session identity. The receiver
+reports the best observed network interval and holds a process-local relative
+sender reference. Source switches, restart, background, invalid replies and
+expired references cannot silently apply an old relative correction. This
+does not set either system clock or solve all physical input/output latencies.
+The existing acoustic two-way calibration maths remains separate from this
+LAN clock and direct A/V source path.
+
+Validate packet maths and actual loopback networking, peer source binding,
+expiry/lifecycle and native generator integration, plus existing optical,
+legacy, latency and calibration regressions. Prepare local iOS builds only;
+physical two-device accuracy and any alternate marker still need field tests.
+
+Local validation: core and picture CTest, 74 JavaScript/web tests, actual native
+AVFoundation/file/calibration and generator fixtures, 60/120/240-fps cadence,
+SNTP regressions, and peer packet/UDP loopback (including disagreeing sender
+clock rejection). Release simulator and signed generic-iPhone builds succeeded.
+The Mac helper compiles, renders a QR that Vision decodes, and includes the
+shared font/icon/license. Mac was locked during UI inspection: interactive
+layout, permissions and physical two-device accuracy still need the field run.
+No physical phone installation or EAS build/submission was performed.
+
 ## Diagnostic TestFlight delivery (2026-11-01)
 
 After local validation the maintainer explicitly authorized one EAS Cloud build

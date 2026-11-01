@@ -139,3 +139,28 @@ test('independent sync checks compare at a common native time without treating n
  assert.equal(compareClockReferences({...current,uncertaintyMs:NaN},reference),null);
  assert.equal(compareClockReferences(current,null),null);
 });
+
+test('direct sender clock is source/session bound and never becomes a global generator clock', () => {
+ const peerSample={...sample,source:'peer',peerSourceId:42,peerSessionId:'session-one',peerClockId:'sender-one',taiUtcSeconds:37};
+ const peer=bindReference(peerSample,now,10);
+ const matching={...report,signalIdentity:'direct:42',latency:{...report.latency,taiUtcSeconds:37}};
+ const corrected=applyTimeReference(matching,peer);
+ assert.equal(corrected.latency.video_ms,120);assert.equal(corrected.clockReference.source,'peer');
+ assert.equal(corrected.clockReference.scope,'relative to selected sender');
+ assert.equal(corrected.clockReference.holdoverDriftPpm,100);
+ assert.deepEqual(generatorClockOptions(peer,now),{});
+ for(const other of [{...matching,signalIdentity:'direct:43'},{...matching,signalIdentity:undefined},{...matching,latency:{...matching.latency,taiUtcSeconds:36}}]) {
+  const result=applyTimeReference(other,peer);
+  assert.equal(result.latency.video_ms,20);assert.equal(result.clockReference.correctionMs,null);
+  assert.ok(result.latency.flags.some(f=>f.startsWith('peer_')));
+ }
+ assert.equal(compareClockReferences({...peer,peerSessionId:'restart'},peer),null);
+ assert.equal(compareClockReferences({...peer,peerSourceId:43},peer),null);
+ assert.equal(referenceAt(peer,{...now,clockId:'new-process'}).state,'unavailable');
+ assert.equal(referenceAt(peer,{...now,monotonicMs:301001}).state,'expired');
+ assert.ok(Math.abs(referenceAt(peer,{...now,monotonicMs:11000}).holdoverUncertaintyMs-1)<1e-6);
+ assert.throws(()=>bindReference({...peerSample,peerSourceId:-1},now));
+ assert.throws(()=>bindReference({...peerSample,peerSessionId:null},now));
+ const audio=applyTimeReference({...matching,signalIdentity:null,audioTimecode:{valid:true,crcOk:true,sourceId:42},latency:{audio_ms:55,taiUtcSeconds:37}},peer);
+ assert.equal(audio.latency.audio_ms,155);assert.equal(audio.latency.video_ms,undefined);
+});

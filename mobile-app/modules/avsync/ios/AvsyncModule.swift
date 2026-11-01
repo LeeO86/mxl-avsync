@@ -19,6 +19,23 @@ public class AvsyncModule: Module {
       AVSyncDeviceCalibration.solve(input)
     }
     Function("clockNow") { PhoneClock.now() }
+    AsyncFunction("discoverPeerClocks") { (promise: Promise) in
+      guard UIApplication.shared.applicationState == .active else {promise.reject("PEER_INACTIVE","Open AVsync before finding senders");return}
+      DispatchQueue.global(qos:.userInitiated).async {
+        let names=PeerClockDiscovery().discover()
+        let values=names.map { ["name":$0,"code":PeerClockPacket.code(from:$0) ?? ""] }
+        DispatchQueue.main.async {promise.resolve(values)}
+      }
+    }.runOnQueue(.main)
+    AsyncFunction("synchronizePeerClock") { (name: String, code: String, promise: Promise) in
+      guard !self.clockBusy,UIApplication.shared.applicationState == .active else {promise.reject("CLOCK_BUSY","Keep AVsync open and finish the current clock check");return}
+      self.clockBusy=true
+      DispatchQueue.global(qos:.userInitiated).async {
+        do {let reference=try PeerClockClient().synchronize(serviceName:name,code:code)
+          DispatchQueue.main.async {self.clockBusy=false;promise.resolve(reference)}
+        } catch {DispatchQueue.main.async {self.clockBusy=false;promise.reject("PEER_UNAVAILABLE",error.localizedDescription)}}
+      }
+    }.runOnQueue(.main)
     AsyncFunction("synchronizeClock") { (host: String, promise: Promise) in
       guard !self.clockBusy else { promise.reject("CLOCK_BUSY", "A clock check is already running"); return }
       self.clockBusy = true
@@ -102,7 +119,7 @@ public class AvsyncModule: Module {
     }
     do {
       let image = try GeneratorImageStore.load(id: options["imageId"] ?? "")
-      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false")
+      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false",peerClockEnabled:options["peerClock"]=="true")
       generator = controller; controller.onClose = { result in promise.resolve(result) }
       parent.view.endEditing(true)
       parent.present(controller, animated: true)
