@@ -10,6 +10,14 @@ archive before spending the build. This supersedes the local-only distribution
 constraint for this delivery only; physical accuracy and full acoustic device
 calibration remain unvalidated/separate.
 
+Delivery verified: mobile 2.0.8 (11), source
+`799445af0026e7bb8b446bb3cfc18ef4ab7e0867`, EAS build
+`647b9210-ffaf-442e-a860-95c59638fa54`, submission
+`b891b210-708d-40cf-aeab-10ce4efa633b`. The downloaded signed store IPA verifies
+universal device family 1/2, full-screen iPad, Bonjour declarations, new native
+peer/optical code, production JS and resources. Apple reports VALID /
+IN_BETA_TESTING. No physical-phone app/data replacement or container deployment.
+
 ## Direct-device clock and optical isolation (2026-11-01, local implementation)
 
 Maintainer asks to isolate the remaining optical jitter and test a direct

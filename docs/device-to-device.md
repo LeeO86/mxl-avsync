@@ -1,7 +1,9 @@
 # Direct device testing and calibration
 
-## Direct sender clock and picture/sound (local implementation, 2026-11-01)
+## Direct sender clock and picture/sound (TestFlight build 11, 2026-11-01)
 
+Update both iOS devices to **AVsync 2.0.8 (11)** in TestFlight (or use a
+corresponding local native build). Native iPad support is included.
 Use **Generate → Direct clock for another device** on an iPhone/iPad, start
 the signal and note the six-character code. On the receiver, open **Settings →
 Direct device test → Find local senders**, choose that code and allow Local
@@ -18,7 +20,8 @@ open "/tmp/avsync-direct-device/AVsync Direct Test.app"
 open "/tmp/avsync-direct-device/AVsync Direct Test.app" --args --one-hz
 ```
 
-macOS 14+, Xcode/command-line tools and a local native iOS build are required.
+macOS 14+ and Xcode/command-line tools are required to build the Mac helper.
+The receiver uses TestFlight build 11 or the corresponding local native build.
 The helper is built locally, uses the shared AVS2 renderer and waveform, and
 plays via AppKit/display-link and AVAudioEngine. No browser, WebRTC, server
 pipeline or cloud build is involved. Use the green window button for full
