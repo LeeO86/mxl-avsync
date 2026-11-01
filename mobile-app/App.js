@@ -146,6 +146,8 @@ export default function App() {
    const generation = clockGeneration.current;
    const value = await synchronizeClock(native,session);
    if(generation !== clockGeneration.current || AppState.currentState !== 'active') throw new Error('Clock settings or foreground state changed. Synchronize again.');
+   // The periodic UI tick can predate this new reference by up to 200 ms.
+   setTick(performance.now());
    setClockCheck(previous=>({...value,comparison:compareClockReferences(value,previous)}));
   } catch(error) { setClockCheck(null);setClockError(`Clock unavailable: ${error.message}`); }
   finally { clockInFlight.current = false;setClockBusy(false); }
