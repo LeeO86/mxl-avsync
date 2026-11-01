@@ -1,5 +1,18 @@
 # mxl-avsync — Implementation plan
 
+## Diagnostic TestFlight delivery (2026-11-01)
+
+After local validation the maintainer explicitly authorized one EAS Cloud build
+and TestFlight submission for gathering 240-fps diagnostics. Mobile 2.0.8 (10)
+is built from `d30160fa8e96f364ec22df6c1d713625ffa0338e`, merged through PR #59
+as `3affb0ea5188f0afc9880c1a619ccc1e7fdd8e53` with an identical app/core tree.
+The signed store artifact includes adaptive QR scheduling, sparse acquisition,
+phase profiling and diagnostic sharing and excludes test-only preview access.
+Camera mode remains selectable; no phone installation, source-pipeline update
+or physical timing validation is performed by this distribution. The earlier
+local-only preparation notes below describe that stage before this explicit
+release request. Ongoing development still uses local builds by default.
+
 ## Event-focused phone capture at 240 fps (local work, 2026-11-01)
 
 Maintainer requests profiling and a fast all-frame path with deeper work only

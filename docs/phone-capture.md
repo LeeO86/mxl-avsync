@@ -94,7 +94,7 @@ including nonzero audio/video start offsets. Live calibration exports a clipped
 WAV and dense waveform for the retained pre/post-contact window. Save uses the
 original selected frame timestamp, not the interpolated preview clock.
 
-## On-device comparison diagnostics (unreleased)
+## On-device comparison diagnostics (mobile 2.0.8 build 10)
 
 The fast path probes sparse finder/flash pixels on every frame. It does not
 rectify or decode a full raster per frame. QR-module evidence is gathered only
@@ -132,4 +132,5 @@ exporting does not reapply the current reference to a held acquisition.
 
 For an A/B run keep the source pipeline unchanged between app builds. A local
 development build does not replace a TestFlight build unless deliberately
-installed on the phone. This change is prepared and built locally only.
+installed on the phone. The diagnostic update is distributed as TestFlight
+2.0.8 (10); installation and a controlled device run are separate steps.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Mobile (unreleased)
+## Mobile 2.0.8 build 10 (2026-11-01)
 
 - Focus slow QR work around actual pulses with geometry refresh/reacquisition;
   retain cheap photometry on every frame, including unexpected early/late
@@ -9,7 +9,8 @@
 - Throttle unidentified full-raster acquisition and avoid duration-ring COW
   allocations. Add buffer/probe/QR/housekeeping timings, workload counts and
   bounded normalized flash traces. Sustained 240-fps device delivery remains
-  a hardware check; no cloud build or phone installation is performed here.
+  a hardware check. This diagnostic update does not claim validated physical
+  timing accuracy.
 
 - Distinguish the measured sync uncertainty from the assumed 50-ppm holdover
   allowance. The allowance is not measured phone drift and does not increase
@@ -22,7 +23,8 @@
   readings, capture timestamps and the existing clock qualification policy.
 - Count worker delivery delay consistently in display, Save and diagnostic ages,
   so saving cannot relabel a held reading as live at the freshness boundary.
-- Local validation/build only; no EAS Cloud build or TestFlight upload.
+- Distributed as TestFlight build 10 after local native/portable tests and all
+  CI checks passed. Camera-rate selection remains explicit (initial 120 fps).
 
 ## Mobile 2.0.8 (2026-11-01)
 
