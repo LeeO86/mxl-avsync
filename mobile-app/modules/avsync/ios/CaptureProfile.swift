@@ -73,7 +73,7 @@ final class CaptureTelemetry {
       "deliveredFps":duration>0 ? Double(current.count-1)*1000/duration : 0,
       "windowMs":duration,"maxFrameGapMs":gaps.max() ?? 0,"p95FrameGapMs":p95(gaps),
       "dropCallbacks":drops.values.reduce(0,+),"dropReasons":drops,"videoPaths":paths,"estimatedMissingFramesFromPts":inferredMissing]
-    for kind in ["video","audio","poll","snapshot","videoLock","videoProbe","videoUnlock","qrVision","qrVisionFirst","qrVisionFallback","qrApply","housekeeping"] { let values=timings[kind,default:[]];result[kind+"ProcessingP95Ms"]=p95(values);result[kind+"ProcessingMaxMs"]=values.max() ?? 0 }
+    for kind in ["video","audio","poll","snapshot","videoLock","videoProbe","videoUnlock","qrVision","qrVisionFirst","qrVisionFallback","qrApply","housekeeping","reportDelivery"] { let values=timings[kind,default:[]];result[kind+"ProcessingP95Ms"]=p95(values);result[kind+"ProcessingMaxMs"]=values.max() ?? 0 }
     var edges=[[String:Any]]()
     for event in events.suffix(20) {
       guard let time=event["videoTimeMs"] as? Double, let first=current.first, time>=first.time,

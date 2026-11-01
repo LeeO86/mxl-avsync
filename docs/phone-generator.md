@@ -3,8 +3,9 @@
 Use the current native iOS/TestFlight build, open **Generate**, choose **1 or 2 chirps/s**,
 set **Name**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
 inside the fullscreen screen; Measure/Results keep their portrait layout.
-Film the entire test picture, including all four corner fiducials, with an
-external camera. Keep only that phone's speaker audible. Send the camera's
+Film the QR code and the adjacent flash panel with an external camera.
+Both must remain visible; outside corner marks and the old frame strip are
+not required by the QR/flash detector. Keep only that phone's speaker audible. Send the camera's
 picture and audio through the desired gateway to an updated live analyzer.
 Transport/routing remain the responsibility of the gateway/controller.
 
@@ -12,7 +13,7 @@ The source uses the same compact 1200-baud codec as the server. A 100-ms white
 pulse begins at the planned chirp onset, once or twice per second. Each audio
 packet independently carries the source identity and timestamp; an image or
 manifest is not needed to decode the audio data. The picture carries the same
-identity/time and a 60-Hz source-frame strip (`720p60`). Source timestamps describe
+identity/time in a compact QR beside the flash panel (`720p60`). Source timestamps describe
 **scheduled output**, not an independent measurement of light or sound emission.
 
 ## What the numbers mean
@@ -27,8 +28,10 @@ identity/time and a 60-Hz source-frame strip (`720p60`). Source timestamps descr
   `latency_estimated: true`, `source_reference: phone-utc-scheduled-output`,
   `latency_uncertainty_status: unknown`. A locked receiver does not validate the
   source. Optical AV uncertainty is also unknown until measured on real hardware.
-- The manual HTTPS clock check is a coarse sanity check. It does not discipline
-  the clock or calibrate display/speaker delay. Capture calibration in Measure
+- The NTP check gives a separately qualified UTC estimate. Direct-device LAN
+  pairing gives a sender-relative reference for tests without WebRTC; see
+  [direct device testing](device-to-device.md). Neither disciplines the system
+  clock or calibrates display/speaker delay. Capture calibration in Measure
   belongs to the phone's camera/microphone and is not applied to source playback.
 - A separate independently timed source-output calibration is required to
   subtract phone output bias and isolate a downstream camera's contribution.

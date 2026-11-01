@@ -439,10 +439,17 @@ struct QrDetection {
 class QrFlashTracker {
 public:
     struct Sample { double time_ms=0,level=0,range=0; int phase=0; };
+    struct EdgeDiagnostic {
+        uint64_t id=0,sequence=0,attempts=0;
+        double white_ms=0,first_qr_ms=-1;
+        std::array<double,4> crossings_ms{{-1,-1,-1,-1}};
+        int reason=0,max_known_modules=0; // 0 two whites, 1 QR, 2 window, 3 frozen, 4 pixels, 5 duplicate, 6 confirmed
+    };
     struct Diagnostics {
         uint64_t frames=0,probe_frames=0,symbol_frames=0,module_reads=0,match_calls=0,symbol_comparisons=0;
         uint64_t mixed_frames=0,finder_rejections=0,geometry_rejections=0,edges=0,emitted=0;
         std::deque<Sample> samples;
+        std::deque<EdgeDiagnostic> edge_details;
     };
     void reset();
     void observe(const QrDetection& qr, double capture_ms);
@@ -457,7 +464,7 @@ public:
     std::optional<uint64_t> sequence() const { return anchor_ ? std::optional<uint64_t>(anchor_->payload.k) : std::nullopt; }
 private:
     struct Code { QrPayload payload; double time; std::array<uint8_t,1089> modules; };
-    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; std::vector<std::array<uint8_t,1089>> symbols; };
+    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; std::vector<std::array<uint8_t,1089>> symbols; uint64_t diagnostic_id=0; };
     std::optional<QrDetection> anchor_;
     double anchor_ms_ = -1e30, last_frame_ms_ = -1e30;
     std::array<double, 9> transform_{};
@@ -473,6 +480,7 @@ private:
     void push_pixels(const void* luma, bool eight_bit, int width, int height, int stride, VideoObservation frame);
     double last_black_ms_ = -1e30;
     Diagnostics diagnostics_;
+    std::deque<Sample> raw_samples_;
 };
 
 // ---- pairing, grading, statistics, uncertainty (§4, §8) ------------------

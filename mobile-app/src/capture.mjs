@@ -35,7 +35,13 @@ export function captureDiagnostics(report = {}, ageMs = Infinity, active = true)
  if(report.qrFlash) {
   const q=report.qrFlash;
   lines.push(`Since source/reset · ${q.probeFrames} flash probes · ${q.symbolFrames} QR pixel checks · ${q.emitted}/${q.edges} confirmed/detected edges`);
+  const transition=q.edgeDetails?.at(-1);
+  if(transition){
+   const relative=key=>Number.isFinite(transition[key])&&Number.isFinite(transition.whiteTimeMs)?ms(transition[key]-transition.whiteTimeMs):'unavailable';
+   lines.push(`Latest optical edge · ${transition.reason} · 10/30/50% versus primary 70%: ${relative('threshold10Ms')} / ${relative('threshold30Ms')} / ${relative('threshold50Ms')}`);
+  }
  }
+ if(Number.isFinite(stats.reportDeliveryProcessingMaxMs))lines.push(`Capture report delivery max ${ms(stats.reportDeliveryProcessingMaxMs)}`);
  if(edge) lines.push(`Latest paired video #${latest.seq} · capture bracket ${ms(edge.frameGapMs)}`);
  const warning=!stale && frameMs && Number.isFinite(stats.maxFrameGapMs) && stats.maxFrameGapMs>frameMs*2.5 ?
   'Capture gaps exceed two frame intervals. Missing camera samples can increase video timing variation; this does not identify WebRTC/display jitter.' : null;

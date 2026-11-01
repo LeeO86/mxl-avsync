@@ -49,3 +49,10 @@ test('detailed profiling separates pixel-buffer, QR-worker and capture-queue wor
  assert.ok(value.lines.some(line=>line.includes('QR worker max 15.0 ms')&&line.includes('QR apply max 0.5 ms')));
  assert.ok(value.lines.some(line=>line.includes('160 QR pixel checks')&&line.includes('19/20')));
 });
+
+test('optical candidates are shown relative to unchanged primary and survive diagnostic metadata export',()=>{
+ const value=captureDiagnostics({captureStats:{reportDeliveryProcessingMaxMs:.3},qrFlash:{edgeDetails:[{whiteTimeMs:100,threshold10Ms:80,threshold30Ms:90,threshold50Ms:96,reason:'qr_seen_before_edge'}]}},0,true);
+ assert.ok(value.lines.some(l=>l.includes('-20.0 ms / -10.0 ms / -4.0 ms')&&l.includes('qr_seen_before_edge')));
+ assert.ok(value.lines.some(l=>l.includes('delivery max 0.3 ms')));
+ assert.ok(!value.lines.some(l=>l.includes('NaN')));
+});

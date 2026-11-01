@@ -14,7 +14,10 @@
       "infoPlist": {
         "NSCameraUsageDescription": "See the AV sync test picture.",
         "NSMicrophoneUsageDescription": "Hear the AV sync chirps.",
-        "NSLocalNetworkUsageDescription": "Synchronize the measurement clock with a time server on your local network."
+        "NSLocalNetworkUsageDescription": "Synchronize measurement time with local time servers and nearby AVsync senders.",
+        "NSBonjourServices": [
+          "_avsync-peer._udp"
+        ]
       },
       "config": {
         "usesNonExemptEncryption": false

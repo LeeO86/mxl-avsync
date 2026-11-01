@@ -130,3 +130,8 @@ References: [NTPv4](https://www.rfc-editor.org/rfc/rfc5905),
 Real iPhone NTP accuracy, Android hardware GNSS and physical latency validation
 remain separate device tests; a successful simulator/JVM test does not establish
 their accuracy.
+
+For a comparison without WebRTC, use the source-bound native LAN clock and
+direct Mac/iPhone/iPad signal described in [device-to-device.md](device-to-device.md).
+This is sender-relative timing, with a 100-ppm two-clock holdover allowance,
+not a verified UTC reference or complete physical I/O calibration.

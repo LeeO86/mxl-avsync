@@ -188,6 +188,12 @@ jobs:
           /tmp/avsync-capture-cadence
       - name: Swift SNTP protocol and real local UDP exchange
         run: python3 mobile-app/tests/native/clock.py
+      - name: Direct sender clock packet and real UDP exchange
+        run: |
+          swiftc mobile-app/modules/avsync/ios/SntpPacket.swift mobile-app/modules/avsync/ios/PhoneClock.swift mobile-app/modules/avsync/ios/PeerClockPacket.swift mobile-app/modules/avsync/ios/PeerClock.swift mobile-app/tests/native/peer-clock.swift -o /tmp/avsync-peer-clock
+          /tmp/avsync-peer-clock
+      - name: Native Mac direct source
+        run: python3 tools/direct-device/build.py
       - name: Experimental device-calibration maths bridge
         run: |
           clang++ -std=c++20 -O2 -fobjc-arc -I mobile-app/modules/avsync/ios -I core/include -I third_party/pocketfft \

@@ -1,4 +1,56 @@
-# Device-to-device calibration (C2/C3 spike)
+# Direct device testing and calibration
+
+## Direct sender clock and picture/sound (local implementation, 2026-11-01)
+
+Use **Generate → Direct clock for another device** on an iPhone/iPad, start
+the signal and note the six-character code. On the receiver, open **Settings →
+Direct device test → Find local senders**, choose that code and allow Local
+Network on both devices. Keep both on the same LAN. Film the sender directly
+and leave only its sound audible. A sender restart creates a new source ID and
+code; pair again. Repeat with the devices swapped, then compare to the Mac.
+
+For the same-monitor comparison without WebRTC, build the native Mac sender:
+
+```sh
+python3 tools/direct-device/build.py
+open "/tmp/avsync-direct-device/AVsync Direct Test.app"
+# Optional: one event per second rather than two
+open "/tmp/avsync-direct-device/AVsync Direct Test.app" --args --one-hz
+```
+
+macOS 14+, Xcode/command-line tools and a local native iOS build are required.
+The helper is built locally, uses the shared AVS2 renderer and waveform, and
+plays via AppKit/display-link and AVAudioEngine. No browser, WebRTC, server
+pipeline or cloud build is involved. Use the green window button for full
+screen. Stop/restart on audio-device changes; use built-in speakers for the
+comparison. The default build is ad-hoc signed; optionally set
+`AVSYNC_SIGN_IDENTITY` to an existing local signing identity.
+
+Bonjour `_avsync-peer._udp` advertises an ephemeral pairing code, not the device
+name. Eight short UDP exchanges carry request nonce, receiver send time and
+sender receive/send times. At least three consistent replies are required;
+minimum network interval wins. The source freezes one UTC/monotonic mapping
+for both scheduled AVS2 timestamps and clock replies. The receiver maps its
+own monotonic time into that sender mapping, so neither needs accurate UTC
+for this **relative** test. The display includes a network/stamping interval,
+100-ppm two-clock holdover allowance, five-minute expiry and unknown physical
+accuracy. This interval is an estimate, not a guaranteed bound on asymmetric
+LAN delay. Neither device system clock is changed.
+
+Wrong origin, oversized/invalid packets, self-sync, clock/session changes and
+disagreeing samples are rejected. Correction is applied only to matching
+source-ID and TAI-offset reports; switching sources cannot silently reuse it.
+Background/settings changes invalidate acquisition; background invalidates
+the retained in-memory reference. The protocol is unauthenticated, intended
+for an explicitly selected sender on a trusted test LAN. No camera/audio
+recording or saved measurement is transferred. Pairing does **not** determine
+display, speaker, camera or microphone latency; these remain in the result.
+
+Checks: native packet and real UDP-loopback tests, source-bound JS correction,
+renderer/QR/waveform tests and local iOS builds. Physical device-to-device
+accuracy and comparison against the WebRTC path require the field run.
+
+## Acoustic two-way calibration (C2/C3 spike)
 
 Status: design, plus the maths and the onset extraction in the phone core
 (`core/include/avsync/two_way.hpp`, `core/src/two_way.cpp`). They are tested

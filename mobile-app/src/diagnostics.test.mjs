@@ -17,3 +17,11 @@ test('diagnostic shares distinguish held acquisition from current capture and ex
  assert.equal(exported.currentReport.picture.uri,undefined);
  assert.deepEqual(reading,{kind:'reading',offset_ms:12,clockReference:{source:'ntp',correctionMs:100},at:1000});
 });
+
+test('optical candidates and selected peer binding are retained separately from held readings',()=>{
+ const edge={threshold10Ms:80,threshold70Ms:100,whiteTimeMs:100,reason:'confirmed'};
+ const value=diagnosticSnapshot({report:{qrFlash:{timestampPolicy:'white70-v1',edgeDetails:[edge]}},reference:{source:'peer',peerSourceId:42,peerSessionId:'session-a'},reading:{clockReference:{source:'ntp'}},ageMs:0,readingAgeMs:100,active:true});
+ assert.deepEqual(value.currentReport.qrFlash.edgeDetails,[edge]);
+ assert.equal(value.currentClockReference.peerSourceId,42);
+ assert.equal(value.lastAcceptedReading.clockReference.source,'ntp');
+});

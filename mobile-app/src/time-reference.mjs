@@ -21,17 +21,21 @@ export function clockSettings(session = {}) {
 
 export function bindReference(sample, nativeNow, jsMono = performance.now()) {
  const finite = key => Number.isFinite(sample?.[key]);
- if (!['ntp', 'gnss'].includes(sample?.source) || !finite('referenceUnixMs') || !finite('referenceMonotonicMs') || !finite('uncertaintyMs') ||
+ if (!['ntp', 'gnss', 'peer'].includes(sample?.source) || !finite('referenceUnixMs') || !finite('referenceMonotonicMs') || !finite('uncertaintyMs') ||
      sample.referenceUnixMs < 1e12 || sample.referenceUnixMs > 4e12 || sample.uncertaintyMs < 0 || sample.uncertaintyMs > 1500 ||
      !sample.clockId || !['ios-host','android-elapsed-realtime'].includes(sample.timebase) ||
      !Number.isFinite(nativeNow?.monotonicMs) || nativeNow.clockId !== sample.clockId || nativeNow.timebase !== sample.timebase) {
   throw new Error('Native clock reference is incomplete or belongs to a different clock.');
  }
+ if(sample.source==='peer' && (!Number.isInteger(sample.peerSourceId)||sample.peerSourceId<0||sample.peerSourceId>0xffffffff||typeof sample.peerSessionId!=='string'||!sample.peerSessionId||typeof sample.peerClockId!=='string'||!sample.peerClockId||!finite('taiUtcSeconds')||sample.taiUtcSeconds<0||sample.taiUtcSeconds>100)) throw new Error('Sender clock has no complete source/session binding.');
  const ageMs = nativeNow.monotonicMs-sample.referenceMonotonicMs;
  if (ageMs < 0 || ageMs > CLOCK_MAX_AGE_MS) throw new Error('Native clock reference is stale.');
  return { ...sample, receivedJsMonoMs: jsMono, ageAtReceiptMs: ageMs, maxAgeMs: CLOCK_MAX_AGE_MS,
-  holdoverDriftPpm: CLOCK_DRIFT_PPM, estimated: true, physicalAccuracy: 'unvalidated' };
+  holdoverDriftPpm: sample.source==='peer'?100:CLOCK_DRIFT_PPM, estimated: true, physicalAccuracy: 'unvalidated' };
 }
+
+const driftPpm=reference=>reference?.source==='peer'?100:CLOCK_DRIFT_PPM;
+const clockName=reference=>reference.source==='gnss'?'GNSS':reference.source==='peer'?`Direct sender ${reference.server || ''}`.trim():`NTP ${reference.server || ''}`.trim();
 
 export async function synchronizeClock(native, session, jsMono = () => performance.now()) {
  if (!native?.synchronizeClock || !native?.clockNow) throw new Error('A new native AVsync build is required for clock synchronization.');
@@ -46,11 +50,11 @@ export function referenceAt(reference, mapping, maxUncertaintyMs = 20) {
  const ageMs = mapping.monotonicMs-reference.referenceMonotonicMs;
  if (ageMs < 0 || ageMs > CLOCK_MAX_AGE_MS) return { state: 'expired', ageMs };
  const sampleUncertaintyMs = reference.uncertaintyMs;
- const holdoverUncertaintyMs = ageMs * CLOCK_DRIFT_PPM / 1e6;
+ const holdoverUncertaintyMs = ageMs * driftPpm(reference) / 1e6;
  const uncertaintyMs = sampleUncertaintyMs + holdoverUncertaintyMs;
  const unixMs = reference.referenceUnixMs + ageMs;
  return { state: uncertaintyMs <= maxUncertaintyMs ? 'estimated' : 'uncertain', ageMs, uncertaintyMs,
-  sampleUncertaintyMs, holdoverUncertaintyMs, holdoverDriftPpm: CLOCK_DRIFT_PPM, unixMs };
+  sampleUncertaintyMs, holdoverUncertaintyMs, holdoverDriftPpm: driftPpm(reference), unixMs };
 }
 
 export function clockRadiusText(ms) {
@@ -63,10 +67,10 @@ export function referenceSummary(reference, jsMono = performance.now(), limitMs 
  const elapsed = jsMono-reference.receivedJsMonoMs;
  if (elapsed < 0) return 'Clock reference expired · synchronize again';
  const age = reference.ageAtReceiptMs+elapsed;
- const radius = reference.uncertaintyMs+age*CLOCK_DRIFT_PPM/1e6;
- const name = reference.source === 'gnss' ? 'GNSS' : `NTP ${reference.server}`;
+ const radius = reference.uncertaintyMs+age*driftPpm(reference)/1e6;
+ const name = clockName(reference);
  if (age > CLOCK_MAX_AGE_MS) return `${name} · expired · synchronize again`;
- return `${name} · sync estimate ${clockRadiusText(reference.uncertaintyMs)} · holdover +${(age*CLOCK_DRIFT_PPM/1e6).toFixed(1)} ms · ${Math.floor(age/1000)} s old${radius > limitMs ? ' · above limit' : ''}`;
+ return `${name} · sync estimate ${clockRadiusText(reference.uncertaintyMs)} · holdover +${(age*driftPpm(reference)/1e6).toFixed(1)} ms · ${Math.floor(age/1000)} s old${radius > limitMs ? ' · above limit' : ''}`;
 }
 
 // Compare two independent checks at a common native time. The difference can
@@ -74,6 +78,7 @@ export function referenceSummary(reference, jsMono = performance.now(), limitMs 
 export function compareClockReferences(current, previous) {
  if (!current?.clockId || !previous?.clockId || current.clockId !== previous.clockId || current.timebase !== previous.timebase ||
      current.source !== previous.source || current.server !== previous.server) return null;
+ if(current.source==='peer' && (current.peerSessionId!==previous.peerSessionId||current.peerSourceId!==previous.peerSourceId)) return null;
  if (![current.uncertaintyMs,previous.uncertaintyMs].every(value=>Number.isFinite(value)&&value>=0)) return null;
  const elapsedMs = current.referenceMonotonicMs-previous.referenceMonotonicMs;
  if (!Number.isFinite(elapsedMs) || elapsedMs < 1000 || elapsedMs > CLOCK_MAX_AGE_MS) return null;
@@ -86,13 +91,14 @@ export function compareClockReferences(current, previous) {
 export function clockCheckDetails(reference) {
  if (!reference) return null;
  const signed = value => `${value < 0 ? '−' : '+'}${Math.abs(value).toFixed(1)} ms`;
- const offset = Number.isFinite(reference.offsetMs) ? `NTP−device UTC at sync ${signed(reference.offsetMs)}. ` : '';
+ const offset = Number.isFinite(reference.offsetMs) ? `${reference.source==='peer'?'Sender':'NTP'}−device UTC at sync ${signed(reference.offsetMs)}. ` : '';
  const comparison = reference.comparison;
  return offset+(comparison ? `Change since previous check ${signed(comparison.changeMs)} (${clockRadiusText(comparison.uncertaintyMs)} combined estimate) · ${comparison.resolved ? 'outside estimated uncertainty; network/server or clock change' : 'no change resolved within estimated uncertainty'}. ` : '')+
-  `Holdover assumes ${CLOCK_DRIFT_PPM} ppm (0.1 ms per 2 s). This grows the uncertainty allowance, not the clock correction or latency. Actual phone drift is not measured.`;
+  `Holdover assumes ${driftPpm(reference)} ppm (${(driftPpm(reference)*.002).toFixed(1)} ms per 2 s). This grows the uncertainty allowance, not the clock correction or latency. Actual phone drift is not measured.`;
 }
 
 export function generatorClockOptions(reference, nativeNow, limitMs = 20) {
+ if(reference?.source==='peer') return {}; // A role swap creates a new sender/session; re-pair the receiver.
  const value = referenceAt(reference, nativeNow, limitMs);
  if (value.state !== 'estimated') return {};
  return { clockUnixMs: String(reference.referenceUnixMs), clockMonotonicMs: String(reference.referenceMonotonicMs),
@@ -111,17 +117,23 @@ export function applyTimeReference(report, reference, settings = clockSettings()
  const raw = report.latency;
  const mapping = report.clockMapping;
  const estimate = referenceAt(reference, mapping, settings.maxUncertaintyMs);
- const usable = estimate.state === 'estimated' && Number.isFinite(mapping?.deviceUnixMs);
+ const peerMatches=reference?.source!=='peer'||measurementSourceKey(report)===`source:${reference.peerSourceId}`;
+ const peerTaiMatches=reference?.source!=='peer'||raw.taiUtcSeconds===reference.taiUtcSeconds;
+ const usable = estimate.state === 'estimated' && Number.isFinite(mapping?.deviceUnixMs) && peerMatches && peerTaiMatches;
  const correction = usable ? estimate.unixMs-mapping.deviceUnixMs : 0;
- const clock = { state: usable ? 'estimated' : estimate.state, source: usable ? reference.source : 'device-utc',
+ const clock = { state: !peerMatches?'source_mismatch':!peerTaiMatches?'tai_mismatch':usable ? 'estimated' : estimate.state, source: usable ? reference.source : 'device-utc',
   correctionMs: usable ? correction : null, uncertaintyMs: usable ? estimate.uncertaintyMs : null,
   sampleUncertaintyMs: usable ? estimate.sampleUncertaintyMs : null, holdoverUncertaintyMs: usable ? estimate.holdoverUncertaintyMs : null,
   holdoverDriftPpm: usable ? estimate.holdoverDriftPpm : null,
   ageMs: estimate.ageMs ?? null, utcAtReportMs: usable ? estimate.unixMs : null, roundTripMs: usable && Number.isFinite(reference.roundTripMs) ? reference.roundTripMs : null,
   server: usable ? reference.server : null, reference: usable ? reference : null,
+  peerSourceId:reference?.source==='peer'?reference.peerSourceId:null,peerSessionId:reference?.source==='peer'?reference.peerSessionId:null,
+  scope:usable&&reference.source==='peer'?'relative to selected sender':'UTC estimate',
   authenticated: false, captureUncertaintyMs: null, sourceClockUncertaintyMs: null, physicalAccuracy: 'unvalidated' };
  const latency = { ...raw, clock, estimated: true, clockAccuracy: usable ? 'estimated' : 'unknown',
   uncertaintyScope: 'clock only; capture and source timing unknown', flags: [], basis: {} };
+ if(!peerMatches)latency.flags.push('peer_clock_belongs_to_another_source');
+ if(!peerTaiMatches)latency.flags.push('peer_tai_offset_mismatch');
  for (const essence of ['video','audio']) {
   // Idempotent: a retained reading is never corrected a second time.
   const original = raw[`raw_${essence}_ms`] ?? raw[`${essence}_ms`];
@@ -157,6 +169,6 @@ export function applyTimeReference(report, reference, settings = clockSettings()
 // A held reading keeps the clock it actually used, even after a later sync.
 export function measurementClockLabel(clock) {
  if (!clock || clock.source === 'device-utc') return 'Device UTC · uncorrected';
- const name=clock.source==='gnss' ? 'GNSS' : `NTP ${clock.server || ''}`.trim();
+ const name=clockName(clock);
  return `${name} · ${clockRadiusText(clock.uncertaintyMs)} at acquisition`;
 }

@@ -83,3 +83,6 @@ The Signal form's **Title** is the large caption below the sync scale;
 `AVSYNC_SOURCE` keep their names and values. The obsolete header `title` /
 `AVSYNC_TITLE` remains accepted by the legacy API but is not a second title
 control for AVS2. Both container and iPhone show the centered AVsync brand.
+
+A local native Mac/iPhone/iPad test source and source-bound LAN clock pairing
+can isolate WebRTC from phone timing tests: [direct device setup](docs/device-to-device.md).

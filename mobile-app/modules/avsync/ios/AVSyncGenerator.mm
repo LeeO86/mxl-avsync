@@ -11,7 +11,7 @@ void rgb(uint16_t y,uint16_t cb,uint16_t cr,uint8_t *out) {
     out[1]=uint8_t(std::lround(std::clamp(l-.187324*u-.468124*v,0.0,1.0)*255));
     out[2]=uint8_t(std::lround(std::clamp(l+1.8556*u,0.0,1.0)*255));out[3]=255;
 }
-UIImage *image_from_frame(const avsync::Yuv422p10& frame,bool white_only=false) {
+AVSyncPlatformImage *image_from_frame(const avsync::Yuv422p10& frame,bool white_only=false) {
     NSMutableData *rgba=[NSMutableData dataWithLength:size_t(frame.width)*frame.height*4];auto *dst=(uint8_t*)rgba.mutableBytes;
     for(int y=0;y<frame.height;++y)for(int x=0;x<frame.width;++x) {
         const size_t ci=size_t(y)*(frame.width/2)+x/2;
@@ -22,10 +22,26 @@ UIImage *image_from_frame(const avsync::Yuv422p10& frame,bool white_only=false) 
     CGDataProviderRef provider=CGDataProviderCreateWithCFData((__bridge CFDataRef)rgba);
     CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGImageRef image=CGImageCreate(frame.width,frame.height,8,32,frame.width*4,space,kCGImageAlphaPremultipliedLast,provider,nullptr,false,kCGRenderingIntentDefault);
-    UIImage *result=[UIImage imageWithCGImage:image];CGImageRelease(image);CGColorSpaceRelease(space);CGDataProviderRelease(provider);return result;
+#if TARGET_OS_OSX
+    AVSyncPlatformImage *result=[[NSImage alloc]initWithCGImage:image size:NSMakeSize(frame.width,frame.height)];
+#else
+    AVSyncPlatformImage *result=[UIImage imageWithCGImage:image];
+#endif
+    CGImageRelease(image);CGColorSpaceRelease(space);CGDataProviderRelease(provider);return result;
 }
-void make_still(UIImage *image,avsync::SourceStill& still) {
-    if(!image.CGImage)return;
+void make_still(AVSyncPlatformImage *image,avsync::SourceStill& still) {
+#if TARGET_OS_OSX
+    if(!image)return;
+    NSRect rect=NSMakeRect(0,0,image.size.width,image.size.height);
+    CGImageRef source=[image CGImageForProposedRect:&rect context:nil hints:nil];if(!source)return;
+    const double factor=std::min(1.0,512.0/std::max(image.size.width,image.size.height));
+    const int w=std::max(1,int(std::lround(image.size.width*factor))),h=std::max(1,int(std::lround(image.size.height*factor)));
+    still.width=w;still.height=h;still.rgba.resize(size_t(w)*h*4);
+    CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx=CGBitmapContextCreate(still.rgba.data(),w,h,8,w*4,space,kCGImageAlphaPremultipliedLast);
+    CGContextDrawImage(ctx,CGRectMake(0,0,w,h),source);CGContextRelease(ctx);CGColorSpaceRelease(space);
+#else
+    if(!image)return;
     const double factor=std::min(1.0,512.0/std::max(image.size.width,image.size.height));
     const int w=std::max(1,int(std::lround(image.size.width*factor))),h=std::max(1,int(std::lround(image.size.height*factor)));
     UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat];format.scale=1;
@@ -34,6 +50,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     CGColorSpaceRef space=CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef ctx=CGBitmapContextCreate(still.rgba.data(),w,h,8,w*4,space,kCGImageAlphaPremultipliedLast);
     CGContextDrawImage(ctx,CGRectMake(0,0,w,h),normalized.CGImage);CGContextRelease(ctx);CGColorSpaceRelease(space);
+#endif
     // Shared blitter expects straight alpha; CoreGraphics supplies premultiplied.
     for(size_t i=0;i<still.rgba.size();i+=4) { const int a=still.rgba[i+3];if(a>0&&a<255)for(int c=0;c<3;++c)still.rgba[i+c]=uint8_t(std::min(255,int(still.rgba[i+c])*255/a)); }
 }
@@ -55,26 +72,26 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
         NSURL *bundleURL=[[NSBundle mainBundle] URLForResource:@"AvsyncResources" withExtension:@"bundle"];
         NSBundle *resources=bundleURL ? [NSBundle bundleWithURL:bundleURL] : nil;
         NSURL *iconURL=[resources URLForResource:@"icon" withExtension:@"png"];
-        UIImage *icon=iconURL ? [UIImage imageWithContentsOfFile:iconURL.path] : nil;
+        AVSyncPlatformImage *icon=iconURL ? [[AVSyncPlatformImage alloc]initWithContentsOfFile:iconURL.path] : nil;
         if(icon) { make_still(icon,_appIcon);_info.app_icon=&_appIcon; }
     }
     return self;
 }
-- (void)setSourceName:(NSString *)name subtitle:(NSString *)subtitle image:(UIImage * _Nullable)image {
+- (void)setSourceName:(NSString *)name subtitle:(NSString *)subtitle image:(AVSyncPlatformImage * _Nullable)image {
     _info.source=name.length?name.UTF8String:"iPhone";_info.subtitle=subtitle.UTF8String;
     _sourceImage={};_info.source_image=nullptr;
-    if(!image.CGImage)return;
+    if(!image)return;
     make_still(image,_sourceImage);
     _info.source_image=&_sourceImage;
 }
-- (UIImage *)syncForeground {
+- (AVSyncPlatformImage *)syncForeground {
     avsync::Yuv422p10 frame;frame.resize(1280,720);
     avsync::render_sync_foreground(frame,_plan->period_frames(),_info.period_ms,true);
     return image_from_frame(frame,true);
 }
 - (NSDictionary *)geometry {
     auto g=avsync::qr_flash_geometry(1280,720);
-    return @{ @"width":@1280,@"height":@720,@"markerX":@(g.marker_x),@"markerY":@(g.marker_y),@"markerSide":@(g.marker_side),@"stripX":@(g.strip_x),@"stripY":@(g.strip_y),@"stripWidth":@0,@"stripHeight":@0 };
+    return @{ @"width":@1280,@"height":@720,@"sourceId":@(_plan->qr(1).source_id),@"markerX":@(g.marker_x),@"markerY":@(g.marker_y),@"markerSide":@(g.marker_side),@"stripX":@(g.strip_x),@"stripY":@(g.strip_y),@"stripWidth":@0,@"stripHeight":@0 };
 }
 - (NSDictionary *)frameAt:(double)target {
     const auto frame=_plan->frame_at(target);const int period=_plan->period_frames();const uint64_t seq=1+frame/period;const int pos=int(frame%period);
@@ -85,7 +102,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
 }
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }
 - (NSData *)audioForSequence:(uint64_t)seq { const auto samples=_plan->audio(seq);return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)]; }
-- (UIImage *)imageForSequence:(uint64_t)seq {
+- (AVSyncPlatformImage *)imageForSequence:(uint64_t)seq {
     _info.qr_json=avsync::qr_payload_text(_plan->qr(seq));_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
     avsync::Yuv422p10 frame;frame.resize(1280,720);
     avsync::render_picture(frame,_info,seq,0,_plan->period_frames(),false);
