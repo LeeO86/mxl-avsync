@@ -2,6 +2,7 @@
 
 ## Mobile unreleased
 
+- Enable native iPad support for the same full-screen receiver/source test.
 - Add explicit sender-relative LAN clock pairing for native iPhone/iPad sources
   and a native Mac test player. The four-timestamp exchange is bound to source
   and process/session identity, expires, and never claims PTP or physical I/O
@@ -9,7 +10,7 @@
 - Record observed 10/30/50/70% optical crossing candidates and per-edge QR
   rejection reasons; preserve the existing 70% primary timestamp and identity
   gates. Cache static capture context and audio-route details until invalidated;
-  expose worker-report delivery cost. No TestFlight release for this local work.
+  expose worker-report delivery cost. Physical timing remains unvalidated.
 
 ## Mobile 2.0.8 build 10 (2026-11-01)
 

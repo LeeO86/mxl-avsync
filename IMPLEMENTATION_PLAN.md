@@ -1,5 +1,15 @@
 # mxl-avsync — Implementation plan
 
+## Direct-device TestFlight preparation (2026-11-01)
+
+After local validation, the maintainer explicitly authorizes one EAS Cloud
+iOS build and TestFlight delivery for direct-device testing. Enable native
+iPad support with full-screen portrait app layout; generator rotates its raster
+as on iPhone. Verify universal device family, Bonjour purposes and the exact
+archive before spending the build. This supersedes the local-only distribution
+constraint for this delivery only; physical accuracy and full acoustic device
+calibration remain unvalidated/separate.
+
 ## Direct-device clock and optical isolation (2026-11-01, local implementation)
 
 Maintainer asks to isolate the remaining optical jitter and test a direct

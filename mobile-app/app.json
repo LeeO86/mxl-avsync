@@ -22,7 +22,9 @@
       "config": {
         "usesNonExemptEncryption": false
       },
-      "icon": "./assets/icon.png"
+      "icon": "./assets/icon.png",
+      "supportsTablet": true,
+      "requireFullScreen": true
     },
     "android": {
       "package": "io.leeo86.mxl.avsync",
