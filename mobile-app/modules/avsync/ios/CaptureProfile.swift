@@ -34,13 +34,19 @@ func chooseCaptureFormat(_ formats: [CaptureFormatRange], cap: Double) -> Captur
 // Bounded, samples-queue-only telemetry. PTS gaps and didDrop callbacks describe
 // overlapping evidence: they must not be summed into a fabricated lost-frame total.
 final class CaptureTelemetry {
+  private static let pathNames=["noPixel","legacy","qrFlash","calibration","warmupSkipped"]
   private struct Frame { let time: Double, gap: Double }
   private var frames = [Frame](), start = 0
   private var timings = [String:[Double]]()
   private var delivered = 0, drops = [String:Int](), inferredMissing = 0
+  private var paths = [String:Int]()
   private var previous: Double?
   private var configuredFps = 120.0
-  func reset(fps: Double) { frames=[];start=0;timings=[:];delivered=0;drops=[:];inferredMissing=0;previous=nil;configuredFps=fps }
+  func reset(fps: Double) { frames=[];start=0;timings=[:];delivered=0;drops=[:];paths=[:];inferredMissing=0;previous=nil;configuredFps=fps }
+  func videoPath(_ path: Int) {
+    guard Self.pathNames.indices.contains(path) else { return }
+    paths[Self.pathNames[path],default:0]+=1
+  }
   func frame(at time: Double) {
     guard time.isFinite else { return }
     if let previous, time <= previous { self.previous=nil;frames=[];start=0 }
@@ -53,9 +59,11 @@ final class CaptureTelemetry {
   func drop(reason: String) { drops[reason,default:0]+=1 }
   func processing(_ kind: String, ms: Double) {
     guard ms.isFinite && ms >= 0 else { return }
-    var values=timings[kind,default:[]];values.append(ms)
-    if values.count > 128 { values.removeFirst(values.count-128) }
-    timings[kind]=values
+    // Mutate in place: copying the dictionary's array before every append
+    // triggers Swift COW allocation on the 240-fps capture path.
+    timings[kind,default:[]].append(ms)
+    let excess=timings[kind]!.count-128
+    if excess>0 { timings[kind]!.removeFirst(excess) }
   }
   private func p95(_ values: [Double]) -> Double { let v=values.sorted();return v.isEmpty ? 0 : v[min(v.count-1,Int(Double(v.count-1)*0.95))] }
   func snapshot(events: [[String:Any]] = []) -> [String:Any] {
@@ -64,8 +72,8 @@ final class CaptureTelemetry {
     var result: [String:Any] = ["deliveredFrames":delivered,"configuredFps":configuredFps,
       "deliveredFps":duration>0 ? Double(current.count-1)*1000/duration : 0,
       "windowMs":duration,"maxFrameGapMs":gaps.max() ?? 0,"p95FrameGapMs":p95(gaps),
-      "dropCallbacks":drops.values.reduce(0,+),"dropReasons":drops,"estimatedMissingFramesFromPts":inferredMissing]
-    for kind in ["video","audio","poll","snapshot"] { let values=timings[kind,default:[]];result[kind+"ProcessingP95Ms"]=p95(values);result[kind+"ProcessingMaxMs"]=values.max() ?? 0 }
+      "dropCallbacks":drops.values.reduce(0,+),"dropReasons":drops,"videoPaths":paths,"estimatedMissingFramesFromPts":inferredMissing]
+    for kind in ["video","audio","poll","snapshot","videoLock","videoProbe","videoUnlock","qrVision","qrVisionFirst","qrVisionFallback","qrApply","housekeeping"] { let values=timings[kind,default:[]];result[kind+"ProcessingP95Ms"]=p95(values);result[kind+"ProcessingMaxMs"]=values.max() ?? 0 }
     var edges=[[String:Any]]()
     for event in events.suffix(20) {
       guard let time=event["videoTimeMs"] as? Double, let first=current.first, time>=first.time,

@@ -13,6 +13,8 @@ int main(int argc,char**argv){@autoreleasepool{
  [reader addOutput:video];[reader addOutput:audio];[reader startReading];
  AVSyncStreamAnalyzer*processor=[AVSyncStreamAnalyzer new];if(argc>2)[processor beginCalibration];
  NSDictionary *environment=NSProcessInfo.processInfo.environment;
+ if(environment[@"AVSYNC_TEST_SCAN_QR"]||environment[@"AVSYNC_TEST_SPARSE_ACQUISITION"])[processor setSparseAcquisition:YES];
+ uint64_t paths[5]={};
  NSString *testQR=environment[@"AVSYNC_TEST_QR"];
  const bool snapshots=environment[@"AVSYNC_TEST_ASYNC_SNAPSHOTS"]!=nil;
  AVSyncStreamAnalyzer *retainedSnapshot=nil;NSDictionary *retainedPicture=nil;
@@ -22,11 +24,14 @@ int main(int argc,char**argv){@autoreleasepool{
  while(v||a){bool chooseVideo=v&&(!a||CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(v),CMSampleBufferGetPresentationTimeStamp(a))<=0);
   const double currentMs=CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(chooseVideo?v:a))*1000;
   if(chooseVideo){
-   if(environment[@"AVSYNC_TEST_SCAN_QR"]&&currentMs-lastQR>=100){
+   const auto work=[processor pushVideo:v];
+   assert(work.lockMs>=0&&work.processMs>=0&&work.unlockMs>=0);
+   if(work.path>=0&&work.path<5)++paths[work.path];
+   if(environment[@"AVSYNC_TEST_SCAN_QR"]&&currentMs-lastQR>=100&&[processor qrScanSuggestedAt:currentMs]){
     lastQR=currentMs;NSDictionary *qr=[AVSyncQRCodeReader readPixelBuffer:CMSampleBufferGetImageBuffer(v)];
     for(NSDictionary *detection in qr[@"detections"])[processor observeQRDetection:detection timeMs:currentMs];
    }
-   [processor pushVideo:v];CFRelease(v);v=[video copyNextSampleBuffer];}else{[processor pushAudio:a];CFRelease(a);a=[audio copyNextSampleBuffer];}
+   CFRelease(v);v=[video copyNextSampleBuffer];}else{[processor pushAudio:a];CFRelease(a);a=[audio copyNextSampleBuffer];}
   if(testQR){
    if(environment[@"AVSYNC_TEST_ADVANCE_QR"]){
     auto qr=avsync::parse_qr_payload(testQR.UTF8String);
@@ -44,7 +49,7 @@ int main(int argc,char**argv){@autoreleasepool{
    AVSyncStreamAnalyzer *snapshot=[processor liveSnapshotForPolling];
    if(snapshot){report=[snapshot poll];assert([processor acceptLiveAnalysis:snapshot]);if(!retainedSnapshot){retainedSnapshot=snapshot;retainedPicture=[snapshot pictureObservation];}}
   }else report=[processor poll];
-  if(report){[reports addObject:report];if([report[@"kind"] isEqual:@"calibration"])break;}
+  if(report){NSMutableDictionary *measured=[report mutableCopy];measured[@"testVideoPaths"]=@{@"legacy":@(paths[1]),@"qrFlash":@(paths[2]),@"calibration":@(paths[3]),@"warmupSkipped":@(paths[4])};[reports addObject:measured];if([report[@"kind"] isEqual:@"calibration"])break;}
  }
  if(snapshots){assert(retainedSnapshot);if(testQR){auto other=avsync::parse_qr_payload(testQR.UTF8String);assert(other);other->source_id^=1;other->test_id="other-source";[processor observeQR:[NSString stringWithUTF8String:avsync::qr_payload_json(*other).c_str()] timeMs:999999];assert(![processor acceptLiveAnalysis:retainedSnapshot]);}[processor reset];assert([retainedPicture isEqual:[retainedSnapshot pictureObservation]]);}
  if(v)CFRelease(v);if(a)CFRelease(a);

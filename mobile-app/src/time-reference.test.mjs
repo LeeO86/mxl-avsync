@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTimeReference, bindReference, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
+import { applyTimeReference, bindReference, clockCheckDetails, compareClockReferences, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
 import { receiveReading, savedReading } from './reading.mjs';
 const epoch = 1793450000000;
 const sample = {source:'ntp',server:'lab.example',referenceUnixMs:epoch,referenceMonotonicMs:1000,deviceUnixMs:epoch-100,uncertaintyMs:2,roundTripMs:2,clockId:'boot-a',timebase:'ios-host'};
@@ -80,7 +80,7 @@ test('native acquisition and generator use the same reference, never a JS receip
 test('GNSS uses its own timebase and summaries expose age, uncertainty and expiry', () => {
  const gnss={...reference,source:'gnss',timebase:'android-elapsed-realtime'};
  assert.equal(referenceAt(gnss,{...now,timebase:'android-elapsed-realtime'}).state,'estimated');
- assert.match(referenceSummary(gnss,100),/GNSS.*estimated clock.*ms/);
+ assert.match(referenceSummary(gnss,100),/GNSS.*sync estimate.*ms.*holdover/);
  assert.match(referenceSummary(gnss,400000),/expired/);
  assert.match(referenceSummary({...gnss,uncertaintyMs:100},100),/above limit/);
 });
@@ -104,4 +104,38 @@ test('measurement clock label uses frozen acquisition evidence, not a later curr
  assert.match(measurementClockLabel(saved),/Device UTC.*uncorrected/);
  assert.match(measurementClockLabel(current),/NTP lab.example.*acquisition/);
  assert.match(measurementClockLabel(saved),/Device UTC/);
+});
+
+test('holdover grows the uncertainty by 0.1 ms per 2 s, never the UTC correction or latency',()=>{
+ const atStart=referenceAt(reference,now);
+ const laterMapping={...now,monotonicMs:now.monotonicMs+2000};
+ const later=referenceAt(reference,laterMapping);
+ assert.ok(Math.abs(later.holdoverUncertaintyMs-atStart.holdoverUncertaintyMs-.1)<1e-10);
+ assert.equal(later.sampleUncertaintyMs,atStart.sampleUncertaintyMs);
+ const initial=applyTimeReference(report,reference);
+ const advanced=applyTimeReference({...report,clockMapping:{...laterMapping,deviceUnixMs:epoch+2000}},reference);
+ assert.equal(initial.clockReference.correctionMs,advanced.clockReference.correctionMs);
+ assert.equal(initial.latency.audio_ms,advanced.latency.audio_ms);
+ assert.equal(initial.latency.video_ms,advanced.latency.video_ms);
+ assert.equal(advanced.clockReference.sampleUncertaintyMs,2);
+ assert.ok(advanced.clockReference.holdoverUncertaintyMs>initial.clockReference.holdoverUncertaintyMs);
+ assert.match(referenceSummary(reference,2010),/sync estimate ±2.0 ms.*holdover \+0.1 ms/);
+ assert.match(clockCheckDetails(reference),/assumes 50 ppm.*not the clock correction or latency/);
+});
+
+test('independent sync checks compare at a common native time without treating network noise as drift',()=>{
+ const current={...reference,referenceMonotonicMs:31000,referenceUnixMs:epoch+30000.25};
+ const comparison=compareClockReferences(current,reference);
+ assert.equal(comparison.changeMs,.25);assert.equal(comparison.elapsedMs,30000);
+ assert.equal(comparison.uncertaintyMs,4);assert.equal(comparison.resolved,false);
+ assert.match(clockCheckDetails({...current,comparison}),/no change resolved/);
+ const changed=compareClockReferences({...current,referenceUnixMs:epoch+30010},reference);
+ assert.equal(changed.resolved,true);
+ assert.match(clockCheckDetails({...current,comparison:changed}),/network\/server or clock change/);
+ assert.equal(compareClockReferences({...current,clockId:'other'},reference),null);
+ assert.equal(compareClockReferences({...current,server:'another.example'},reference),null);
+ assert.equal(compareClockReferences({...current,referenceMonotonicMs:900},reference),null);
+ assert.equal(compareClockReferences({...current,referenceMonotonicMs:500000},reference),null);
+ assert.equal(compareClockReferences({...current,uncertaintyMs:NaN},reference),null);
+ assert.equal(compareClockReferences(current,null),null);
 });

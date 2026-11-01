@@ -277,6 +277,19 @@ bool same_qr_source(const QrPayload&a,const QrPayload&b) {
 }
 }
 void QrFlashTracker::reset() { *this=QrFlashTracker{}; }
+bool QrFlashTracker::qr_scan_suggested(double time) const {
+    if(!anchor_||!pose_.found||time-anchor_ms_>=350||time<anchor_ms_)return true;
+    if(edges_.empty())return true;
+    const auto format=parse_video_format(anchor_->payload.format);if(!format)return true;
+    const double period=plan_period(*format,anchor_->payload.rate).period_ms;
+    const double since=time-edges_.back().frame.time_ms;
+    // A QR from the first 25 ms cannot identify this pulse. Photometry still
+    // samples every frame; this gate only schedules the independent QR worker.
+    if(since>=0&&since<25)return false;
+    if(!edges_.back().emitted&&since>=25&&since<=period*.85)return true;
+    const double phase=std::fmod(std::max(0.0,since),period);
+    return phase<=160||phase>=period-80;
+}
 void QrFlashTracker::observe(const QrDetection& q,double time) {
     if(!q.payload.qr_flash||!q.payload.timecode||!std::isfinite(time)||!parse_video_format(q.payload.format))return;
     std::array<double,9> h{};if(!qr_transform(q,h))return;
@@ -301,12 +314,14 @@ void QrFlashTracker::observe(const QrDetection& q,double time) {
 void QrFlashTracker::push(const uint16_t* pixels,int width,int height,int stride,VideoObservation frame) { push_pixels(pixels,false,width,height,stride,frame); }
 void QrFlashTracker::push_u8(const uint8_t* pixels,int width,int height,int stride,VideoObservation frame) { push_pixels(pixels,true,width,height,stride,frame); }
 void QrFlashTracker::push_pixels(const void* pixels,bool eight_bit,int width,int height,int stride,VideoObservation frame) {
+    ++diagnostics_.frames;
     valid_=false;pose_.found=false;
     auto lose=[&]{phase_=MarkerReading::State::Invalid;blacks_=0;};
     if(!anchor_||!pixels||width<16||height<16||stride<width||!std::isfinite(frame.time_ms)) {lose();return;}
     const double gap=frame.time_ms-last_frame_ms_;last_frame_ms_=frame.time_ms;
     if(gap<=0||gap>60)lose();
-    if(frame.time_ms-anchor_ms_>750||frame.time_ms-anchor_ms_<-50){lose();return;}
+    if(frame.time_ms-anchor_ms_>750||frame.time_ms-anchor_ms_<-50){++diagnostics_.geometry_rejections;lose();return;}
+    ++diagnostics_.probe_frames;
     auto sample=[&](double mx,double my)->double{
         double x,y;if(!project_qr(transform_,mx,my,x,y)||x<0||y<0||x>1||y>1)return -1;
         int ix=int(std::lround(x*width)),iy=int(std::lround(y*height));
@@ -323,7 +338,7 @@ void QrFlashTracker::push_pixels(const void* pixels,bool eight_bit,int width,int
         double b=patch(center.first,center.second,.35),w=patch(center.first-2,center.second,.12);
         if(b>=0&&w-b>=100){black+=b;white+=w;++refs;}
     }
-    if(refs<2){lose();return;}
+    if(refs<2){++diagnostics_.finder_rejections;lose();return;}
     black/=refs;white/=refs;const double contrast=white-black;
     std::array<double,25> p{};int n=0;
     // Flash panel spans [41,82] x [-4,37] in QR-symbol module coordinates.
@@ -331,11 +346,18 @@ void QrFlashTracker::push_pixels(const void* pixels,bool eight_bit,int width,int
         double v=sample(41+41*(.30+.10*i),-4+41*(.30+.10*j));if(v<0){lose();return;}p[n++]=v;
     }
     std::sort(p.begin(),p.end());double light=p[12];
+    auto trace=[&](int phase){
+        if(phase!=0||diagnostics_.samples.empty()||frame.time_ms-diagnostics_.samples.back().time_ms>=100){
+            diagnostics_.samples.push_back({frame.time_ms,(light-black)/contrast,(p[23]-p[1])/contrast,phase});
+            while(diagnostics_.samples.size()>64)diagnostics_.samples.pop_front();
+        }
+    };
     auto mixed=[&]{if(phase_!=MarkerReading::State::Black||frame.time_ms-last_black_ms_>60)lose();};
-    if(p[23]-p[1]>contrast*.40){mixed();return;}
+    if(p[23]-p[1]>contrast*.40){++diagnostics_.mixed_frames;trace(1);mixed();return;}
     auto phase=light<black+.30*contrast?MarkerReading::State::Black:
         light>black+.70*contrast?MarkerReading::State::White:MarkerReading::State::Invalid;
-    if(phase==MarkerReading::State::Invalid){mixed();return;}
+    if(phase==MarkerReading::State::Invalid){++diagnostics_.mixed_frames;trace(1);mixed();return;}
+    trace(phase==MarkerReading::State::White?2:0);
     valid_=true;
     const double xs[]={-4,82,82,-4},ys[]={-4,-4,37,37};
     for(int i=0;i<4;++i){double x,y;if(!project_qr(transform_,xs[i],ys[i],x,y)){lose();valid_=false;return;}pose_.corner_x[i]=x*width;pose_.corner_y[i]=y*height;}
@@ -352,24 +374,30 @@ void QrFlashTracker::push_pixels(const void* pixels,bool eight_bit,int width,int
             for(int i=0;i<4;++i)optical|=std::hypot(anchor_->x[i]*width-ex[i],anchor_->y[i]*height-ey[i])>3;
             if(optical)frame.flags.push_back("optical_capture");
             edges_.push_back({frame,1,false,{}});
+            ++diagnostics_.edges;
         } else if(phase_==phase&&!edges_.empty()&&frame.time_ms-edges_.back().frame.time_ms<=150)++edges_.back().whites;
         if(!edges_.empty()&&edges_.back().symbols.size()<32&&!edges_.back().emitted&&frame.time_ms-edges_.back().frame.time_ms<=100) {
             // Keep sparse module-center evidence from the pulse itself. A later
             // decoded identity must match this image, not just a nearby time.
             std::array<uint8_t,1089> symbol{};
+            ++diagnostics_.symbol_frames;
+            diagnostics_.module_reads+=symbol.size();
             for(int y=0;y<33;++y)for(int x=0;x<33;++x) {
                 const double value=sample(x+.5,y+.5);
                 symbol[y*33+x]=value<0?2:value<black+.35*contrast?0:value>black+.65*contrast?1:2;
             }
             edges_.back().symbols.push_back(symbol);
+            match(); // New pulse evidence can change the identity decision.
         }
         blacks_=0;
     }else {++blacks_;last_black_ms_=frame.time_ms;}
     phase_=phase;
     while(!edges_.empty()&&frame.time_ms-edges_.front().frame.time_ms>2000)edges_.pop_front();
-    match();
+    // Black frames do not change symbols or decoded QR evidence. QR arrivals
+    // call match() in observe(); retrying here would repeat identical work.
 }
 void QrFlashTracker::match() {
+    ++diagnostics_.match_calls;
     for(auto& edge:edges_) {
         if(edge.emitted||edge.whites<2)continue;
         for(const auto& code:codes_) {
@@ -383,7 +411,10 @@ void QrFlashTracker::match() {
             bool symbol_matches=false;
             for(const auto& symbol:edge.symbols) {
                 int known=0,wrong=0;
-                for(size_t i=0;i<symbol.size();++i)if(symbol[i]<2){++known;wrong+=symbol[i]!=code.modules[i];}
+                for(size_t i=0;i<symbol.size();++i)if(symbol[i]<2){
+                    ++known;++diagnostics_.symbol_comparisons;
+                    if(symbol[i]!=code.modules[i]){wrong=1;break;}
+                }
                 if(known>=int(symbol.size()*.80)&&wrong==0){symbol_matches=true;break;}
             }
             if(!symbol_matches)continue;
@@ -391,7 +422,7 @@ void QrFlashTracker::match() {
             auto out=edge.frame;out.seq=code.payload.k;out.timecode=true;out.source_id=code.payload.source_id;
             out.event_time_ns=quantize_timecode_ns(code.payload.tk);out.estimated_source=code.payload.estimated_source;
             if(code.payload.mode=="LIVE"){out.have_set_time=true;out.set_tai_ns=code.payload.tk;}
-            ready_.push_back(std::move(out));emitted_seq_=code.payload.k;edge.emitted=true;break;
+            ready_.push_back(std::move(out));emitted_seq_=code.payload.k;edge.emitted=true;++diagnostics_.emitted;break;
         }
     }
 }

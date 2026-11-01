@@ -627,6 +627,14 @@ Android capture remains a separate port. The calibration UI is unchanged;
 new corrections are scoped to model/OS/route/sample rate/camera mode.
 See [phone time reference](docs/phone-clock.md) for algorithms and limits.
 
+The phone clock UI separates sync-sample uncertainty from the assumed holdover
+allowance (50 ppm, 0.1 ms per two seconds). That allowance never changes the UTC
+correction or latency. Repeat checks compare mappings at a common native time
+with combined sample uncertainty, without claiming measured oscillator drift.
+Capture diagnostics name delivered fps, frame gaps and capture/worker costs
+separately. Shared snapshots distinguish current state from held acquisition
+and exclude recorded calibration media.
+
 ### 12.2 Technology
 
 - **Expo** (React Native) for the UI, one code base for iOS and Android, with an **Expo native module** per platform for capture and timing.
@@ -1052,6 +1060,17 @@ a late decoding callback does not change the edge timestamp. Missing identity
 or edges, stale geometry, source changes and duplicates cannot create events.
 Geometry expires after 750 ms. The normal QR retry target is 100 ms; scans are
 bounded to one in flight on iOS. Motion/finder failure withholds measurements.
+
+iOS adaptively schedules that QR worker around observed pulses (pre-pulse
+geometry and eligible post-transition identity), with a 350-ms geometry refresh
+and the existing 100-ms retry cap. The cheap flash probe still runs on every
+camera frame, including outside the predicted window. Predictions never create
+events or replace their original timestamps. Deep module verification occurs
+only on actual white-pulse frames; unchanged black-frame evidence does not
+trigger another identity match. Phone acquisition throttles unidentified
+full-raster searches; a detected legacy pose restores its normal legacy path.
+Bounded normalized photometry traces and separated CPU/camera-buffer timings
+permit physical diagnosis without storing camera images.
 
 A crop is supported only while the QR including quiet zone and the sampled
 flash area remain visible. Frozen pictures cannot produce repeating events.

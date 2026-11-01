@@ -1,9 +1,12 @@
 #import <Foundation/Foundation.h>
 #import <CoreMedia/CoreMedia.h>
+typedef struct { double lockMs, processMs, unlockMs; int path; } AVSyncVideoWork;
 @interface AVSyncStreamAnalyzer : NSObject
 - (void)reset;
 - (void)beginCalibration;
-- (void)pushVideo:(CMSampleBufferRef)sample;
+- (AVSyncVideoWork)pushVideo:(CMSampleBufferRef)sample;
+- (BOOL)qrScanSuggestedAt:(double)timeMs NS_SWIFT_NAME(qrScanSuggested(at:));
+- (void)setSparseAcquisition:(BOOL)enabled;
 - (void)pushAudio:(CMSampleBufferRef)sample;
 - (NSDictionary *)poll;
 // Capture queue only: calibration stays synchronous; live DSP runs on an immutable copy.

@@ -438,6 +438,12 @@ struct QrDetection {
 // Slow identified geometry/QR, fast sparse photometry. No raster rectification.
 class QrFlashTracker {
 public:
+    struct Sample { double time_ms=0,level=0,range=0; int phase=0; };
+    struct Diagnostics {
+        uint64_t frames=0,probe_frames=0,symbol_frames=0,module_reads=0,match_calls=0,symbol_comparisons=0;
+        uint64_t mixed_frames=0,finder_rejections=0,geometry_rejections=0,edges=0,emitted=0;
+        std::deque<Sample> samples;
+    };
     void reset();
     void observe(const QrDetection& qr, double capture_ms);
     void push(const uint16_t* luma, int width, int height, int stride, VideoObservation frame);
@@ -446,6 +452,8 @@ public:
     const PicturePose& pose() const { return pose_; }
     bool valid_frame() const { return valid_; }
     bool active() const { return anchor_.has_value(); }
+    bool qr_scan_suggested(double capture_ms) const;
+    const Diagnostics& diagnostics() const { return diagnostics_; }
     std::optional<uint64_t> sequence() const { return anchor_ ? std::optional<uint64_t>(anchor_->payload.k) : std::nullopt; }
 private:
     struct Code { QrPayload payload; double time; std::array<uint8_t,1089> modules; };
@@ -464,6 +472,7 @@ private:
     void match();
     void push_pixels(const void* luma, bool eight_bit, int width, int height, int stride, VideoObservation frame);
     double last_black_ms_ = -1e30;
+    Diagnostics diagnostics_;
 };
 
 // ---- pairing, grading, statistics, uncertainty (§4, §8) ------------------
@@ -612,6 +621,8 @@ public:
     void push_audio(const float* samples, size_t count, double start_ms, int sample_rate, bool defer_timecode_scan = false);
     void merge_audio_analysis(const PhoneSession& analyzed);
     bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
+    bool qr_scan_suggested(double time_ms) const { return !qr_flash_active() || qr_flash_.qr_scan_suggested(time_ms); }
+    const QrFlashTracker::Diagnostics& qr_flash_diagnostics() const { return qr_flash_.diagnostics(); }
     void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms);
     PhoneReport finish(const std::string& test_id = "PHONE");
     void trim_before(double time_ms);

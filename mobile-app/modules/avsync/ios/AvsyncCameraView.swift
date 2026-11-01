@@ -35,6 +35,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
+    processor.setSparseAcquisition(true)
     if let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
        let data = try? Data(contentsOf: directory.appendingPathComponent("avsync-diagnostics.json")),
        let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
@@ -240,18 +241,32 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     autoreleasepool {
       if isVideo {
         telemetry.frame(at:CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))*1000)
-        processor.pushVideo(sampleBuffer)
+        let work=processor.pushVideo(sampleBuffer)
+        telemetry.processing("videoLock",ms:work.lockMs)
+        telemetry.processing("videoProbe",ms:work.processMs)
+        telemetry.processing("videoUnlock",ms:work.unlockMs)
+        telemetry.videoPath(Int(work.path))
         let scanTime = ProcessInfo.processInfo.systemUptime
-        if !qrBusy && scanTime - lastQrScan >= 0.1, let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
+        let frameTime=CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))*1000
+        if !qrBusy && scanTime - lastQrScan >= 0.1, processor.qrScanSuggested(at:frameTime), let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
           qrBusy = true; lastQrScan = scanTime
           let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000
           let captureGeneration = generation
           qrWorker.async { [weak self] in
-            let detections = AVSyncQRCodeReader.read(pixel)["detections"] as? [[String: Any]] ?? []
+            let qrStarted=PhoneClock.nowMs()
+            let result=AVSyncQRCodeReader.read(pixel) ?? [:]
+            let detections = result["detections"] as? [[String: Any]] ?? []
+            let timings=result["timingsMs"] as? [NSNumber] ?? []
+            let qrElapsed=PhoneClock.nowMs()-qrStarted
             self?.samples.async { [weak self] in
               guard let self else { return }; self.qrBusy = false
               guard self.generation == captureGeneration else { return }
+              self.telemetry.processing("qrVision",ms:qrElapsed)
+              if let first=timings.first { self.telemetry.processing("qrVisionFirst",ms:first.doubleValue) }
+              if timings.count>1 { self.telemetry.processing("qrVisionFallback",ms:timings[1].doubleValue) }
+              let applyStarted=PhoneClock.nowMs()
               for detection in detections { self.processor.observeQRDetection(detection, timeMs: timestamp) }
+              self.telemetry.processing("qrApply",ms:PhoneClock.nowMs()-applyStarted)
             }
           }
         }
@@ -261,6 +276,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       }
       let now = ProcessInfo.processInfo.systemUptime
       if now - lastPoll > 0.1 {
+        let housekeepingStarted=PhoneClock.nowMs()
+        defer { telemetry.processing("housekeeping",ms:PhoneClock.nowMs()-housekeepingStarted) }
         lastPoll = now
         if let clock = session.masterClock {
           let before = CMTimeGetSeconds(CMClockGetTime(clock)) * 1000
