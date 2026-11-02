@@ -5,6 +5,7 @@ import Vision
 
 // Uses the production native renderer/waveform, with one frozen host/UTC map.
 // Display/speaker presentation and receiver capture delays remain uncalibrated.
+func newMacSourceID() -> String { "direct-"+UUID().uuidString.replacingOccurrences(of:"-",with:"") }
 func cg(_ image: NSImage) -> CGImage? { image.cgImage(forProposedRect:nil,context:nil,hints:nil) }
 final class Canvas: NSView {
   override var isFlipped: Bool { true }
@@ -66,7 +67,7 @@ final class Sender: NSObject, NSApplicationDelegate, NSWindowDelegate {
   func begin(_ target:Double) throws {
     let before=CACurrentMediaTime(),unix=Date().timeIntervalSince1970,after=CACurrentMediaTime()
     utcMap=unix-(before+after)/2;epoch=target+1.5
-    let source=AVSyncGenerator(testID:"direct-"+UUID().uuidString,rate:rate,epochTaiNs:Int64((utcMap+37+epoch)*1e9),epochHost:epoch)
+    let source=AVSyncGenerator(testID:newMacSourceID(),rate:rate,epochTaiNs:Int64((utcMap+37+epoch)*1e9),epochHost:epoch)
     source.setSource(name:"Direct Mac source",subtitle:"Native display and sound · sender-relative clock",image:nil)
     plan=source;let sourceId=(source.geometry()["sourceId"] as! NSNumber).uint32Value
     let host=PeerClockHost(sourceId:sourceId,unixMs:(utcMap+after)*1000,monotonicMs:after*1000,taiUtcSeconds:37)
@@ -120,7 +121,7 @@ final class Sender: NSObject, NSApplicationDelegate, NSWindowDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
 }
 func selfTest() throws {
-  let plan=AVSyncGenerator(testID:"mac-self-test",rate:2,epochTaiNs:1793450000000000000,epochHost:100)
+  let plan=AVSyncGenerator(testID:newMacSourceID(),rate:2,epochTaiNs:1793450000000000000,epochHost:100)
   plan.setSource(name:"Direct test",subtitle:"Native renderer",image:nil)
   guard let image=cg(plan.image(sequence:1)),image.width==1280,image.height==720,
         (plan.geometry()["sourceId"] as? NSNumber)?.uint32Value != nil,

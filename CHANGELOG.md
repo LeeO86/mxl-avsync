@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased local follow-up
+
+- Fix native Mac test-source startup: generate a 39-character source ID within
+  the core’s 40-character limit and exercise the real ID factory in self-test.
+- Match general clock-help text to the selected 50/100-ppm holdover policy;
+  clock calculations are unchanged. TestFlight build 11 is unchanged.
+
 ## Mobile 2.0.8 build 11 (2026-11-01)
 
 - Enable native iPad support for the same full-screen receiver/source test.

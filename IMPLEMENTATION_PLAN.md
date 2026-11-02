@@ -1,5 +1,24 @@
 # mxl-avsync — Implementation plan
 
+## Native Mac source visual follow-up (2026-11-02)
+
+Opening the real source exposed a startup crash: the runtime `direct-` plus
+full hyphenated UUID is 43 characters, beyond PhoneGeneratorPlan’s 40-character
+limit. The old headless test used a short literal and missed this. Use one
+39-character source-ID factory (UUID without hyphens) in runtime and native
+self-test. Rebuild and inspect actual start/stop, picture and pairing code.
+The source-ID fix changes only the Mac helper; TestFlight build 11 is unchanged.
+
+Visual checks now cover iPhone/iPad generator layouts (1/2 Hz), visible pairing
+codes, start/stop and settings backdrop dismissal. The iPad simulator discovers
+and synchronizes to the running Mac helper through Bonjour/UDP using the real
+UI. Both processes share the development Mac, so this is not physical two-device
+accuracy validation. An experimental explicit scroll style duplicated React
+Native’s existing default and was removed; accessibility navigation reveals the
+iPhone sender controls. Correct the general clock-help footer to 100 ppm for
+a peer reference (50 for NTP/GNSS), matching the existing calculations/details.
+That copy correction is for a future app build, with no new EAS build here.
+
 ## Direct-device TestFlight preparation (2026-11-01)
 
 After local validation, the maintainer explicitly authorizes one EAS Cloud
