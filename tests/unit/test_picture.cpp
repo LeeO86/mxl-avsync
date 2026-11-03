@@ -660,6 +660,30 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     CHECK(value("spreadMs")<1.0);
 }
 
+TEST_CASE("phone analyzer calibration take: frames around one clap, then live again") {
+    PhoneAnalyzer analyzer;analyzer.begin_calibration();
+    std::vector<uint8_t> frame(320*180,40);std::vector<float> block(480,0.f);
+    std::optional<PhoneAnalyzer::CalibrationTake> take;
+    double at=1000;
+    for(int i=0;i<4*240&&!take;++i) {
+        const double t=1000+i*1000.0/240;
+        analyzer.push_video(frame.data(),320,180,320,t,1000.0/240,0);
+        for(;at+10<=t;at+=10){ // 10 ms audio blocks up to the frame time, a clap at 2.3 s
+            std::fill(block.begin(),block.end(),.001f);
+            if(at>=2300&&at<2310)for(int k=0;k<48;++k)block[k]=k%2?.9f:-.9f;
+            analyzer.push_audio(block.data(),block.size(),at,48000);
+        }
+        take=analyzer.take_calibration();
+    }
+    REQUIRE(take);
+    CHECK(take->spike_ms==doctest::Approx(1300).epsilon(.001));
+    int before=0,after=0;for(const auto&f:take->frames)(f.time_ms<take->spike_ms?before:after)++;
+    CHECK(before>=150);CHECK(after>=150); // 750 ms before, 700 ms after at 240 fps
+    CHECK(take->frames.front().width==320);
+    CHECK(take->audio.size()>size_t(48000));
+    CHECK_FALSE(analyzer.calibration_error());
+}
+
 TEST_CASE("AVS2 brand is centered and the moving box passes below white foreground ticks") {
     PictureInfo info;QrPayload q;q.qr_flash=q.optical_code=q.timecode=true;q.test_id="layout";
     info.qr_json=qr_payload_text(q);info.source="Demo title";info.subtitle="Smaller subtitle";

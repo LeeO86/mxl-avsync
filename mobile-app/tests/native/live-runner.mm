@@ -65,7 +65,8 @@ int main(int argc, char **argv) { @autoreleasepool {
     }
     const int rate = 48000;
     std::vector<float> mic(size_t(rate * 8), 0.f);
-    for (uint64_t seq = 1; seq <= 14; ++seq) {
+    // A calibration take hears only the clap (no test signal sound).
+    for (uint64_t seq = 1; !calibration && seq <= 14; ++seq) {
         const auto wave = plan.audio(seq, rate);
         const size_t at = size_t(std::lround((plan.host_seconds(seq) - epochHost + .050) * rate));
         for (size_t i = 0; i < wave.size() && at + i < mic.size(); ++i) mic[at + i] += wave[i];

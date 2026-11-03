@@ -3,6 +3,7 @@
 
 // Objective-C face of avsync::PhoneAnalyzer (core/include/avsync/phone_analyzer.hpp).
 // Use from one queue; a snapshot may be polled on another.
+NS_ASSUME_NONNULL_BEGIN
 @interface AVSyncPhoneAnalyzer : NSObject
 - (void)reset;
 - (void)beginCalibration;
@@ -14,9 +15,10 @@
 - (void)pushAudio:(CMSampleBufferRef)sample;
 - (BOOL)reportDue;
 - (AVSyncPhoneAnalyzer *)snapshotForPoll;
-- (NSDictionary *)poll;
+- (nullable NSDictionary *)poll;
 - (void)mergeAudio:(AVSyncPhoneAnalyzer *)analyzed;
 // nil while a take runs; then once an error report or a calibration report with written files.
-- (NSDictionary *)pollCalibration;
+- (nullable NSDictionary *)pollCalibration;
 - (NSDictionary *)pictureObservation;
 @end
+NS_ASSUME_NONNULL_END
