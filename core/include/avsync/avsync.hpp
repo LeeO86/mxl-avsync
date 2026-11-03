@@ -633,7 +633,8 @@ public:
     bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
     bool qr_scan_suggested(double time_ms) const { return !qr_flash_active() || qr_flash_.qr_scan_suggested(time_ms); }
     const QrFlashTracker::Diagnostics& qr_flash_diagnostics() const { return qr_flash_.diagnostics(); }
-    void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms);
+    // AVS3 camera frame: time_ms is the exposure start of the first row.
+    void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms, double exposure_ms = 0, double readout_ms = 0);
     PhoneReport finish(const std::string& test_id = "PHONE");
     void trim_before(double time_ms);
     int located_frames() const { return located_frames_; }

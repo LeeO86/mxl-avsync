@@ -406,6 +406,8 @@ TEST_CASE("large qr stays decodable and the sync square moves")
     }
 }
 
+#include "avsync/phone_analyzer.hpp"
+#include "avsync/phone_generator.hpp"
 #include "avsync/picture_reader.hpp"
 TEST_CASE("live picture reader keeps direct path and reacquires a moving camera tile after loss") {
     PictureReader reader;
@@ -605,6 +607,57 @@ TEST_CASE("AVS3 through a simulated 240 fps camera: each burst within half a mil
     }
     REQUIRE(err.size()>=3);
     for(double e:err)CHECK(std::abs(e)<.5);
+}
+
+TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms audio") {
+    // Source: the phone generator plan (720p60, 2 events/s). Video reaches the camera 30 ms after
+    // its scheduled time, audio 50 ms after: AV +20 ms, latencies 30 / 50 ms on a true clock.
+    const int64_t epoch_tai=1793300000000000000LL;const double epoch_host=100;
+    PhoneGeneratorPlan plan("phone-e2e",2,epoch_tai,epoch_host);
+    PhoneAnalyzer analyzer;
+    analyzer.set_device_utc_offset(double(epoch_tai)/1e6-epoch_host*1000-37000);
+    const int w=640,h=360;Yuv422p10 frame;frame.resize(1280,720);
+    // Render each 60 Hz source frame once, downscaled into the camera picture.
+    std::vector<std::vector<uint8_t>> shown;
+    const int frames=60*6;
+    for(int n=0;n<frames;++n) {
+        PictureInfo info;info.period_ms=500;info.qr_json=qr_payload_text(plan.qr(plan.named_seq(n)));
+        render_picture(frame,info,1+n/30,n%30,30,plan.a_white(n));
+        std::vector<uint8_t> small(size_t(w)*h);
+        for(int y=0;y<h;++y)for(int x=0;x<w;++x)small[size_t(y)*w+x]=uint8_t(frame.y[size_t(y*2)*1280+x*2]>>2);
+        shown.push_back(std::move(small));
+    }
+    // Audio: every event's timecode waveform at host_seconds(seq) + 50 ms.
+    const int rate=48000;std::vector<float> mic(size_t(rate*7),0.f);
+    for(uint64_t seq=1;seq<=12;++seq){
+        const auto wave=plan.audio(seq,rate);const size_t at=size_t(std::lround((plan.host_seconds(seq)-epoch_host+.050)*rate));
+        for(size_t i=0;i<wave.size()&&at+i<mic.size();++i)mic[at+i]+=wave[i];
+    }
+    const double cam=1000/239.48,start=epoch_host*1000;size_t audio_at=0;int count=0;std::string last;
+    std::vector<uint8_t> shot(size_t(w)*h);
+    for(double t=start+3.1;t<start+frames*1000.0/60-40;t+=cam) {
+        // Integrate the shown frames over [t, t+cam), with the 30 ms display delay.
+        std::vector<double> acc(shot.size(),0);
+        const double s0=t-start-30,s1=s0+cam;
+        for(int n=std::max(0,int(std::floor(s0*60/1000)));n<=int(s1*60/1000)&&n<frames;++n){
+            const double o=std::min(s1,(n+1)*1000.0/60)-std::max(s0,n*1000.0/60);if(o<=0)continue;
+            for(size_t i=0;i<acc.size();++i)acc[i]+=o*shown[n][i];
+        }
+        if(s0<0)continue;
+        for(size_t i=0;i<shot.size();++i)shot[i]=uint8_t(std::lround(acc[i]/cam));
+        if(count++%24==0){std::vector<uint16_t> wide(shot.size());for(size_t i=0;i<shot.size();++i)wide[i]=uint16_t(shot[i]*4);if(auto q=decode_qr_signal(wide.data(),w,h,w))analyzer.observe_qr(qr_payload_text(q->payload),q->x,q->y,t);}
+        analyzer.push_video(shot.data(),w,h,w,t,cam,0);
+        // Feed microphone audio up to this time in 10 ms blocks.
+        while(audio_at+480<=mic.size()&&start+(audio_at+480)*1000.0/rate<=t){analyzer.push_audio(mic.data()+audio_at,480,start+audio_at*1000.0/rate,rate);audio_at+=480;}
+        if(analyzer.report_due()){auto copy=analyzer.snapshot_for_poll();auto text=copy.poll();analyzer.merge_audio(copy);if(!text.empty())last=text;}
+    }
+    INFO(last);
+    REQUIRE(last.find("\"stage\":\"measuring\"")!=std::string::npos);
+    auto value=[&](const char* key){const auto at=last.find(std::string("\"")+key+"\":");REQUIRE(at!=std::string::npos);return std::stod(last.substr(at+std::strlen(key)+3));};
+    CHECK(std::abs(value("offsetMs")-20)<.6);
+    CHECK(std::abs(value("videoLatencyMs")-30)<.6);
+    CHECK(std::abs(value("audioLatencyMs")-50)<.3);
+    CHECK(value("spreadMs")<1.0);
 }
 
 TEST_CASE("AVS2 brand is centered and the moving box passes below white foreground ticks") {

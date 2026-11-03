@@ -50,6 +50,7 @@ add_library(avsync-core STATIC
     core/src/grade.cpp
     core/src/qr.cpp
     core/src/optical_code.cpp
+    core/src/phone_analyzer.cpp
     core/src/g711.cpp
     core/src/text.cpp
     core/src/sync_scale.cpp

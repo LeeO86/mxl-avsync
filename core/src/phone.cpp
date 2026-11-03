@@ -74,9 +74,9 @@ void PhoneSession::update_qr_picture(double frame_start_ms) {
             if(auto seq=qr_flash_.sequence()){decoded_seq_=uint32_t(*seq);confirmed_picture_seq_=uint32_t(*seq);confirmed_picture_time_ms_=frame_start_ms;}
         }
 }
-void PhoneSession::push_video_u8(const uint8_t* luma,int width,int height,int stride,double time_ms) {
+void PhoneSession::push_video_u8(const uint8_t* luma,int width,int height,int stride,double time_ms,double exposure_ms,double readout_ms) {
     if(!qr_flash_active())return;
-    VideoObservation frame;frame.time_ms=time_ms;
+    VideoObservation frame;frame.time_ms=time_ms;frame.exposure_ms=exposure_ms;frame.readout_ms=readout_ms;
     qr_flash_.push_u8(luma,width,height,stride,frame);
     update_qr_picture(time_ms);collect_qr_events();
 }
