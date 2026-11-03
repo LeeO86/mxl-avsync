@@ -101,6 +101,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
         do {
           if !self.configured { try self.configure() }
           if !self.session.isRunning {
+            // The calibration review plays sound and may have switched the audio session to playback.
+            try self.configureAudioSession()
             self.samples.sync { self.restart() }
             self.session.startRunning()
             self.scheduleExposureLock()
@@ -122,11 +124,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
           let microphone = AVCaptureDevice.default(for: .audio) else {
       throw NSError(domain: "Avsync", code: 2, userInfo: [NSLocalizedDescriptionKey: "Camera or microphone unavailable on this device."])
     }
-    // Calibration review plays sound; always take the audio session back for recording.
-    let audioSession = AVAudioSession.sharedInstance()
-    try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
-    try audioSession.setPreferredSampleRate(48000)
-    try audioSession.setActive(true)
+    try configureAudioSession()
     session.beginConfiguration()
     defer { session.commitConfiguration() }
     session.automaticallyConfiguresApplicationAudioSession = false
@@ -154,6 +152,12 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     try applyFrameRate(device)
     cameraDevice = device
     configured = true
+  }
+  private func configureAudioSession() throws {
+    let audioSession = AVAudioSession.sharedInstance()
+    try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
+    try audioSession.setPreferredSampleRate(48000)
+    try audioSession.setActive(true)
   }
   // 0 = automatic: the fastest mode the camera has (up to 240 fps).
   private func applyFrameRate(_ device: AVCaptureDevice) throws {

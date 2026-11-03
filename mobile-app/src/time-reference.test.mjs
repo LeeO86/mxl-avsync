@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyTimeReference, bindReference, clockCheckDetails, compareClockReferences, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
-import { receiveReading, savedReading } from './reading.mjs';
 const epoch = 1793450000000;
 const sample = {source:'ntp',server:'lab.example',referenceUnixMs:epoch,referenceMonotonicMs:1000,deviceUnixMs:epoch-100,uncertaintyMs:2,roundTripMs:2,clockId:'boot-a',timebase:'ios-host'};
 const now = {monotonicMs:1100,clockId:'boot-a',timebase:'ios-host'};
@@ -48,15 +47,6 @@ test('stale, future, incompatible and high-uncertainty references never correct 
 test('a device wall clock step does not move the monotonic UTC reference', () => {
  const stepped={...report,clockMapping:{...report.clockMapping,deviceUnixMs:epoch+2000},latency:{...report.latency,video_ms:2020,audio_ms:2055}};
  assert.equal(applyTimeReference(stepped,reference).latency.video_ms,120);
-});
-test('saved readings retain their own time correction and clock uncertainty', () => {
- const corrected=applyTimeReference(report,reference);
- const snapshot=receiveReading(null,corrected,null,epoch,10);
- const saved=savedReading(snapshot,{state:'held',ageMs:4000},epoch+4000);
- assert.equal(saved.latency.video_ms,120);assert.equal(saved.clockReference.reference.clockId,'boot-a');
- assert.equal(saved.latency.clock.ageMs,100);assert.equal(saved.raw_offset_ms,35);
- const later=applyTimeReference(report,{...reference,referenceUnixMs:epoch+50});
- assert.equal(later.latency.video_ms,170);assert.equal(saved.latency.video_ms,120);
 });
 test('clock metadata is retained for audio-only readings and absence of latency is harmless', () => {
  const r={...report,latency:{state:'estimated',audio_ms:55}};

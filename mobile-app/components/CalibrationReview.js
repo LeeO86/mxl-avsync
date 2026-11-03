@@ -3,7 +3,7 @@ import {AppState,Image,Pressable,ScrollView,Text,View} from 'react-native';
 import {Audio} from 'expo-av';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {CalibrationPlayback,clamp,repeatInterval,waveformPosition,waveformBins} from '../src/calibration-playback.mjs';
-import {offsetText} from '../src/measure.mjs';
+import {offsetText} from '../src/live.mjs';
 const ink='#e7ecf1',muted='#9aa7b5',blue='#60a5fa',orange='#ffc26b';
 const text={color:ink,fontSize:16,lineHeight:23};
 function Action({title,onPress,disabled}){return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={{padding:12,borderRadius:8,backgroundColor:'#2a3644',marginTop:10,alignItems:'center',opacity:disabled ? .4 : 1}}><Text style={text}>{title}</Text></Pressable>;}
