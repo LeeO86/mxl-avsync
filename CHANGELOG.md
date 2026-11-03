@@ -12,6 +12,8 @@
   wrong sync bits (of 56) and level; on iOS also the microphone gain. This is
   to find why the phone needs a loud signal. The phone report gains
   `diagnostics.audioBursts`.
+- Debug shows "QR age —" before any QR was seen, not "1e+30 ms". The phone
+  report leaves out `diagnostics.qrAgeMs` until then.
 - Video latency is shown again for a platform (PTP) source. The shared phone
   analyzer gave it only for the phone's own generator; audio latency was not
   affected.

@@ -319,7 +319,7 @@ std::string PhoneAnalyzer::poll()
                                .integer("crossings", long(d.optical_crossings)).integer("rejected", long(d.optical_rejected))
                                .integer("unbound", long(d.optical_unbound)).integer("byGrid", long(d.optical_by_grid))
                                .integer("videoEvents", long(report.video_events)).integer("audioTimecodes", long(report.audio_timecodes.size()))
-                               .num("audioPeakDbfs", report.audio_peak_dbfs).num("qrAgeMs", now - qr_ms_).raw("audioBursts", array(bursts)).raw("trace", array(trace)).text());
+                               .num("audioPeakDbfs", report.audio_peak_dbfs).num("qrAgeMs", qr_ms_ > -1e29 ? now - qr_ms_ : NAN).raw("audioBursts", array(bursts)).raw("trace", array(trace)).text());
     return out.text();
 }
 

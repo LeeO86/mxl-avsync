@@ -668,6 +668,17 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     }
 }
 
+TEST_CASE("phone analyzer diagnostics leave out the QR age until a QR was seen") {
+    PhoneAnalyzer analyzer;std::vector<uint8_t> frame(320*180,40);std::string last;
+    for(int i=0;i<2*240;++i){
+        analyzer.push_video(frame.data(),320,180,320,1000+i*1000.0/240,1000.0/240,0);
+        if(analyzer.report_due()){auto copy=analyzer.snapshot_for_poll();auto text=copy.poll();analyzer.merge_audio(copy);if(!text.empty())last=text;}
+    }
+    INFO(last);
+    REQUIRE(last.find("\"diagnostics\"")!=std::string::npos);
+    CHECK(last.find("qrAgeMs")==std::string::npos);
+}
+
 TEST_CASE("phone analyzer calibration take: frames around one clap, then live again") {
     PhoneAnalyzer analyzer;analyzer.begin_calibration();
     std::vector<uint8_t> frame(320*180,40);std::vector<float> block(480,0.f);
