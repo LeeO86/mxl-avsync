@@ -123,6 +123,34 @@ TEST_CASE("stream decoder remembers chirp arrival instead of telegram completion
     CHECK(std::abs(decoded[0].arrival_ms - 9100) < 0.12);
 }
 
+TEST_CASE("stream decoder reports one attempt per burst, also when the packet fails") {
+    // Burst 1 is clean; burst 2 keeps its start chirp but its bits are replaced by noise.
+    const auto wave =
+        timecode_waveform(encode_timecode(123, 1700000037000000000LL, 35000000, true), 1200);
+    std::vector<float> signal(48000 * 2, 0);
+    std::copy(wave.begin(), wave.end(), signal.begin() + 4800);
+    std::copy(wave.begin(), wave.end(), signal.begin() + 28800);
+    uint32_t seed = 1;
+    for (size_t i = 28800 + 48 * 45; i < 28800 + wave.size(); ++i) {
+        seed = seed * 1664525 + 1013904223;
+        signal[i] = 0.25f * (float(seed >> 8) / float(1 << 24) - 0.5f);
+    }
+    AudioTimecodeStream decoder;
+    for (size_t at = 0; at < signal.size(); at += 480) {
+        decoder.push(signal.data() + at, 480, 48000, at / 48.0, at / 48.0);
+        decoder.scan();
+    }
+    decoder.scan(true);
+    const auto &attempts = decoder.attempts();
+    REQUIRE(attempts.size() == 2);
+    CHECK(attempts[0].decoded);
+    CHECK(attempts[0].sync_errors == 0);
+    CHECK(attempts[0].correlation > 0.9);
+    CHECK_FALSE(attempts[1].decoded);
+    CHECK(attempts[1].sync_errors > 6);
+    CHECK(std::abs(attempts[1].time_ms - attempts[0].time_ms - 500) < 1);
+}
+
 TEST_CASE(
     "timecode identity pairs beyond the old repeating chirp window and rejects other sources") {
     VideoObservation video;

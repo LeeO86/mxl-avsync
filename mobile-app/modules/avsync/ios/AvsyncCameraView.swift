@@ -226,7 +226,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     let audio = AVAudioSession.sharedInstance()
     let route = audio.currentRoute.inputs.map { $0.portType.rawValue }.sorted().joined(separator: "+") + "/" + audio.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator: "+")
     return ["platform": "ios", "model": model, "os": UIDevice.current.systemVersion, "audioRoute": route,
-            "sampleRate": capturedSampleRate, "cameraMode": captureMode]
+            "sampleRate": capturedSampleRate, "cameraMode": captureMode,
+            "inputGain": Double(audio.inputGain), "inputGainSettable": audio.isInputGainSettable]
   }
   // samples queue
   private func emit(_ value: [String: Any]) {

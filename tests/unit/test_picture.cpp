@@ -663,6 +663,8 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     CHECK(std::abs(value("videoLatencyMs")-30)<.6);
     CHECK(std::abs(value("audioLatencyMs")-50)<.3);
     CHECK(value("spreadMs")<1.0);
+    CHECK(last.find("\"audioBursts\":[{")!=std::string::npos);
+    CHECK(last.find("\"ok\":false")==std::string::npos);
     }
 }
 

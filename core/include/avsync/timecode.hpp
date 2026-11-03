@@ -36,9 +36,18 @@ bool parse_timecode(const std::vector<uint8_t> &bytes, AudioTimecode &out);
 double timecode_duration_ms(size_t payload_bytes, int baud);
 std::vector<float> timecode_waveform(const std::vector<uint8_t> &bytes, int baud,
                                      int sample_rate = 48000, double level_dbfs = -12);
+// One start chirp the decoder found and how far its packet got (for the debug screen).
+// sync_errors: wrong bits of the 56-bit sync pattern in the best try (at most 6 decode).
+struct TimecodeAttempt {
+    double time_ms = 0, correlation = 0, level_dbfs = -120;
+    int sync_errors = 56;
+    bool decoded = false;
+};
+
 // Blind decoder: no QR, manifest, source ID, event count or event rate required.
 std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, int sample_rate,
-                                            double origin_ms = 0);
+                                            double origin_ms = 0,
+                                            std::vector<TimecodeAttempt> *attempts = nullptr);
 
 // Latches each complete packet when its onset enters the output block. Updates
 // cannot rewrite a telegram already in flight. Collisions are skipped explicitly.
@@ -66,6 +75,8 @@ class AudioTimecodeStream {
     void push(const float *audio, size_t count, int sample_rate, double start_ms,
               double arrival_start_ms);
     const std::vector<AudioTimecode> &scan(bool force = false);
+    // Start chirps of the last 20 s, one per burst, oldest first.
+    const std::vector<TimecodeAttempt> &attempts() const { return attempts_; }
     void reset();
 
   private:
@@ -75,6 +86,7 @@ class AudioTimecodeStream {
     std::vector<float> audio_;
     std::vector<Arrival> arrivals_;
     std::vector<AudioTimecode> decoded_;
+    std::vector<TimecodeAttempt> attempts_;
     int rate_ = 0;
     double origin_ms_ = 0, last_scan_ms_ = -1e30;
 };

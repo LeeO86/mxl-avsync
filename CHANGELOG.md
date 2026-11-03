@@ -8,6 +8,10 @@
 - The clock is checked again as soon as the holdover allowance passes the
   limit (at most every 30 s), not only after 4 minutes. With a ±14 ms NTP
   check, latency was hidden from about 2 minutes after each check.
+- Debug shows the last six audio bursts: decoded or not, start-chirp match,
+  wrong sync bits (of 56) and level; on iOS also the microphone gain. This is
+  to find why the phone needs a loud signal. The phone report gains
+  `diagnostics.audioBursts`.
 - Video latency is shown again for a platform (PTP) source. The shared phone
   analyzer gave it only for the phone's own generator; audio latency was not
   affected.

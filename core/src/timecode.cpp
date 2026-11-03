@@ -273,7 +273,8 @@ std::vector<float> timecode_waveform(const std::vector<uint8_t> &bytes, int baud
 }
 
 std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, int rate,
-                                            double origin_ms) {
+                                            double origin_ms,
+                                            std::vector<TimecodeAttempt> *attempts) {
     if (!audio || count == 0 || rate < 8000 || !std::isfinite(origin_ms))
         return {};
     std::vector<float> x = rate == 8000 ? std::vector<float>(audio, audio + count)
@@ -289,12 +290,14 @@ std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, in
         if (hit.chirp_id != 0)
             continue;
         bool found = false;
+        int sync_errors = 56;
         for (int baud : {1200, 600}) {
             Demod d(x, baud);
             double nominal = hit.sample_pos + 200;
             std::vector<Candidate> best;
             for (int shift = -32; shift <= 32; shift++) {
                 auto c = assess(d, nominal + shift, 1);
+                sync_errors = std::min(sync_errors, c.sync_errors);
                 if (c.sync_errors <= 6 && c.score > 0.18)
                     best.push_back(c);
             }
@@ -341,6 +344,8 @@ std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, in
             if (found)
                 break;
         }
+        if (attempts)
+            attempts->push_back({hit.time_ms + origin_ms, hit.correlation, hit.level_dbfs, sync_errors, found});
     }
     return result;
 }
@@ -407,7 +412,8 @@ const std::vector<AudioTimecode> &AudioTimecodeStream::scan(bool force) {
     if (!force && end - last_scan_ms_ < 100)
         return decoded_;
     last_scan_ms_ = end;
-    for (auto packet : decode_timecodes(audio_.data(), audio_.size(), rate_, origin_ms_)) {
+    std::vector<TimecodeAttempt> found;
+    for (auto packet : decode_timecodes(audio_.data(), audio_.size(), rate_, origin_ms_, &found)) {
         for (const auto &clock : arrivals_)
             if (packet.time_ms >= clock.start - 0.2 && packet.time_ms < clock.end) {
                 packet.arrival_ms = clock.arrival + packet.time_ms - clock.start;
@@ -423,6 +429,21 @@ const std::vector<AudioTimecode> &AudioTimecodeStream::scan(bool force) {
     decoded_.erase(std::remove_if(decoded_.begin(), decoded_.end(),
                                   [&](const AudioTimecode &p) { return p.time_ms < end - 20000; }),
                    decoded_.end());
+    // Each scan sees a burst again (3 s window, every 100 ms): keep the latest view of it.
+    for (const auto &attempt : found) {
+        auto old = std::find_if(attempts_.begin(), attempts_.end(), [&](const TimecodeAttempt &a) {
+            return std::abs(a.time_ms - attempt.time_ms) < 50;
+        });
+        if (old == attempts_.end())
+            attempts_.push_back(attempt);
+        else if (!old->decoded)
+            *old = attempt;
+    }
+    std::sort(attempts_.begin(), attempts_.end(),
+              [](const auto &a, const auto &b) { return a.time_ms < b.time_ms; });
+    attempts_.erase(std::remove_if(attempts_.begin(), attempts_.end(),
+                                   [&](const TimecodeAttempt &a) { return a.time_ms < end - 20000; }),
+                    attempts_.end());
     return decoded_;
 }
 } // namespace avsync
