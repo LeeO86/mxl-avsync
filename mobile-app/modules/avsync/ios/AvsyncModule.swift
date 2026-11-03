@@ -77,16 +77,7 @@ public class AvsyncModule: Module {
     Function("deviceVersion") { () -> String in
       UIDevice.current.systemVersion
     }
-    AsyncFunction("analyze") { (uri: String, calibration: Bool, promise: Promise) in
-      DispatchQueue.global(qos: .userInitiated).async {
-        let result = AVSyncFileAnalyzer.analyze(uri, calibration: calibration)
-        if let error = result["error"] as? String {
-          promise.reject("ANALYSIS_FAILED", error)
-        } else {
-          promise.resolve(result)
-        }
-      }
-    }
+
   }
   private func imageID(in json: String?) -> String? {
     guard let data = json?.data(using: .utf8), let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "avsync/optical_code.hpp"
+
 // avsync-core public API. No MXL, NMOS, FFmpeg or GUI.
 // Time: positive av_offset_ms means audio is late (SPECIFICATION §3.2).
 
@@ -22,8 +24,8 @@ inline constexpr int kYWhite = 940;
 inline constexpr int kYBackground = 502;
 inline constexpr int kYNeutralChroma = 512;
 
-inline constexpr char kCoreVersion[] = "2.0.7";
-inline constexpr char kAppVersion[] = "2.0.7";
+inline constexpr char kCoreVersion[] = "2.1.0";
+inline constexpr char kAppVersion[] = "2.1.0";
 inline constexpr char kMxlRevision[] = "218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7";
 inline constexpr char kQrSchema[] = "mxl-avsync/1";
 inline constexpr char kManifestSchema[] = "mxl-avsync-manifest/1";
@@ -367,6 +369,9 @@ struct VideoObservation {
     int64_t set_tai_ns = 0; // generator T_k from the QR, when that code names this event
     bool have_grain_time = false;
     int64_t grain_tai_ns = 0; // MXL timestamp of this grain, from its index
+    // Camera input only (0 = digital grain): exposure length and top-to-bottom readout.
+    double exposure_ms = 0;
+    double readout_ms = 0;
 };
 
 class MarkerTracker {
@@ -420,12 +425,12 @@ struct QrPayload {
     std::string format = "1080p50";
     bool estimated_source = false; // QR clk=phone-utc
     bool timecode = false;
-    bool qr_flash = false; // AVS2: QR names the current flash event, held for its full period.
+    bool qr_flash = false; // AVS2/AVS3: compact QR with a neighbouring optical marker.
+    bool optical_code = false; // AVS3: A/B burst marker; QR names event k from half a period before it to half after.
     uint32_t source_id = 0;
 };
 
 bool identify_video(VideoObservation& video, const QrPayload& payload);
-bool flash_white(int frame_in_period, double grain_ms);
 std::string qr_payload_json(const QrPayload& payload);
 std::optional<QrPayload> parse_qr_payload(std::string_view json);
 std::string qr_payload_text(const QrPayload& payload);
@@ -435,13 +440,16 @@ struct QrDetection {
     QrPayload payload;
     std::array<double, 4> x{}, y{};
 };
-// Slow identified geometry/QR, fast sparse photometry. No raster rectification.
+// AVS3: slow QR geometry/identity, fast sparse field photometry on every frame.
+// No raster rectification. The OpticalCodeDetector times each burst; the QR seen
+// around it (or the event grid) names it.
 class QrFlashTracker {
 public:
     struct Sample { double time_ms=0,level=0,range=0; int phase=0; };
     struct Diagnostics {
-        uint64_t frames=0,probe_frames=0,symbol_frames=0,module_reads=0,match_calls=0,symbol_comparisons=0;
-        uint64_t mixed_frames=0,finder_rejections=0,geometry_rejections=0,edges=0,emitted=0;
+        uint64_t frames=0,probe_frames=0,geometry_rejections=0,edges=0,emitted=0;
+        // Field crossings, fitted bursts, rejected fits, bursts without identity, bursts named by the grid.
+        uint64_t optical_crossings=0,optical_bursts=0,optical_rejected=0,optical_unbound=0,optical_by_grid=0;
         std::deque<Sample> samples;
     };
     void reset();
@@ -456,22 +464,24 @@ public:
     const Diagnostics& diagnostics() const { return diagnostics_; }
     std::optional<uint64_t> sequence() const { return anchor_ ? std::optional<uint64_t>(anchor_->payload.k) : std::nullopt; }
 private:
-    struct Code { QrPayload payload; double time; std::array<uint8_t,1089> modules; };
-    struct Edge { VideoObservation frame; int whites = 1; bool emitted = false; std::vector<std::array<uint8_t,1089>> symbols; };
+    struct Code { QrPayload payload; double time; };
+    struct Pending { OpticalCodeDetector::Burst burst; VideoObservation frame; bool optical = false; };
     std::optional<QrDetection> anchor_;
     double anchor_ms_ = -1e30, last_frame_ms_ = -1e30;
     std::array<double, 9> transform_{};
     std::deque<Code> codes_;
-    std::deque<Edge> edges_;
     std::vector<VideoObservation> ready_;
     std::optional<uint64_t> emitted_seq_;
     PicturePose pose_;
-    MarkerReading::State phase_ = MarkerReading::State::Invalid;
-    int blacks_ = 0;
     bool valid_ = false;
-    void match();
+    OpticalCodeDetector optical_;
+    std::deque<VideoObservation> recent_;
+    std::deque<Pending> bursts_;
+    std::optional<std::pair<uint64_t, double>> grid_; // last bound sequence and burst time
+    double optical_period_ms_ = 500;
+    void configure_optical();
+    void match_optical(double now_ms);
     void push_pixels(const void* luma, bool eight_bit, int width, int height, int stride, VideoObservation frame);
-    double last_black_ms_ = -1e30;
     Diagnostics diagnostics_;
 };
 
@@ -623,7 +633,8 @@ public:
     bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
     bool qr_scan_suggested(double time_ms) const { return !qr_flash_active() || qr_flash_.qr_scan_suggested(time_ms); }
     const QrFlashTracker::Diagnostics& qr_flash_diagnostics() const { return qr_flash_.diagnostics(); }
-    void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms);
+    // AVS3 camera frame: time_ms is the exposure start of the first row.
+    void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms, double exposure_ms = 0, double readout_ms = 0);
     PhoneReport finish(const std::string& test_id = "PHONE");
     void trim_before(double time_ms);
     int located_frames() const { return located_frames_; }

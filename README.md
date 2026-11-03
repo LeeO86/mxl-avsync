@@ -1,16 +1,18 @@
 # mxl-avsync
 
-AV sync and latency measurement for MXL and iPhone. Version 2.0 uses a large
-QR code beside a flash field and independently decodable audio timecode. File,
-live MXL and native iOS sources/receivers share the signal and measuring core.
-The analyzer reports audio/video offset and, with a suitable clock reference,
-latency. Phone-clock latency is explicitly estimated with unknown physical
-accuracy. Android capture is planned.
+AV sync and latency measurement for MXL, iPhone and Android. Version 2.1 uses a
+large QR code beside two always-opposite light fields that swap in a short
+burst at each event (AVS3), plus independently decodable audio timecode. File,
+live MXL and the phone apps share the signal and measuring core. The analyzer
+reports audio/video offset and, with a suitable clock reference, latency.
+Phone-clock latency is an estimate; its physical accuracy depends on the
+phone's camera and microphone (calibrate once per phone).
 
-Get `ghcr.io/leeo86/mxl-avsync:2.0.7` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
+Get `ghcr.io/leeo86/mxl-avsync:2.1.0` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
 for iOS TestFlight information. Upgrade compact-signal generator and receivers
-together: old receivers do not understand AVS2. Legacy signals remain supported.
-[Signal and validation details](docs/qr-flash.md) · [Release notes](docs/release-notes-2.0.7.md).
+together: AVS3 receivers ignore AVS2 sources, and older receivers do not
+understand AVS3. Legacy signals remain supported.
+[Signal and validation details](docs/qr-flash.md) · [Release notes](docs/release-notes-2.1.0.md).
 
 
 **Status: measuring core, file tools, control plane, live MXL reader and writer, and the phone core.** The container image is `ghcr.io/leeo86/mxl-avsync`, user 1000:1000. `/metrics` exports every family from the first scrape, counters at 0. Latency gauges are not exported. `mxl-avsync` links libmxl when the package is found; `avsync-core` does not. `/readyz` is 200 when the process and HTTP service are up and, with NMOS registration configured, the node is listed in the Query API. The generator also requires its output flows to be created. Analyzer routes and signal are independent: `not_routed`, `waiting` and `no_signal` remain ready and are reported in `/statusz`, the input-state metric and the UI. The analyzer also writes a result picture flow, and the web UI polls `/api/v1/preview/input.jpg` and `/api/v1/preview/generated.jpg` once a second. Clock state comes from an optional ptp4l management socket (`AVSYNC_PTP_SOCKET`), otherwise the kernel (`adjtimex(2)`); `AVSYNC_PTP_STATUS_URL` is an explicit override. `/statusz`, `/api/v1/status`, the UI and metrics identify `sync_source` (`ptp4l`, `kernel` or `url`). See [clock reference and deployment requirements](docs/clock-reference.md) for socket permissions, PTP error reporting and NTP TAI setup. Latency and the index shifts are reported only when that clock is locked and the QR names the event. Latency is arrival vs the content timestamp; directly behind the generator it is the generator's own write timing (both essences committed about 20–25 ms early, so negative). The main value is the AV sync, which is what MXL consumers see. For an absolute latency (emission → arrival, never negative, with ± and the clock named), enter the source's emit offsets on the analyzer (`AVSYNC_SOURCE_EMIT_VIDEO_MS` / `AVSYNC_SOURCE_EMIT_AUDIO_MS`, copied from the generator's `/api/v1/status` `emit_offsets`), or route the generator's flows directly with a Query API configured (the analyzer then reads the generator's flow tag `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0`); without either the latency is relative to the source timestamp. Alert rules: `deploy/prometheus/avsync-rules.yaml`; per-release bench over several paths: `tools/bench_paths.py`. `video_content_vs_grain_ms` and `audio_content_vs_grain_ms` compare that content time with the MXL grain timestamp even when the clock is unknown. This repo does not implement ST 2110, SRT, or SIP; those flows come from the sibling gateways. File-mode H.264 and G.711 are test aids. A real phone still needs a device. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
@@ -69,10 +71,10 @@ See [testfiles/README.md](testfiles/README.md) for eight verified AV-sync clips 
 Signal and Settings forms keep local drafts across status/JPEG polling, with an Unsaved changes indicator and Apply/Discard. Only successful Apply or explicit Discard adopts the server settings; failed saves and newer edits made during a save are retained.
 
 
-## Audio timecode and white flash
+## Audio timecode and optical burst
 
 The default signal carries independently decodable audio timecode at 1200 baud.
-At zero offset, each white flash starts with the chirp. Choose 1 or 2 chirps/s
+At zero offset, each optical burst starts with the chirp. Choose 1 or 2 chirps/s
 in Signal; 600 baud and legacy compatibility are also available. See
 [the format, phone feedback, audio-only latency and tests](docs/audio-timecode.md).
 
@@ -82,4 +84,4 @@ The Signal form's **Title** is the large caption below the sync scale;
 **Subtitle** is smaller. For existing deployments the saved `source` field and
 `AVSYNC_SOURCE` keep their names and values. The obsolete header `title` /
 `AVSYNC_TITLE` remains accepted by the legacy API but is not a second title
-control for AVS2. Both container and iPhone show the centered AVsync brand.
+control for AVS3. Both container and phone show the centered AVsync brand.

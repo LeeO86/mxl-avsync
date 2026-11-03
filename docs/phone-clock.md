@@ -121,7 +121,7 @@ cannot identify all of them. See [device-to-device](device-to-device.md).
   rejection of unsynchronized, wrong-origin and kiss-of-death replies.
 - `./gradlew :avsync:testDebugUnitTest` from generated Android project: GPS/UTC
   epoch and leap conversion, elapsedRealtime mapping and invalid/stale samples.
-- Existing core and native iOS fixture suites verify AVS2, audio-only, latency,
+- Existing core and native iOS fixture suites verify AVS3, audio-only, latency,
   sparse picture tracking and capture calibration independently of time sync.
 
 References: [NTPv4](https://www.rfc-editor.org/rfc/rfc5905),

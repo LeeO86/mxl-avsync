@@ -50,12 +50,12 @@ int main(int argc, char** argv)
         payload.format = format->token;
         info.qr_json = qr_payload_text(payload);
         const auto t0 = std::chrono::steady_clock::now();
-        render_picture(picture, info, seq, frame_in_period, period.grains, flash_white(frame_in_period, period.period_ms / period.grains));
+        render_picture(picture, info, seq, frame_in_period, period.grains, optical_a_white(frame_in_period, 2, seq));
         const auto t1 = std::chrono::steady_clock::now();
         pack_v210(picture.y.data(), picture.cb.data(), picture.cr.data(), format->width, rows, format->width, packed.data());
         const auto t2 = std::chrono::steady_clock::now();
         const auto t3 = std::chrono::steady_clock::now();
-        const auto& incremental = live.render(format->width, rows, info, seq, frame_in_period, period.grains, flash_white(frame_in_period, period.period_ms / period.grains));
+        const auto& incremental = live.render(format->width, rows, info, seq, frame_in_period, period.grains, optical_a_white(frame_in_period, 2, seq));
         const auto t4 = std::chrono::steady_clock::now();
         live_ms.push_back(std::chrono::duration<double, std::milli>(t4 - t3).count());
         if (incremental != packed) ++mismatches;

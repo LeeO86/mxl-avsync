@@ -15,22 +15,50 @@ import android.os.SystemClock
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import java.util.UUID
+import android.view.WindowManager
 
 class AvsyncModule : Module() {
   private val handler = Handler(Looper.getMainLooper())
-  private val clockId = UUID.randomUUID().toString()
   private var cancel: (() -> Unit)? = null
+  private var ntpBusy = false
   override fun definition() = ModuleDefinition {
     Name("Avsync")
-    Function("supportsLiveCapture") { false } // Camera/NDK port is a separate milestone.
-    Function("supportsGenerator") { false }
+    Function("supportsLiveCapture") { true }
+    Function("supportsGenerator") { false } // generate() comes with the Android generator.
     Function("deviceVersion") { Build.VERSION.RELEASE }
     Function("loadState") { appContext.reactContext?.getSharedPreferences("avsync", Context.MODE_PRIVATE)?.getString("session.v1", null) }
     Function("saveState") { value: String -> appContext.reactContext?.getSharedPreferences("avsync", Context.MODE_PRIVATE)?.edit()?.putString("session.v1", value)?.apply(); Unit }
-    Function("clockNow") { mapOf("monotonicMs" to SystemClock.elapsedRealtimeNanos()/1e6, "clockId" to clockId, "timebase" to "android-elapsed-realtime") }
-    AsyncFunction("synchronizeClock") { _: String, promise: Promise -> handler.post { startClock(promise) }; Unit }
-    OnActivityEntersBackground { handler.post { cancel?.invoke() } }
+    Function("clockNow") { PhoneClock.now() }
+    AsyncFunction("synchronizeClock") { server: String, promise: Promise ->
+      if (ntpBusy) { promise.reject("CLOCK_BUSY", "A clock check is already running", null); return@AsyncFunction }
+      ntpBusy = true
+      Thread({
+        val result = runCatching { SntpClient().synchronize(server) }
+        handler.post {
+          ntpBusy = false
+          result.fold({ promise.resolve(it) }, { promise.reject("NTP_UNAVAILABLE", it.message ?: "NTP unavailable", it) })
+        }
+      }, "avsync.ntp").start()
+    }
+    // GNSS time is kept for later; the app does not use it (no location permission is requested).
+    AsyncFunction("synchronizeGnssClock") { _: String, promise: Promise -> handler.post { startClock(promise) }; Unit }
+    Function("setScreenAwake") { on: Boolean? ->
+      handler.post {
+        val window = appContext.currentActivity?.window ?: return@post
+        if (on == true) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      }
+      Unit
+    }
+    View(AvsyncCameraView::class) {
+      Events("onReport")
+      Prop("active") { view: AvsyncCameraView, active: Boolean -> view.setActive(active) }
+      Prop("captureFps") { view: AvsyncCameraView, fps: Double -> view.setRequestedFps(fps) }
+      Prop("taiUtcOffset") { view: AvsyncCameraView, seconds: Double -> view.setTaiUtcOffset(seconds) }
+      AsyncFunction("beginCalibration") { view: AvsyncCameraView -> view.beginCalibration() }
+      AsyncFunction("resumeAnalysis") { view: AvsyncCameraView -> view.resumeAnalysis() }
+    }
+    OnActivityEntersForeground { AvsyncCameraView.setForeground(true) }
+    OnActivityEntersBackground { AvsyncCameraView.setForeground(false); handler.post { cancel?.invoke() } }
     OnDestroy { handler.post { cancel?.invoke() } }
   }
   private fun startClock(promise: Promise) {
@@ -80,7 +108,7 @@ class AvsyncModule : Module() {
           val deviceUnix = System.currentTimeMillis().toDouble() - (now-c.elapsedRealtimeNanos)/1e6
           val result = mapOf<String, Any>("source" to "gnss", "server" to "device GNSS", "referenceUnixMs" to v.unixMs,
             "referenceMonotonicMs" to v.monotonicMs,"deviceUnixMs" to deviceUnix,"offsetMs" to v.unixMs-deviceUnix,
-            "uncertaintyMs" to v.uncertaintyMs,"clockId" to clockId,"timebase" to "android-elapsed-realtime",
+            "uncertaintyMs" to v.uncertaintyMs,"clockId" to PhoneClock.identifier,"timebase" to PhoneClock.TIMEBASE,
             "authenticated" to false,"hardwareDiscontinuityCount" to c.hardwareClockDiscontinuityCount,
             "uncertaintyModel" to "3-sigma GNSS bias + elapsedRealtime mapping (statistical estimate)")
           // A second independent update checks that the mapping did not jump.

@@ -30,9 +30,11 @@
       },
       "permissions": [
         "CAMERA",
-        "RECORD_AUDIO",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "RECORD_AUDIO"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ],
       "icon": "./assets/android-icon.png"
     },

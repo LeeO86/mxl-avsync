@@ -38,9 +38,9 @@ def main():
                 assert not report['audio_timecodes'];continue
             assert len(report['audio_timecodes'])>=3 and all(p['crc_ok'] for p in report['audio_timecodes']),report
             assert all(e.get('audio_timecode',{}).get('valid') for e in report['events'] if e['grade']!='invalid'),report
-            # The first white marker frame is at the first chirp onset when offset=0.
+            # Field A (left half of the panel) first turns white at the first chirp onset when offset=0.
             if offset==0:
-                pixels=run('ffmpeg','-v','error','-i',movie,'-vf','crop=16:16:1177:445,scale=1:1','-pix_fmt','gray','-f','rawvideo','-').stdout
+                pixels=run('ffmpeg','-v','error','-i',movie,'-vf','crop=16:16:1074:445,scale=1:1','-pix_fmt','gray','-f','rawvideo','-').stdout
                 first=next(i for i,p in enumerate(pixels) if p>200)
                 manifest=json.loads(Path(str(movie)+'.manifest.json').read_text())
                 assert first==manifest['events'][0]['video_frame'],(first,manifest)

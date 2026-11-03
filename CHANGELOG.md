@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.1.0 (2026-11-03) and Mobile 2.1.0 (not released yet)
+
+- **AVS3 optical code** replaces the AVS2 single white flash in every
+  generator (MXL, file, phone). The flash panel is split into two fields that
+  are always opposite (constant total light) and swap 8 times around each
+  event. The analyzer times every A = B crossing from the edge samples and
+  averages them, so slow panels, local dimming, frame-rate conversion, auto
+  exposure and tone curves no longer move the event time. The QR names each
+  event from half a period before its burst; the burst pattern carries the
+  event parity. AVS3 receivers ignore AVS2 sources; update generators and
+  receivers together. [Details and simulation](docs/qr-flash.md).
+- **Shared phone analyzer** (`PhoneAnalyzer`) in the core for iOS and Android:
+  the reading is the median of the last 8 pairs with its spread, video and
+  audio latency are medians too. `docs/mobile-native.md` is the native contract.
+- **iOS capture:** automatic fastest camera mode; focus, white balance and a
+  full-frame exposure locked after 1.5 s; the recording audio session is set
+  again on every capture start (after the calibration review it was left in
+  playback mode).
+- **New, much simpler app UI:** Measure (one AV number, spread, two latencies,
+  Save, Restart), Signal (one Start button, options folded), Results. Settings
+  has calibration, clock and screen wake; all technical controls and live
+  diagnostics are in Settings → Debug. The clock synchronizes on its own.
+  Calibration reviews in a modal while the camera stays mounted.
+- Removed: the iOS stream/file analyzers, their native tests and the unused JS
+  modules of the old UI; the native Mac test sender (PR #60) is not merged.
+- New simulator `avsync-optical-sim` (tests/tools/optical_sim.cpp).
+
 ## Mobile 2.0.8 build 10 (2026-11-01)
 
 - Focus slow QR work around actual pulses with geometry refresh/reacquisition;

@@ -406,6 +406,8 @@ TEST_CASE("large qr stays decodable and the sync square moves")
     }
 }
 
+#include "avsync/phone_analyzer.hpp"
+#include "avsync/phone_generator.hpp"
 #include "avsync/picture_reader.hpp"
 TEST_CASE("live picture reader keeps direct path and reacquires a moving camera tile after loss") {
     PictureReader reader;
@@ -460,9 +462,9 @@ TEST_CASE("mobile static plate omits only the shared animated sync square") {
         const int period=60/rate;
         for(int pos:{0,1,period-1}) {
             Yuv422p10 animated,plate;animated.resize(1280,720);plate.resize(1280,720);
-            render_picture(animated,info,9,pos,period,flash_white(pos,1000.0/60));
+            render_picture(animated,info,9,pos,period,optical_a_white(pos,2,9));
             info.show_sync_indicator=false;
-            render_picture(plate,info,9,pos,period,flash_white(pos,1000.0/60));
+            render_picture(plate,info,9,pos,period,optical_a_white(pos,2,9));
             info.show_sync_indicator=true;
             const auto dot=sync_indicator(1280,720,pos,period,info.period_ms);
             CHECK(animated.y[(dot.y+dot.side/2)*1280+dot.x+dot.side/2]==kYWhite); // foreground tick wins
@@ -484,87 +486,206 @@ TEST_CASE("mobile static plate omits only the shared animated sync square") {
     }
 }
 
-TEST_CASE("AVS2 QR alone anchors a cropped picture and timestamps flashes before decoding") {
+namespace {
+// One AVS3 grain as the live generator draws it: QR names the nearest event.
+QrPayload avs3_payload(uint64_t index, int grains, int rate, const char* format, uint32_t source = 0xABCDEF12)
+{
+    QrPayload p;p.timecode=p.qr_flash=p.optical_code=true;p.source_id=source;p.test_id="avs3";p.mode="LIVE";
+    p.k=optical_named_seq(index,grains);p.tk=1793300000000000000LL+int64_t(p.k)*(1000000000LL/rate);p.rate=rate;p.format=format;
+    return p;
+}
+void render_avs3(Yuv422p10& image, uint64_t index, int grains, int rate, int chip, const char* format, uint32_t source = 0xABCDEF12)
+{
+    const auto p=avs3_payload(index,grains,rate,format,source);
+    PictureInfo info;info.qr_json=qr_payload_text(p);info.period_ms=1000.0/rate;
+    const uint64_t seq=index/grains;const int pos=int(index%grains);
+    render_picture(image,info,seq,pos,grains,optical_a_white(pos,chip,seq));
+}
+} // namespace
+
+TEST_CASE("AVS3 QR payload round trip and burst schedule") {
+    QrPayload p=avs3_payload(37,25,2,"1080p50");
+    const auto text=qr_payload_text(p);CHECK(text.substr(0,5)=="AVS3:");CHECK(text.size()==59);
+    auto back=parse_qr_payload(text);REQUIRE(back);CHECK(back->optical_code);CHECK(back->k==p.k);CHECK(back->tk==p.tk);
+    // The QR names event k from half a period before its burst.
+    CHECK(optical_named_seq(37,25)==1);CHECK(optical_named_seq(38,25)==2);CHECK(optical_named_seq(62,25)==2);CHECK(optical_named_seq(63,25)==3);
+    for(int rate:{1,2})for(double fps:{25.0,50.0,59.94,60.0}) {
+        const int chip=optical_chip_grains(fps,rate);const double period=1000.0/rate,chip_ms=chip*1000/fps;
+        CHECK(chip_ms>=33);CHECK(optical_span_chips()*chip_ms<period-150); // a pause after every burst
+        for(uint64_t seq:{4u,5u}) {
+            int changes=0;bool last=false;
+            for(int pos=0;pos<int(period*fps/1000);++pos){const bool w=optical_a_white(pos,chip,seq);changes+=w!=last;last=w;}
+            CHECK(changes==kOpticalTransitions);CHECK_FALSE(last); // back to rest: A black, B white
+        }
+    }
+    CHECK(optical_chip_grains(50,2)==2);CHECK(optical_chip_grains(25,2)==1);CHECK(optical_chip_grains(50,1)==4);
+}
+
+TEST_CASE("AVS3 QR alone anchors a cropped picture and times bursts on the grain") {
     for(int rate:{1,2}) {
         QrFlashTracker tracker;
         const auto g=qr_flash_geometry(1280,720);
-        // Crop away all outside corners, bars and the entire old bottom strip.
+        // Crop away all outside corners, bars and the bottom strip.
         const int left=g.qr_x-12,top=g.qr_y-12,cw=g.marker_x+g.marker_side-left+12,ch=g.qr_size+24;
+        const int grains=50/rate,chip=optical_chip_grains(50,rate);
         std::vector<uint16_t> crop(size_t(cw)*ch);
         std::vector<VideoObservation> events;
-        for(int frame=0;frame<160;++frame) {
-            double time=frame*20.0;uint64_t seq=1+frame/(50/rate);int pos=frame%(50/rate);
-            QrPayload p;p.timecode=p.qr_flash=true;p.source_id=0xABCDEF12;p.test_id="roundtrip";
-            p.mode="LIVE";p.k=seq;p.tk=1793300000000000000LL+int64_t(seq-1)*(1000000000/rate);p.rate=rate;p.format="1080p50";
-            PictureInfo info;info.qr_json=qr_payload_text(p);info.period_ms=1000.0/rate;
-            Yuv422p10 image;image.resize(1280,720);render_picture(image,info,seq,pos,50/rate,flash_white(pos,20));
+        Yuv422p10 image;image.resize(1280,720);
+        for(int frame=0;frame<grains*5;++frame) {
+            const double time=frame*20.0;
+            render_avs3(image,frame,grains,rate,chip,"1080p50");
             for(int y=0;y<ch;++y)std::copy_n(image.y.data()+size_t(y+top)*1280+left,cw,crop.data()+size_t(y)*cw);
             if(frame%5==0) {
-                auto q=decode_qr_signal(crop.data(),cw,ch,cw);REQUIRE(q);REQUIRE(q->payload.qr_flash);
-                CHECK(q->payload.k==seq);CHECK(q->payload.tk==p.tk);tracker.observe(*q,time);
+                auto q=decode_qr_signal(crop.data(),cw,ch,cw);REQUIRE(q);REQUIRE(q->payload.optical_code);
+                CHECK(q->payload.k==optical_named_seq(frame,grains));tracker.observe(*q,time);
             }
             VideoObservation f;f.time_ms=time;f.have_arrival=true;f.arrival_ms=time+7;f.grain_index=frame;
             tracker.push(crop.data(),cw,ch,cw,f);
             auto out=tracker.take_events();events.insert(events.end(),out.begin(),out.end());
             CHECK(tracker.valid_frame());
         }
-        REQUIRE(events.size()==size_t(3*rate));
-        for(size_t i=0;i<events.size();++i) {
-            CHECK(events[i].seq==i+2);CHECK(events[i].time_ms==doctest::Approx((i+1)*1000.0/rate));
-            CHECK(events[i].arrival_ms==events[i].time_ms+7);CHECK(events[i].timecode);
-            CHECK(events[i].set_tai_ns==1793300000000000000LL+int64_t(i+1)*(1000000000/rate));
+        // The first period only fills the field history; every later burst is found.
+        REQUIRE(events.size()>=3);
+        for(const auto& e:events) {
+            CHECK(e.time_ms==doctest::Approx(double(e.seq)*1000.0/rate).epsilon(1e-9));
+            CHECK(e.arrival_ms==e.time_ms+7);CHECK(e.grain_index==int64_t(e.seq)*grains);CHECK(e.timecode);
+            CHECK(e.set_tai_ns==1793300000000000000LL+int64_t(e.seq)*(1000000000LL/rate));
         }
+        CHECK(events.back().seq==4);
     }
 }
 
-TEST_CASE("AVS2 rejects static pictures and expired geometry") {
-    QrFlashTracker tracker;QrPayload p;p.timecode=p.qr_flash=true;p.source_id=5;p.k=7;p.tk=1000000000;p.test_id="still";
-    PictureInfo info;info.qr_json=qr_payload_text(p);Yuv422p10 image;image.resize(1280,720);render_picture(image,info,7,0,30,true);
+TEST_CASE("AVS3 rejects static pictures and expired geometry") {
+    QrFlashTracker tracker;Yuv422p10 image;image.resize(1280,720);
+    render_avs3(image,7*25+20,25,2,2,"1080p50"); // rest state, no burst
     auto q=decode_qr_signal(image.y.data(),1280,720,1280);REQUIRE(q);tracker.observe(*q,0);
     for(int frame=0;frame<40;++frame){VideoObservation f;f.time_ms=frame*20;tracker.push(image.y.data(),1280,720,1280,f);CHECK(tracker.take_events().empty());}
     CHECK_FALSE(tracker.valid_frame()); // 780-ms-old QR geometry cannot keep measuring.
 }
 
-TEST_CASE("AVS2 cannot relabel a pulse with frozen or later unrelated QR identity") {
-    for(bool frozen:{false,true}) {
-        QrFlashTracker tracker;Yuv422p10 picture;picture.resize(1280,720);
-        QrPayload p;p.timecode=p.qr_flash=true;p.k=7;p.tk=1000000000;p.source_id=77;p.test_id="negative";
-        PictureInfo info;info.period_ms=500;info.qr_json=qr_payload_text(p);
-        for(int i=0;i<40;++i) {
-            double time=i*20.0;bool white=i>=25&&i<30;
-            // The actual QR stays at event seven, even during the pulse.
-            render_picture(picture,info,7,i%25,25,white);
-            if(i%5==0) {
-                auto q=decode_qr_signal(picture.y.data(),1280,720,1280);REQUIRE(q);
-                if(!frozen&&i>=30){q->payload.k=8;q->payload.tk+=500000000;}
-                tracker.observe(*q,time);
+TEST_CASE("AVS3 never names a burst with a QR of the wrong parity or another source") {
+    for(int mode=0;mode<2;++mode) {
+        QrFlashTracker tracker;Yuv422p10 image;image.resize(1280,720);size_t named=0;
+        for(int frame=0;frame<25*4;++frame) {
+            render_avs3(image,frame,25,2,2,"1080p50");
+            if(frame%5==0) {
+                auto q=decode_qr_signal(image.y.data(),1280,720,1280);REQUIRE(q);
+                // 0: a stuck QR shows event 1 forever. 1: the QR is one event ahead.
+                if(mode==0){q->payload.k=1;}else{q->payload.k+=1;}
+                tracker.observe(*q,frame*20.0);
             }
-            VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),1280,720,1280,f);
-            CHECK(tracker.take_events().empty());
+            VideoObservation f;f.time_ms=frame*20.0;tracker.push(image.y.data(),1280,720,1280,f);
+            // Never a wrong name: burst k sits at k periods.
+            for(const auto& e:tracker.take_events()){++named;CHECK(double(e.seq)==doctest::Approx(e.time_ms/500));}
         }
+        // A stuck QR names its own burst, then the grid counts on; a shifted QR has the other parity: nothing.
+        CHECK(named==(mode==0?3u:0u));
+        CHECK(tracker.diagnostics().optical_bursts>=2);
     }
 }
 
-TEST_CASE("AVS2 late QR pixel settling preserves the first optical frame at 240 fps") {
-    QrFlashTracker tracker;Yuv422p10 picture;picture.resize(640,360);
-    std::vector<VideoObservation> events;
-    for(int frame=0;frame<360;++frame) {
-        const double time=frame*1000.0/240;const uint64_t seq=1+frame/120;
-        QrPayload p;p.timecode=p.qr_flash=true;p.source_id=11;p.test_id="display-response";p.format="720p60";
-        // The flash responds immediately; the changed QR pixels take 42 ms.
-        p.k=frame>=120&&frame<130?1:seq;p.tk=int64_t(p.k-1)*500000000;
-        PictureInfo info;info.qr_json=qr_payload_text(p);
-        render_picture(picture,info,seq,frame%120,120,(frame%120)<24);
-        if(frame%24==0){auto q=decode_qr_signal(picture.y.data(),640,360,640);REQUIRE(q);tracker.observe(*q,time);}
-        VideoObservation f;f.time_ms=time;tracker.push(picture.y.data(),640,360,640,f);
-        auto fresh=tracker.take_events();events.insert(events.end(),fresh.begin(),fresh.end());
+TEST_CASE("AVS3 through a simulated 240 fps camera: each burst within half a millisecond") {
+    // Source 50p, the camera integrates the shown frames over a full-frame exposure
+    // at a free-running 239.48 fps; truth is the grain time of transition 0.
+    const int grains=25,chip=optical_chip_grains(50,2),w=640,h=360;
+    std::vector<Yuv422p10> frames(grains*5);
+    for(size_t n=0;n<frames.size();++n){frames[n].resize(w,h);render_avs3(frames[n],n,grains,2,chip,"720p50");}
+    QrFlashTracker tracker;std::vector<double> err;
+    const double cam=1000/239.48;std::vector<uint16_t> shot(size_t(w)*h);
+    for(double t=1.3;t+cam<frames.size()*20.0-1;t+=cam) {
+        // Mean of the source frames weighted by their overlap with [t, t+cam).
+        std::vector<double> acc(shot.size(),0);
+        for(size_t n=size_t(t/20);n<=size_t((t+cam)/20)&&n<frames.size();++n) {
+            const double o=std::min(t+cam,(n+1)*20.0)-std::max(t,n*20.0);if(o<=0)continue;
+            for(size_t i=0;i<shot.size();++i)acc[i]+=o*frames[n].y[i];
+        }
+        for(size_t i=0;i<shot.size();++i)shot[i]=uint16_t(std::lround(acc[i]/cam));
+        static int count=0;
+        if(count++%24==0){auto q=decode_qr_signal(shot.data(),w,h,w);if(q)tracker.observe(*q,t);}
+        VideoObservation f;f.time_ms=t;f.exposure_ms=cam;tracker.push(shot.data(),w,h,w,f);
+        for(const auto& e:tracker.take_events())err.push_back(e.time_ms-double(e.seq)*500);
     }
-    REQUIRE(events.size()==2);CHECK(events[0].seq==2);CHECK(events[0].time_ms==500);
-    CHECK(events[1].seq==3);CHECK(events[1].time_ms==1000);
+    REQUIRE(err.size()>=3);
+    for(double e:err)CHECK(std::abs(e)<.5);
+}
+
+TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms audio") {
+    // Source: the phone generator plan (720p60, 2 events/s). Video reaches the camera 30 ms after
+    // its scheduled time, audio 50 ms after: AV +20 ms, latencies 30 / 50 ms on a true clock.
+    const int64_t epoch_tai=1793300000000000000LL;const double epoch_host=100;
+    PhoneGeneratorPlan plan("phone-e2e",2,epoch_tai,epoch_host);
+    PhoneAnalyzer analyzer;
+    analyzer.set_device_utc_offset(double(epoch_tai)/1e6-epoch_host*1000-37000);
+    const int w=640,h=360;Yuv422p10 frame;frame.resize(1280,720);
+    // Render each 60 Hz source frame once, downscaled into the camera picture.
+    std::vector<std::vector<uint8_t>> shown;
+    const int frames=60*6;
+    for(int n=0;n<frames;++n) {
+        PictureInfo info;info.period_ms=500;info.qr_json=qr_payload_text(plan.qr(plan.named_seq(n)));
+        render_picture(frame,info,1+n/30,n%30,30,plan.a_white(n));
+        std::vector<uint8_t> small(size_t(w)*h);
+        for(int y=0;y<h;++y)for(int x=0;x<w;++x)small[size_t(y)*w+x]=uint8_t(frame.y[size_t(y*2)*1280+x*2]>>2);
+        shown.push_back(std::move(small));
+    }
+    // Audio: every event's timecode waveform at host_seconds(seq) + 50 ms.
+    const int rate=48000;std::vector<float> mic(size_t(rate*7),0.f);
+    for(uint64_t seq=1;seq<=12;++seq){
+        const auto wave=plan.audio(seq,rate);const size_t at=size_t(std::lround((plan.host_seconds(seq)-epoch_host+.050)*rate));
+        for(size_t i=0;i<wave.size()&&at+i<mic.size();++i)mic[at+i]+=wave[i];
+    }
+    const double cam=1000/239.48,start=epoch_host*1000;size_t audio_at=0;int count=0;std::string last;
+    std::vector<uint8_t> shot(size_t(w)*h);
+    for(double t=start+3.1;t<start+frames*1000.0/60-40;t+=cam) {
+        // Integrate the shown frames over [t, t+cam), with the 30 ms display delay.
+        std::vector<double> acc(shot.size(),0);
+        const double s0=t-start-30,s1=s0+cam;
+        for(int n=std::max(0,int(std::floor(s0*60/1000)));n<=int(s1*60/1000)&&n<frames;++n){
+            const double o=std::min(s1,(n+1)*1000.0/60)-std::max(s0,n*1000.0/60);if(o<=0)continue;
+            for(size_t i=0;i<acc.size();++i)acc[i]+=o*shown[n][i];
+        }
+        if(s0<0)continue;
+        for(size_t i=0;i<shot.size();++i)shot[i]=uint8_t(std::lround(acc[i]/cam));
+        if(count++%24==0){std::vector<uint16_t> wide(shot.size());for(size_t i=0;i<shot.size();++i)wide[i]=uint16_t(shot[i]*4);if(auto q=decode_qr_signal(wide.data(),w,h,w))analyzer.observe_qr(qr_payload_text(q->payload),q->x,q->y,t);}
+        analyzer.push_video(shot.data(),w,h,w,t,cam,0);
+        // Feed microphone audio up to this time in 10 ms blocks.
+        while(audio_at+480<=mic.size()&&start+(audio_at+480)*1000.0/rate<=t){analyzer.push_audio(mic.data()+audio_at,480,start+audio_at*1000.0/rate,rate);audio_at+=480;}
+        if(analyzer.report_due()){auto copy=analyzer.snapshot_for_poll();auto text=copy.poll();analyzer.merge_audio(copy);if(!text.empty())last=text;}
+    }
+    INFO(last);
+    REQUIRE(last.find("\"stage\":\"measuring\"")!=std::string::npos);
+    auto value=[&](const char* key){const auto at=last.find(std::string("\"")+key+"\":");REQUIRE(at!=std::string::npos);return std::stod(last.substr(at+std::strlen(key)+3));};
+    CHECK(std::abs(value("offsetMs")-20)<.6);
+    CHECK(std::abs(value("videoLatencyMs")-30)<.6);
+    CHECK(std::abs(value("audioLatencyMs")-50)<.3);
+    CHECK(value("spreadMs")<1.0);
+}
+
+TEST_CASE("phone analyzer calibration take: frames around one clap, then live again") {
+    PhoneAnalyzer analyzer;analyzer.begin_calibration();
+    std::vector<uint8_t> frame(320*180,40);std::vector<float> block(480,0.f);
+    std::optional<PhoneAnalyzer::CalibrationTake> take;
+    double at=1000;
+    for(int i=0;i<4*240&&!take;++i) {
+        const double t=1000+i*1000.0/240;
+        analyzer.push_video(frame.data(),320,180,320,t,1000.0/240,0);
+        for(;at+10<=t;at+=10){ // 10 ms audio blocks up to the frame time, a clap at 2.3 s
+            std::fill(block.begin(),block.end(),.001f);
+            if(at>=2300&&at<2310)for(int k=0;k<48;++k)block[k]=k%2?.9f:-.9f;
+            analyzer.push_audio(block.data(),block.size(),at,48000);
+        }
+        take=analyzer.take_calibration();
+    }
+    REQUIRE(take);
+    CHECK(take->spike_ms==doctest::Approx(1300).epsilon(.001));
+    int before=0,after=0;for(const auto&f:take->frames)(f.time_ms<take->spike_ms?before:after)++;
+    CHECK(before>=150);CHECK(after>=150); // 750 ms before, 700 ms after at 240 fps
+    CHECK(take->frames.front().width==320);
+    CHECK(take->audio.size()>size_t(48000));
+    CHECK_FALSE(analyzer.calibration_error());
 }
 
 TEST_CASE("AVS2 brand is centered and the moving box passes below white foreground ticks") {
-    PictureInfo info;QrPayload q;q.qr_flash=q.timecode=true;q.test_id="layout";
+    PictureInfo info;QrPayload q;q.qr_flash=q.optical_code=q.timecode=true;q.test_id="layout";
     info.qr_json=qr_payload_text(q);info.source="Demo title";info.subtitle="Smaller subtitle";
     SourceStill icon;icon.width=icon.height=4;icon.rgba.resize(4*4*4);
     for(size_t i=0;i<icon.rgba.size();i+=4){icon.rgba[i]=255;icon.rgba[i+3]=255;}
@@ -623,7 +744,7 @@ TEST_CASE("live picture gives the same v210 as a full render on every grain")
             if (n >= c.grains / 2 && n < c.grains * 3 / 4) info.source_image = png.at(ms);
             if (n >= c.grains * 3 / 4) info.source_image = gif.at(ms);
             QrPayload payload;
-            payload.timecode = payload.qr_flash = true;
+            payload.timecode = payload.qr_flash = payload.optical_code = true;
             payload.mode = "LIVE";
             payload.test_id = "live-picture";
             payload.k = seq;
@@ -631,7 +752,7 @@ TEST_CASE("live picture gives the same v210 as a full render on every grain")
             payload.offset_ms = n < c.grains / 2 ? 0 : 35;
             payload.format = format->token;
             info.qr_json = qr_payload_text(payload);
-            const bool white = flash_white(fip, period.period_ms / period.grains);
+            const bool white = optical_a_white(fip, optical_chip_grains(1000.0 * period.grains / period.period_ms, 2), seq);
             render_picture(full, info, seq, fip, period.grains, white);
             pack_v210(full.y.data(), full.cb.data(), full.cr.data(), format->width, rows, format->width, packed.data());
             const auto& incremental = live.render(format->width, rows, info, seq, fip, period.grains, white);

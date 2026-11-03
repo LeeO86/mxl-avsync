@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name = 'Avsync'
   s.version = '2.0.8'
-  s.summary = 'Recorded AV sync analysis using avsync-core'
+  s.summary = 'Live AV sync measurement using avsync-core'
   s.description = s.summary
   s.license = 'MIT'
   s.author = 'LeeO86'
@@ -15,7 +15,7 @@ Pod::Spec.new do |s|
   s.resource_bundles = { 'AvsyncResources' => ['Resources/*'] }
   s.source_files = '*.{h,mm,cpp,swift}'
   s.exclude_files = 'AvsyncCapture.swift'
-  s.public_header_files = 'AVSyncFileAnalyzer.h', 'AVSyncStreamAnalyzer.h', 'AVSyncQRCodeReader.h', 'AVSyncGenerator.h', 'AVSyncDeviceCalibration.h'
+  s.public_header_files = 'AVSyncPhoneAnalyzer.h', 'AVSyncQRCodeReader.h', 'AVSyncGenerator.h', 'AVSyncDeviceCalibration.h'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'GCC_OPTIMIZATION_LEVEL' => '2',

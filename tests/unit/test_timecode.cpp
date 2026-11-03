@@ -46,7 +46,7 @@ TEST_CASE("QR preserves exact TAI identity and flash tracking emits only rising 
             draw_static_layer(view);
             const int position = frame % period.grains;
             draw_timing(view, 1 + frame / period.grains, position, period.grains,
-                        flash_white(position, 40));
+                        position * 40 < 100);
             const auto observed = tracker.push(pixels.data(), format.width, frame, frame * 40.0);
             if (observed.event) {
                 ++events;

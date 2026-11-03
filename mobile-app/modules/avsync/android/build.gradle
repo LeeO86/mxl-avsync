@@ -1,7 +1,7 @@
 apply plugin: 'com.android.library'
 
 group = 'io.leeo86.mxl.avsync'
-version = '2.0.5'
+version = '2.0.8'
 
 def expoModulesCorePlugin = new File(project(':expo-modules-core').projectDir, 'ExpoModulesCorePlugin.gradle')
 apply from: expoModulesCorePlugin
@@ -11,9 +11,20 @@ useDefaultAndroidSdkVersions()
 
 android {
   namespace 'io.leeo86.mxl.avsync.clock'
-  defaultConfig { minSdkVersion 24 }
+  defaultConfig {
+    minSdkVersion 24
+    testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_shared' } }
+    // 64-bit only: the core's timestamp math uses __int128.
+    ndk { abiFilters 'arm64-v8a', 'x86_64' }
+  }
+  externalNativeBuild { cmake { path 'CMakeLists.txt'; version '3.22.1' } }
 }
 
 dependencies {
+  // Bundled model: works without Google Play services downloading it first.
+  implementation 'com.google.mlkit:barcode-scanning:17.3.0'
   testImplementation 'junit:junit:4.13.2'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

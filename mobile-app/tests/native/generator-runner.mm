@@ -46,12 +46,12 @@ int main(int argc, char **argv) { @autoreleasepool {
             NSDictionary *nativeQR=[AVSyncQRCodeReader readPixelBuffer:pixel];
             assert([nativeQR[@"detections"] count]==1);
             NSDictionary *detection=nativeQR[@"detections"][0];
-            auto payload=parse_qr_payload([detection[@"payload"] UTF8String]);assert(payload&&payload->qr_flash);
+            auto payload=parse_qr_payload([detection[@"payload"] UTF8String]);assert(payload&&payload->optical_code);
             QrDetection anchor;anchor.payload=*payload;NSArray *points=detection[@"points"];
             for(int i=0;i<4;++i){anchor.x[i]=[points[i][@"x"] doubleValue];anchor.y[i]=[points[i][@"y"] doubleValue];}
             CVPixelBufferLockBaseAddress(pixel,0);
-            // Exercise the same packed bits used by the native timing layers,
-            // including all source-frame positions and pulse falling edges.
+            // Exercise the native timing layers at every source frame of the period: the
+            // first burst only fills the field history, the next two are found.
             const auto geometry=[source geometry];
             auto n=[&](NSString *key){return [geometry[key] intValue];};
             for(int pos=0;pos<60/rate;++pos) {
@@ -67,8 +67,9 @@ int main(int argc, char **argv) { @autoreleasepool {
                 const uint32_t bits=[frame[@"strip"] unsignedIntValue];
                 for(int cell=0;cell<32;++cell) for(int y=n(@"stripY");y<n(@"stripY")+n(@"stripHeight");++y)for(int dx=0;dx<n(@"stripWidth");++dx)
                     luma[y*width+n(@"stripX")+cell*n(@"stripWidth")+dx]=bits&(1u<<(31-cell))?kYWhite:kYBlack;
-                const bool white=[frame[@"white"] boolValue];
-                for(int y=n(@"markerY");y<n(@"markerY")+n(@"markerSide");++y)for(int x=n(@"markerX");x<n(@"markerX")+n(@"markerSide");++x)luma[y*width+x]=white?kYWhite:kYBlack;
+                // AVS3: field A (left half) white when "white", field B (right half) the opposite.
+                const bool white=[frame[@"white"] boolValue];const int half=n(@"markerSide")/2;
+                for(int y=n(@"markerY");y<n(@"markerY")+n(@"markerSide");++y)for(int x=n(@"markerX");x<n(@"markerX")+n(@"markerSide");++x)luma[y*width+x]=(x<n(@"markerX")+half)==white?kYWhite:kYBlack;
                 const double time=1000.0*(event-1)/rate+1000.0*pos/60;
                 if(pos%6==0&&(event>1||pos>=12))tracker.observe(anchor,time); // Repeated 100-ms scans; first identity arrives after the edge.
                 VideoObservation capture;capture.time_ms=time;
@@ -109,8 +110,9 @@ int main(int argc, char **argv) { @autoreleasepool {
                 const auto geo=qr_flash_geometry(width,height);
                 UIImage *snapshot=[[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(width,height) format:format] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
                     [styled drawAtPoint:CGPointZero];
-                    [([state[@"white"] boolValue]?UIColor.whiteColor:UIColor.blackColor) setFill];
-                    UIRectFill(CGRectMake(geo.marker_x,geo.marker_y,geo.marker_side,geo.marker_side));
+                    const bool white=[state[@"white"] boolValue];const int half=geo.marker_side/2;
+                    [(white?UIColor.whiteColor:UIColor.blackColor) setFill];UIRectFill(CGRectMake(geo.marker_x,geo.marker_y,half,geo.marker_side));
+                    [(white?UIColor.blackColor:UIColor.whiteColor) setFill];UIRectFill(CGRectMake(geo.marker_x+half,geo.marker_y,geo.marker_side-half,geo.marker_side));
                     [[UIColor colorWithRed:number(@"syncR")/255 green:number(@"syncG")/255 blue:number(@"syncB")/255 alpha:1] setFill];
                     UIRectFill(CGRectMake(number(@"syncX"),number(@"syncY"),number(@"syncSize"),number(@"syncSize")));
                     [UIColor.blackColor setFill];

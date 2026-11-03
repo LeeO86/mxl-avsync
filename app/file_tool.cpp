@@ -1,4 +1,5 @@
 #include "file_tool.hpp"
+#include "avsync/optical_code.hpp"
 
 #include "picture.hpp"
 #include "report.hpp"
@@ -321,7 +322,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
             int64_t tk = static_cast<int64_t>(std::llround(ms));
             for (const auto& event : plan.events) {
                 if (static_cast<uint64_t>(index) >= event.video_grain) {
-                    marker_white = plan_config.timecode_baud ? flash_white(int(index - event.video_grain), period.period_ms / period.grains) : event.marker_phase != 0;
+                    marker_white = plan_config.timecode_baud ? optical_a_white(int64_t(index - event.video_grain), optical_chip_grains(1000.0 * period.grains / period.period_ms, request.event_rate), event.seq) : event.marker_phase != 0;
                     shown_seq = event.seq;
                     qr_seq = event.seq;
                     tk = static_cast<int64_t>(std::llround(event.video_timeline_ms * (plan_config.timecode_baud ? 1e6 : 1)));
@@ -352,15 +353,26 @@ int run_generate(const GenerateRequest& request, std::string& error)
             char timetext[64];
             std::snprintf(timetext, sizeof(timetext), "t %8.1f ms", ms);
             info.time_line = timetext;
+            uint64_t named_seq = shown_seq;
+            if (plan_config.timecode_baud) {
+                // AVS3: the QR names event k from half a period before its burst.
+                named_seq = 0;
+                for (const auto& event : plan.events) {
+                    if (2 * uint64_t(index) + uint64_t(period.grains) < 2 * event.video_grain) break;
+                    named_seq = event.seq;
+                    offset = event.expected_av_offset_ms;
+                    tk = static_cast<int64_t>(std::llround(event.video_timeline_ms * 1e6));
+                }
+            }
             if (second != qr_second || plan_config.timecode_baud) {
                 QrPayload payload;
                 payload.timecode = plan_config.timecode_baud != 0;
-                payload.qr_flash = payload.timecode;
+                payload.qr_flash = payload.optical_code = payload.timecode;
                 payload.source_id = plan_config.source_id;
                 payload.test_id = request.test_id;
                 payload.mode = "FILE";
-                payload.k = payload.qr_flash ? shown_seq : qr_seq;
-                payload.tk = payload.qr_flash && shown_seq == 0 ? 0 : tk;
+                payload.k = payload.qr_flash ? named_seq : qr_seq;
+                payload.tk = payload.qr_flash && named_seq == 0 ? 0 : tk;
                 payload.sweep = !request.sweep.empty();
                 payload.offset_ms = offset;
                 payload.rate = request.event_rate;

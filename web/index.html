@@ -158,7 +158,7 @@
         <label>Chirps per second
           <select v-model.number="eventRate"><option :value="1">1 / second</option><option :value="2">2 / second</option><option v-if="audioTimecode === 'legacy'" :value="4">4 / second (legacy)</option></select>
         </label>
-        <p class="note" v-if="audioTimecode !== 'legacy'">Each white flash starts at the chirp reference; positive offset delays the audio.</p>
+        <p class="note" v-if="audioTimecode !== 'legacy'">Each light burst starts at the chirp reference; positive offset delays the audio.</p>
         <label>Audio timecode
           <select v-model="audioTimecode"><option value="1200">1200 baud</option><option value="600">600 baud (1 / second)</option><option value="legacy">Legacy chirps</option></select>
         </label>
