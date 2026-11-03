@@ -22,9 +22,9 @@ export function Settings({ onClose, calibration, clock, onCalibrate, onSyncClock
   <Button title="Calibrate this phone" onPress={onCalibrate} style={{ marginTop: 0, marginBottom: 10 }} />
   <Row label="Clock" value={clock} />
   <Button title={syncing ? 'Synchronizing…' : 'Sync clock now'} disabled={syncing} onPress={onSyncClock} style={{ marginTop: 0, marginBottom: 10 }} />
-  <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.line }}>
+  <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingRight: 8, borderTopWidth: 1, borderTopColor: colors.line }}>
    <Text style={{ ...text, flex: 1 }}>Keep screen awake</Text>
-   <Switch accessibilityLabel="Keep screen awake" value={keepAwake} onValueChange={onKeepAwake} style={{ marginRight: 4, transform: [{ scale: 0.9 }] }} />
+   <Switch accessibilityLabel="Keep screen awake" value={keepAwake} onValueChange={onKeepAwake} />
   </View>
   <Row label="Privacy and support" onPress={onPrivacy} />
   <Row label="Debug" value="›" onPress={onDebug} />
@@ -40,11 +40,13 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
  useEffect(() => { setServer(session.ntpServer || ''); setLimit(String(session.clockMaxUncertaintyMs ?? 20)); setTai(String(session.taiUtcSeconds ?? 37)); }, []);
  const d = report?.diagnostics || {};
  const stats = report?.captureStats || {};
- const input = { ...text, backgroundColor: colors.bg, padding: 10, borderRadius: 8, marginTop: 4 };
+ const input = { ...text, backgroundColor: colors.card, padding: 10, borderRadius: 8, marginTop: 4 };
+ const card = { backgroundColor: colors.bg };
  return <>
   <Pressable accessibilityRole="button" onPress={onBack} style={{ paddingBottom: 8 }}><Text style={{ ...text, color: colors.muted }}>‹ Settings</Text></Pressable>
   <Text accessibilityRole="header" style={{ ...text, fontSize: 22 }}>Debug</Text>
-  <Card>
+  <Button title="Share diagnostics" onPress={onShare} />
+  <Card style={card}>
    <Text style={small}>Camera rate (fps)</Text>
    <Choice options={RATES} value={Number(session.captureFps) || 0} onChange={value => onChange({ captureFps: value })} />
    <Text style={{ ...small, marginTop: 8 }}>
@@ -52,16 +54,17 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
    </Text>
    <Text style={small}>{`Max frame gap ${Number.isFinite(stats.maxFrameGapMs) ? stats.maxFrameGapMs.toFixed(1) : '—'} ms · drops ${stats.dropCallbacks ?? '—'}`}</Text>
   </Card>
-  <Card>
+  <Card style={card}>
    <Text style={small}>Signal</Text>
    <Text selectable style={{ ...small, color: colors.ink }}>
     {`Stage ${report?.stage || '—'} · QR age ${Number.isFinite(d.qrAgeMs) ? Math.round(d.qrAgeMs) + ' ms' : '—'}\n` +
-     `Bursts ${d.bursts ?? '—'} (rejected ${d.rejected ?? '—'}, no QR ${d.unbound ?? '—'}, by grid ${d.byGrid ?? '—'}) · crossings ${d.crossings ?? '—'}\n` +
+     `Bursts ${d.bursts ?? '—'} · crossings ${d.crossings ?? '—'}\n` +
+     `Rejected ${d.rejected ?? '—'} · no QR ${d.unbound ?? '—'} · by grid ${d.byGrid ?? '—'}\n` +
      `Video events ${d.videoEvents ?? '—'} · audio timecodes ${d.audioTimecodes ?? '—'} · audio peak ${Number.isFinite(d.audioPeakDbfs) ? d.audioPeakDbfs.toFixed(0) + ' dBFS' : '—'}`}
    </Text>
    {(report?.events || []).slice(-8).reverse().map(e => <Text key={e.seq} selectable style={small}>{`#${e.seq}  AV ${offsetText(e.offsetMs)}  V ${latencyText(e.videoLatencyMs)}  A ${latencyText(e.audioLatencyMs)}  (device UTC)`}</Text>)}
   </Card>
-  <Card>
+  <Card style={card}>
    <Text style={small}>Clock</Text>
    {clockDetails ? <Text selectable style={{ ...small, marginTop: 4 }}>{clockDetails}</Text> : null}
    <Text style={{ ...small, marginTop: 8 }}>NTP server</Text>
@@ -72,7 +75,6 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
    <TextInput accessibilityLabel="TAI minus UTC" keyboardType="number-pad" value={tai} onChangeText={setTai} style={input} />
    <Button title="Apply" onPress={() => onChange({ ntpServer: server.trim(), clockMaxUncertaintyMs: Number(limit), taiUtcSeconds: Number(tai) })} />
   </Card>
-  <Button title="Share diagnostics" onPress={onShare} />
   <Button title="Clear saved results" onPress={onClearResults} />
   <Button title="Clear calibration" onPress={onClearCalibration} />
   <Button title="Back" onPress={onBack} />

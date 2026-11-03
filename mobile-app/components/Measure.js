@@ -20,8 +20,8 @@ export default function Measure({ camera, view, flow, calibrated, onSave, onRest
    {flow === 'aim' && <Button primary title="Start" onPress={onStartCalibration} />}
    <Button title="Cancel" onPress={onCancelCalibration} />
    {notice ? <Text style={{ ...small, color: colors.accent, marginTop: 8 }}>{notice}</Text> : null}
-  </View> : <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 }}>
-   <Text accessibilityRole="header" style={{ color: reading?.fresh ? colors.ink : colors.muted, fontSize: 52, fontWeight: '300' }}>{reading ? offsetText(reading.offsetMs) : '—'}</Text>
+  </View> : <View style={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 }}>
+   <Text accessibilityRole="header" style={{ color: reading?.fresh ? colors.ink : colors.muted, fontSize: 48, lineHeight: 54, fontWeight: '300' }}>{reading ? offsetText(reading.offsetMs) : '—'}</Text>
    <Text style={{ ...text, color: reading?.fresh ? colors.ink : colors.muted }}>
     {reading ? offsetSentence(reading.offsetMs) : 'No reading yet'}
     {reading && !reading.fresh ? ` · ${Math.round(reading.heldForMs / 1000)} s ago` : ''}
