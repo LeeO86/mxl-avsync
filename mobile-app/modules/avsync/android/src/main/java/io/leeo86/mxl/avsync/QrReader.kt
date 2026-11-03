@@ -11,7 +11,8 @@ import java.nio.ByteBuffer
 // normalized to the camera image, x TL, TR, BR, BL then y; only AVS3 payloads count.
 class QrReader : AutoCloseable {
   class Detection(val payload: String, val corners: DoubleArray)
-  class Frame(val nv21: ByteArray, val width: Int, val height: Int)
+  // width × height is the copy; step maps it back to the camera image (cameraWidth × cameraHeight).
+  class Frame(val nv21: ByteArray, val width: Int, val height: Int, val step: Int, val cameraWidth: Int, val cameraHeight: Int)
   private val scanner = BarcodeScanning.getClient(BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build())
 
   // Called on the capture thread: a copy at most `limit` pixels wide, with neutral chroma.
@@ -27,7 +28,7 @@ class QrReader : AutoCloseable {
     }
     luma.rewind()
     out.fill(128.toByte(), w * h, out.size)
-    return Frame(out, w, h)
+    return Frame(out, w, h, step, width, height)
   }
 
   // Called on a worker; blocks until ML Kit is done.
@@ -37,7 +38,7 @@ class QrReader : AutoCloseable {
       val text = code.rawValue ?: return@mapNotNull null
       val points = code.cornerPoints ?: return@mapNotNull null
       if (!text.startsWith("AVS3:") || points.size != 4) return@mapNotNull null
-      Detection(text, DoubleArray(8) { i -> if (i < 4) points[i].x.toDouble() / frame.width else points[i - 4].y.toDouble() / frame.height })
+      Detection(text, DoubleArray(8) { i -> if (i < 4) points[i].x.toDouble() * frame.step / frame.cameraWidth else points[i - 4].y.toDouble() * frame.step / frame.cameraHeight })
     }
   }
 
