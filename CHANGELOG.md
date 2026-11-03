@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0 and Mobile 2.1.0 (not released yet)
+## 2.1.0 (2026-11-03) and Mobile 2.1.0 (not released yet)
 
 - **AVS3 optical code** replaces the AVS2 single white flash in every
   generator (MXL, file, phone). The flash panel is split into two fields that
