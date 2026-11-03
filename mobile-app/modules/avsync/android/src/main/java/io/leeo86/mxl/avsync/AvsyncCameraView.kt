@@ -64,7 +64,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var running = false
   private var choice: CaptureProfile.Choice? = null
   private var characteristics: CameraCharacteristics? = null
-  private var realtimeClock = true
+  // 'realtime' (CLOCK_BOOTTIME) or 'monotonic'; null until an UNKNOWN source is checked on the first frame.
+  private var cameraClock: String? = null
   private var monotonicToBootNs = 0L
   private var exposureMode = "auto"
   private val frameMeta = object : LinkedHashMap<Long, Pair<Double, Double>>() {
@@ -163,8 +164,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       val ranges = c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty().map { it.lower to it.upper }
       val picked = CaptureProfile.choose(ranges, outputs, requestedFps) ?: throw IllegalStateException("Requested camera rate is unsupported. Choose another rate.")
       characteristics = c; choice = picked
-      // REALTIME timestamps are CLOCK_BOOTTIME, like the microphone. UNKNOWN is taken as CLOCK_MONOTONIC.
-      realtimeClock = c.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+      // REALTIME timestamps are CLOCK_BOOTTIME, like the microphone. UNKNOWN is checked on the first frame.
+      cameraClock = if (c.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) "realtime" else null
       monotonicToBootNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
       generation++; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0; failedFrames = 0
       main.post { configureTransform() }
@@ -266,12 +267,26 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     override fun onCaptureFailed(s: CameraCaptureSession, request: CaptureRequest, failure: android.hardware.camera2.CaptureFailure) { failedFrames++ }
   }
 
-  private fun bootMs(timestampNs: Long) = (if (realtimeClock) timestampNs else timestampNs + monotonicToBootNs) / 1e6
+  private fun bootMs(timestampNs: Long) = (if (cameraClock == "realtime") timestampNs else timestampNs + monotonicToBootNs) / 1e6
+
+  // An UNKNOWN source: the frame started about one frame ago on whichever clock matches within 100 ms.
+  private fun identifyClock(timestampNs: Long): Boolean {
+    val frameNs = 1_000_000_000L / (choice?.fps ?: 30)
+    val boot = SystemClock.elapsedRealtimeNanos(); val monotonic = System.nanoTime()
+    cameraClock = when {
+      kotlin.math.abs(boot - frameNs - timestampNs) < 100_000_000L -> "realtime"
+      kotlin.math.abs(monotonic - frameNs - timestampNs) < 100_000_000L -> "monotonic"
+      else -> null
+    }
+    if (cameraClock == null) fail("Camera clock unknown on this device")
+    return cameraClock != null
+  }
 
   private fun onFrame(source: ImageReader) {
     val image = runCatching { source.acquireNextImage() }.getOrNull() ?: return
     image.use {
       if (!running) return
+      if (cameraClock == null && !identifyClock(it.timestamp)) return
       val plane = it.planes[0]
       val pts = bootMs(it.timestamp)
       // The result can arrive after the image; then the previous frame's values stand in.
@@ -303,7 +318,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     lastHousekeeping = now
     val before = SystemClock.elapsedRealtimeNanos(); val unix = System.currentTimeMillis(); val after = SystemClock.elapsedRealtimeNanos()
     analyzer.setDeviceUtcOffset(unix - (before + after) / 2e6)
-    if (!realtimeClock) monotonicToBootNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
+    if (cameraClock == "monotonic") monotonicToBootNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
     analyzer.setTaiUtcSeconds(taiUtcSeconds)
     val corners = analyzer.picture()
     main.post { outline.show(corners) }
@@ -348,7 +363,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     return mapOf("platform" to "android", "model" to "${Build.MANUFACTURER} ${Build.MODEL}", "os" to Build.VERSION.RELEASE,
       "audioRoute" to (audio?.route ?: "unknown"), "sampleRate" to 48_000.0,
       "cameraMode" to (picked?.let { "${it.size.width}x${it.size.height}@${it.fps}" } ?: "unknown"),
-      "exposureMode" to exposureMode, "cameraClock" to if (realtimeClock) "realtime" else "monotonic-assumed",
+      "exposureMode" to exposureMode, "cameraClock" to (cameraClock ?: "unknown"),
       "audioClock" to (audio?.clock ?: "unknown"))
   }
 

@@ -64,7 +64,37 @@ per seq, share diagnostics, and clear results or calibration.
   on a simulated 240 fps capture of the phone source (+20 ms AV, 30/50 ms
   latency; spread below 2 ms) and a calibration take.
 - `npm run test:ios-generator`: the iOS generator picture, fields and audio.
-- Android: see `modules/avsync/android` (in progress).
+- Android: see [Android module](#android-module).
+
+## Android module
+
+`modules/avsync/android` builds the core into `libavsync-jni` (CMake, C++20,
+arm64-v8a and x86_64 only: the core uses `__int128`) and implements the
+[native contract](../docs/mobile-native.md) with Camera2, AudioRecord and ML Kit
+(bundled QR model). Capture is 60 fps on most devices (ImageReader, no
+constrained high-speed session); after 1.5 s of auto exposure the exposure is
+fixed at the full frame interval. Camera timestamps must be on the microphone's
+boot clock: REALTIME is used directly, an UNKNOWN source is matched against
+elapsedRealtime/nanoTime on the first frame, else the view reports
+"Camera clock unknown on this device". The clock check is SNTP, like iOS; the
+GNSS code stays in the module but the app requests no location permission.
+
+Needs Android Studio's SDK, NDK 26.1, CMake 3.22.1 and JDK 17. From `mobile-app/`:
+
+```sh
+npx expo prebuild -p android --clean   # android/ is generated, not committed
+cd android
+./gradlew assembleDebug :avsync:testDebugUnitTest
+./gradlew :avsync:connectedDebugAndroidTest   # with an emulator or device
+```
+
+Unit tests cover the camera mode choice, the fixed-exposure ISO, SNTP and the
+calibration WAV/waveform. `src/androidTest` checks the JNI bridge (live
+snapshot/poll and a clap calibration take).
+
+Not yet verified: the app on the emulator with a camera preview, the
+instrumented JNI test, and any real device (frame rate, exposure lock, the
+audio/camera clock alignment and calibration).
 
 ## EAS Cloud and TestFlight
 
