@@ -6,8 +6,8 @@ export const small = { color: colors.muted, fontSize: 13, lineHeight: 18 };
 
 export function Button({ title, onPress, disabled, primary, style }) {
  return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress}
-  style={[{ padding: 14, borderRadius: 10, backgroundColor: primary ? colors.accent : colors.button, alignItems: 'center', marginTop: 10 }, disabled && { opacity: 0.35 }, style]}>
-  <Text style={{ ...text, color: primary ? '#1a1206' : colors.ink, fontWeight: primary ? '700' : '500' }}>{title}</Text>
+  style={[{ padding: 14, borderRadius: 10, backgroundColor: primary && !disabled ? colors.accent : colors.button, alignItems: 'center', marginTop: 10 }, disabled && { opacity: 0.35 }, style]}>
+  <Text style={{ ...text, color: primary && !disabled ? '#1a1206' : colors.ink, fontWeight: primary ? '700' : '500' }}>{title}</Text>
  </Pressable>;
 }
 

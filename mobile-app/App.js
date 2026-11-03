@@ -8,7 +8,7 @@ import CalibrationReview from './components/CalibrationReview';
 import Measure from './components/Measure';
 import Generate from './components/Generate';
 import Results from './components/Results';
-import { Debug, Settings } from './components/Settings';
+import { Debug, Settings, Sheet } from './components/Settings';
 import { Button, colors, small, text } from './components/ui';
 import { liveView, offsetText, savedResult, formatWhen } from './src/live.mjs';
 import { clockCheckDetails, clockSettings, generatorClockOptions, referenceAt, synchronizeClock, CLOCK_MAX_AGE_MS } from './src/time-reference.mjs';
@@ -30,7 +30,7 @@ export default function App() {
  useEffect(() => { native?.saveState?.(JSON.stringify(session)); }, [session]);
 
  const [tab, setTab] = useState('measure');
- const [settings, setSettings] = useState(false), [debug, setDebug] = useState(false);
+ const [sheet, setSheet] = useState(null); // null, 'settings' or 'debug'
  const [notice, setNotice] = useState(null);
  const [foreground, setForeground] = useState(AppState.currentState === 'active');
  useEffect(() => { const s = AppState.addEventListener('change', value => setForeground(value === 'active')); return () => s.remove(); }, []);
@@ -91,7 +91,7 @@ export default function App() {
  };
  const share = async value => { try { await Share.share({ message: JSON.stringify(value, null, 2) }); } catch (error) { setNotice(error.message); } };
 
- const startCalibration = () => { setSettings(false); setTab('measure'); setNotice(null); setFlow('aim'); };
+ const startCalibration = () => { setSheet(null); setTab('measure'); setNotice(null); setFlow('aim'); };
  const finishCalibration = (index, keep) => {
   try { if (keep) update({ calibration: makeCalibration(take, index, os, Date.now()) }); setNotice(keep ? 'Calibration saved' : null); }
   catch (error) { setNotice(error.message); }
@@ -138,7 +138,7 @@ export default function App() {
     <Image source={require('./assets/header-icon.png')} resizeMode="contain" style={{ width: 36, height: 36, marginRight: 10 }} />
     <Text style={{ ...text, fontSize: 19, fontWeight: '600' }}>AVsync</Text>
    </View>
-   <Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => setSettings(true)} style={{ padding: 8 }}>
+   <Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => setSheet('settings')} style={{ padding: 8 }}>
     <Ionicons name="settings-outline" size={24} color={colors.ink} />
    </Pressable>
   </View>
@@ -162,13 +162,16 @@ export default function App() {
     {take && <CalibrationReview take={take} onSave={index => finishCalibration(index, true)} onRepeat={() => { setTake(null); setFlow('aim'); }} onCancel={() => finishCalibration(0, false)} />}
    </SafeAreaView>
   </Modal>
-  <Settings visible={settings} onClose={() => setSettings(false)} calibration={calibrationLabel} clock={clockLabel} onCalibrate={startCalibration}
-   onSyncClock={syncClock} syncing={syncing} keepAwake={screenAwakeEnabled(session)} onKeepAwake={value => update({ keepScreenAwake: value })}
-   onPrivacy={() => Linking.openURL('https://leeo86.github.io/mxl-avsync/privacy-en.html').catch(() => {})}
-   onDebug={() => { setSettings(false); setTimeout(() => setDebug(true), 400); }} />
-  <Debug visible={debug} onClose={() => setDebug(false)} session={session} onChange={applyDebug} report={report}
-   clockDetails={reference ? clockCheckDetails(reference) : clockError}
-   onShare={() => share({ report, reference, calibration: session.calibration, results: (session.results || []).slice(0, 5) })}
-   onClearResults={() => update({ results: [] })} onClearCalibration={() => { update({ calibration: null }); setNotice('Calibration cleared'); }} />
+  <Sheet visible={sheet !== null} onClose={() => setSheet(null)}>
+   {sheet === 'debug'
+    ? <Debug onBack={() => setSheet('settings')} session={session} onChange={applyDebug} report={report}
+     clockDetails={reference ? clockCheckDetails(reference) : clockError}
+     onShare={() => share({ report, reference, calibration: session.calibration, results: (session.results || []).slice(0, 5) })}
+     onClearResults={() => update({ results: [] })} onClearCalibration={() => { update({ calibration: null }); setNotice('Calibration cleared'); }} />
+    : <Settings onClose={() => setSheet(null)} calibration={calibrationLabel} clock={clockLabel} onCalibrate={startCalibration}
+     onSyncClock={syncClock} syncing={syncing} keepAwake={screenAwakeEnabled(session)} onKeepAwake={value => update({ keepScreenAwake: value })}
+     onPrivacy={() => Linking.openURL('https://leeo86.github.io/mxl-avsync/privacy-en.html').catch(() => {})}
+     onDebug={() => setSheet('debug')} />}
+  </Sheet>
  </SafeAreaView>;
 }

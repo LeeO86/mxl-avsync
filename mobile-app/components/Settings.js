@@ -3,7 +3,7 @@ import { Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from 'rea
 import { Button, Card, Choice, Row, colors, small, text } from './ui';
 import { latencyText, offsetText } from '../src/live.mjs';
 
-function Sheet({ visible, onClose, children }) {
+export function Sheet({ visible, onClose, children }) {
  return <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
   <View style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
    <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} />
@@ -14,8 +14,9 @@ function Sheet({ visible, onClose, children }) {
  </Modal>;
 }
 
-export function Settings({ visible, onClose, calibration, clock, onCalibrate, onSyncClock, syncing, keepAwake, onKeepAwake, onPrivacy, onDebug }) {
- return <Sheet visible={visible} onClose={onClose}>
+// Settings and Debug share one modal (UIKit cannot present a second one while the first closes).
+export function Settings({ onClose, calibration, clock, onCalibrate, onSyncClock, syncing, keepAwake, onKeepAwake, onPrivacy, onDebug }) {
+ return <>
   <Text accessibilityRole="header" style={{ ...text, fontSize: 22, marginBottom: 6 }}>Settings</Text>
   <Row label="Calibration" value={calibration} />
   <Button title="Calibrate this phone" onPress={onCalibrate} style={{ marginTop: 0, marginBottom: 10 }} />
@@ -23,24 +24,25 @@ export function Settings({ visible, onClose, calibration, clock, onCalibrate, on
   <Button title={syncing ? 'Synchronizing…' : 'Sync clock now'} disabled={syncing} onPress={onSyncClock} style={{ marginTop: 0, marginBottom: 10 }} />
   <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.line }}>
    <Text style={{ ...text, flex: 1 }}>Keep screen awake</Text>
-   <Switch accessibilityLabel="Keep screen awake" value={keepAwake} onValueChange={onKeepAwake} />
+   <Switch accessibilityLabel="Keep screen awake" value={keepAwake} onValueChange={onKeepAwake} style={{ marginRight: 4, transform: [{ scale: 0.9 }] }} />
   </View>
   <Row label="Privacy and support" onPress={onPrivacy} />
   <Row label="Debug" value="›" onPress={onDebug} />
   <Button title="Close" onPress={onClose} />
- </Sheet>;
+ </>;
 }
 
 const RATES = [[0, 'Auto'], [240, '240'], [120, '120'], [60, '60'], [30, '30']];
 
 // Everything an engineer needs and an operator does not.
-export function Debug({ visible, onClose, session, onChange, report, clockDetails, onShare, onClearResults, onClearCalibration }) {
+export function Debug({ onBack, session, onChange, report, clockDetails, onShare, onClearResults, onClearCalibration }) {
  const [server, setServer] = useState(''), [limit, setLimit] = useState(''), [tai, setTai] = useState('');
- useEffect(() => { if (visible) { setServer(session.ntpServer || ''); setLimit(String(session.clockMaxUncertaintyMs ?? 20)); setTai(String(session.taiUtcSeconds ?? 37)); } }, [visible]);
+ useEffect(() => { setServer(session.ntpServer || ''); setLimit(String(session.clockMaxUncertaintyMs ?? 20)); setTai(String(session.taiUtcSeconds ?? 37)); }, []);
  const d = report?.diagnostics || {};
  const stats = report?.captureStats || {};
  const input = { ...text, backgroundColor: colors.bg, padding: 10, borderRadius: 8, marginTop: 4 };
- return <Sheet visible={visible} onClose={onClose}>
+ return <>
+  <Pressable accessibilityRole="button" onPress={onBack} style={{ paddingBottom: 8 }}><Text style={{ ...text, color: colors.muted }}>‹ Settings</Text></Pressable>
   <Text accessibilityRole="header" style={{ ...text, fontSize: 22 }}>Debug</Text>
   <Card>
    <Text style={small}>Camera rate (fps)</Text>
@@ -73,6 +75,6 @@ export function Debug({ visible, onClose, session, onChange, report, clockDetail
   <Button title="Share diagnostics" onPress={onShare} />
   <Button title="Clear saved results" onPress={onClearResults} />
   <Button title="Clear calibration" onPress={onClearCalibration} />
-  <Button title="Close" onPress={onClose} />
- </Sheet>;
+  <Button title="Back" onPress={onBack} />
+ </>;
 }
