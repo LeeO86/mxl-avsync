@@ -42,10 +42,10 @@ class AvsyncModule : Module() {
     }
     // GNSS time is kept for later; the app does not use it (no location permission is requested).
     AsyncFunction("synchronizeGnssClock") { _: String, promise: Promise -> handler.post { startClock(promise) }; Unit }
-    Function("setScreenAwake") { on: Boolean ->
+    Function("setScreenAwake") { on: Boolean? ->
       handler.post {
         val window = appContext.currentActivity?.window ?: return@post
-        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (on == true) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
       }
       Unit
     }
