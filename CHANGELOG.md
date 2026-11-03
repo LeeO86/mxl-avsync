@@ -1,5 +1,11 @@
 # Changelog
 
+## Mobile 2.1.0 (not released yet)
+
+- Settings shows the clock as the NTP check's accuracy and its age
+  ("NTP ±1.2 ms · checked 42 s ago"). The growing 50-ppm holdover allowance
+  is only used internally and shown in Debug.
+
 ## 2.1.0 (2026-11-03) and Mobile 2.1.0 (not released yet)
 
 - **AVS3 optical code** replaces the AVS2 single white flash in every

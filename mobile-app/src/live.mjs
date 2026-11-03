@@ -75,6 +75,12 @@ export function latencyText(ms) {
  return Number.isFinite(ms) ? `${ms.toFixed(1)} ms` : '—';
 }
 
+// The user sees the NTP check's own accuracy and its age; the growing holdover allowance stays internal.
+export function clockText(estimate) {
+ const s = Math.max(0, Math.round(estimate.ageMs / 1000));
+ return `NTP ±${estimate.sampleUncertaintyMs.toFixed(1)} ms · checked ${s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`} ago`;
+}
+
 export function savedResult(reading, { calibration = null, now = Date.now() } = {}) {
  if (!reading) return null;
  return {

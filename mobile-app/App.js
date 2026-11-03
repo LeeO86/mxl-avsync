@@ -10,7 +10,7 @@ import Generate from './components/Generate';
 import Results from './components/Results';
 import { Debug, Settings, Sheet } from './components/Settings';
 import { Button, colors, small, text } from './components/ui';
-import { liveView, offsetText, savedResult, formatWhen } from './src/live.mjs';
+import { liveView, offsetText, savedResult, formatWhen, clockText } from './src/live.mjs';
 import { clockCheckDetails, clockSettings, generatorClockOptions, referenceAt, synchronizeClock, CLOCK_MAX_AGE_MS } from './src/time-reference.mjs';
 import { calibrationSummary, makeCalibration, validCalibration } from './src/workflow.mjs';
 import { generatorOptions } from './src/generator.mjs';
@@ -62,7 +62,7 @@ export default function App() {
  }, [tick]);
  const limits = useMemo(() => { try { return clockSettings(session); } catch { return clockSettings({}); } }, [session.ntpServer, session.clockMaxUncertaintyMs]);
  const clockNow = referenceAt(reference, native?.clockNow?.(), limits.maxUncertaintyMs);
- const clockLabel = syncing && !reference ? 'Synchronizing…' : clockNow.state === 'estimated' ? `NTP ±${clockNow.uncertaintyMs.toFixed(1)} ms`
+ const clockLabel = syncing && !reference ? 'Synchronizing…' : clockNow.state === 'estimated' ? clockText(clockNow)
   : clockError ? 'Not synchronized · no latency' : clockNow.state === 'uncertain' ? 'Too uncertain · no latency' : 'Not synchronized · no latency';
 
  // Calibration.
