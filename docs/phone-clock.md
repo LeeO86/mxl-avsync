@@ -10,6 +10,8 @@ mapping from the capture clock to UTC.
 Settings → Debug → NTP server selects a hostname/IP (UDP port 123), default
 `time.cloudflare.com`. The app checks the clock on its own when it starts or
 comes to the front, and again every 4 minutes (a check is valid for 5 minutes).
+When the holdover allowance (below) pushes the uncertainty past the limit, it
+checks again sooner, at most every 30 s.
 Settings → Sync clock now repeats it at once. The iOS client makes up to four
 requests, one second apart, on a worker; Android (`Sntp.kt`) makes eight,
 250 ms apart, with the same checks.

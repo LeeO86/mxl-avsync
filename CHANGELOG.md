@@ -5,6 +5,12 @@
 - Settings shows the clock as the NTP check's accuracy and its age
   ("NTP ±1.2 ms · checked 42 s ago"). The growing 50-ppm holdover allowance
   is only used internally and shown in Debug.
+- The clock is checked again as soon as the holdover allowance passes the
+  limit (at most every 30 s), not only after 4 minutes. With a ±14 ms NTP
+  check, latency was hidden from about 2 minutes after each check.
+- Video latency is shown again for a platform (PTP) source. The shared phone
+  analyzer gave it only for the phone's own generator; audio latency was not
+  affected.
 
 ## 2.1.0 (2026-11-03) and Mobile 2.1.0 (not released yet)
 

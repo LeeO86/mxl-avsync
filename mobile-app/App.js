@@ -18,6 +18,7 @@ import { screenAwakeEnabled } from './src/screen-awake.mjs';
 
 const NativeCamera = native?.supportsLiveCapture?.() ? requireNativeViewManager('Avsync') : null;
 const RESYNC_MS = CLOCK_MAX_AGE_MS - 60000; // renew the clock reference a minute before it expires
+const UNCERTAIN_RESYNC_MS = 30000; // or sooner, at most every 30 s, once the holdover passes the limit
 const TABS = [['measure', 'Measure', 'speedometer-outline'], ['generate', 'Signal', 'tv-outline'], ['results', 'Results', 'list-outline']];
 
 function loadSession() {
@@ -58,7 +59,7 @@ export default function App() {
  useEffect(() => {
   if (!foreground) return;
   const age = reference ? performance.now() - reference.receivedJsMonoMs + reference.ageAtReceiptMs : Infinity;
-  if (age > RESYNC_MS && !syncBusy.current) syncClock();
+  if ((age > RESYNC_MS || (clockNow.state === 'uncertain' && age > UNCERTAIN_RESYNC_MS)) && !syncBusy.current) syncClock();
  }, [tick]);
  const limits = useMemo(() => { try { return clockSettings(session); } catch { return clockSettings({}); } }, [session.ntpServer, session.clockMaxUncertaintyMs]);
  const clockNow = referenceAt(reference, native?.clockNow?.(), limits.maxUncertaintyMs);

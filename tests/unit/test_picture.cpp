@@ -408,6 +408,7 @@ TEST_CASE("large qr stays decodable and the sync square moves")
 
 #include "avsync/phone_analyzer.hpp"
 #include "avsync/phone_generator.hpp"
+#include "avsync/timecode.hpp"
 #include "avsync/picture_reader.hpp"
 TEST_CASE("live picture reader keeps direct path and reacquires a moving camera tile after loss") {
     PictureReader reader;
@@ -432,6 +433,7 @@ TEST_CASE("live picture reader keeps direct path and reacquires a moving camera 
 }
 
 #include "avsync/phone_generator.hpp"
+#include "avsync/timecode.hpp"
 TEST_CASE("bounded optical search refines phone tile borders in 1080p and 4K cameras") {
     PhoneGeneratorPlan plan("linux-phone-1",1,1793000000000000000LL,1000);
     Yuv422p10 frame; frame.resize(1280,720);
@@ -612,6 +614,9 @@ TEST_CASE("AVS3 through a simulated 240 fps camera: each burst within half a mil
 TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms audio") {
     // Source: the phone generator plan (720p60, 2 events/s). Video reaches the camera 30 ms after
     // its scheduled time, audio 50 ms after: AV +20 ms, latencies 30 / 50 ms on a true clock.
+    // A platform generator differs only in the source clock flag (PTP, not phone UTC).
+    for (const bool phone_source : {true, false}) {
+    INFO("phone source " << phone_source);
     const int64_t epoch_tai=1793300000000000000LL;const double epoch_host=100;
     PhoneGeneratorPlan plan("phone-e2e",2,epoch_tai,epoch_host);
     PhoneAnalyzer analyzer;
@@ -621,7 +626,7 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     std::vector<std::vector<uint8_t>> shown;
     const int frames=60*6;
     for(int n=0;n<frames;++n) {
-        PictureInfo info;info.period_ms=500;info.qr_json=qr_payload_text(plan.qr(plan.named_seq(n)));
+        PictureInfo info;info.period_ms=500;auto qr=plan.qr(plan.named_seq(n));qr.estimated_source=phone_source;info.qr_json=qr_payload_text(qr);
         render_picture(frame,info,1+n/30,n%30,30,plan.a_white(n));
         std::vector<uint8_t> small(size_t(w)*h);
         for(int y=0;y<h;++y)for(int x=0;x<w;++x)small[size_t(y)*w+x]=uint8_t(frame.y[size_t(y*2)*1280+x*2]>>2);
@@ -630,7 +635,7 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     // Audio: every event's timecode waveform at host_seconds(seq) + 50 ms.
     const int rate=48000;std::vector<float> mic(size_t(rate*7),0.f);
     for(uint64_t seq=1;seq<=12;++seq){
-        const auto wave=plan.audio(seq,rate);const size_t at=size_t(std::lround((plan.host_seconds(seq)-epoch_host+.050)*rate));
+        const auto wave=timecode_waveform(encode_timecode(plan.qr(seq).source_id,plan.qr(seq).tk,0,true,phone_source),1200,rate);const size_t at=size_t(std::lround((plan.host_seconds(seq)-epoch_host+.050)*rate));
         for(size_t i=0;i<wave.size()&&at+i<mic.size();++i)mic[at+i]+=wave[i];
     }
     const double cam=1000/239.48,start=epoch_host*1000;size_t audio_at=0;int count=0;std::string last;
@@ -658,6 +663,7 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     CHECK(std::abs(value("videoLatencyMs")-30)<.6);
     CHECK(std::abs(value("audioLatencyMs")-50)<.3);
     CHECK(value("spreadMs")<1.0);
+    }
 }
 
 TEST_CASE("phone analyzer calibration take: frames around one clap, then live again") {
