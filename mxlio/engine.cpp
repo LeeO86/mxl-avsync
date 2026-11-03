@@ -1,4 +1,5 @@
 #include "avsync/picture_reader.hpp"
+#include "avsync/optical_code.hpp"
 #include "engine.hpp"
 
 #include "domain.hpp"
@@ -290,12 +291,14 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             info.time_line = timetext;
             const int grains = std::max(1, period.grains);
             const uint64_t event_index = (index / static_cast<uint64_t>(grains)) * static_cast<uint64_t>(grains);
-            const uint64_t named = config.audio_timecode == "legacy" && index != event_index ? event_index + static_cast<uint64_t>(grains) : event_index;
-            const uint64_t named_seq = named / static_cast<uint64_t>(grains);
+            const bool legacy = config.audio_timecode == "legacy";
+            const uint64_t named_seq = legacy ? (index != event_index ? event_index + static_cast<uint64_t>(grains) : event_index) / static_cast<uint64_t>(grains)
+                                              : optical_named_seq(index, grains);
+            const uint64_t named = named_seq * static_cast<uint64_t>(grains);
             if (named_seq != qr_seq) {
                 QrPayload payload;
                 payload.timecode = config.audio_timecode != "legacy";
-                payload.qr_flash = payload.timecode;
+                payload.qr_flash = payload.optical_code = payload.timecode;
                 payload.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
                 payload.test_id = config.test_id.empty() ? config.seed() : config.test_id;
                 payload.mode = "LIVE";
@@ -311,7 +314,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             const auto source_clip = callbacks.source_image ? callbacks.source_image() : nullptr;
             info.source_image = source_clip ? source_clip->at(ms) : nullptr;
             packed = &live_picture.render(format->width, grain_rows, info, seq, frame_in_period, period.grains,
-                config.audio_timecode == "legacy" ? (seq % 2) != 0 : flash_white(frame_in_period, period.period_ms / period.grains));
+                legacy ? (seq % 2) != 0 : optical_a_white(frame_in_period, optical_chip_grains(1000.0 * grains / period.period_ms, config.event_rate), seq));
             if (callbacks.video_render) {
                 callbacks.video_render(std::chrono::duration<double>(std::chrono::steady_clock::now() - render_start).count());
             }

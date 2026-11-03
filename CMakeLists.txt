@@ -49,6 +49,7 @@ add_library(avsync-core STATIC
     core/src/marker.cpp
     core/src/grade.cpp
     core/src/qr.cpp
+    core/src/optical_code.cpp
     core/src/g711.cpp
     core/src/text.cpp
     core/src/sync_scale.cpp
@@ -76,6 +77,9 @@ target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-param
 add_executable(avsync-timecode-tool tests/tools/timecode_tool.cpp)
 target_include_directories(avsync-timecode-tool PRIVATE third_party)
 target_link_libraries(avsync-timecode-tool PRIVATE avsync-core)
+
+add_executable(avsync-optical-sim tests/tools/optical_sim.cpp)
+target_link_libraries(avsync-optical-sim PRIVATE avsync-core)
 
 enable_testing()
 add_test(NAME core COMMAND avsync-core-tests)

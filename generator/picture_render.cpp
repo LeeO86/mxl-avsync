@@ -543,9 +543,13 @@ void avs2_part(Yuv422p10& frame, int part, const PictureInfo& info, const Avs2La
                     fill_yuv(frame, g.qr_x + (x + 4) * l.unit, g.qr_y + (y + 4) * l.unit, l.unit, l.unit, {kYBlack, kYNeutralChroma, kYNeutralChroma});
         break;
     }
-    case kAvs2Marker:
-        fill_yuv(frame, g.marker_x, g.marker_y, g.marker_side, g.marker_side, {uint16_t(marker_white ? kYWhite : kYBlack), kYNeutralChroma, kYNeutralChroma});
+    case kAvs2Marker: {
+        // AVS3: field A (left half) and B (right half) are always opposite; marker_white means A white.
+        const int half = g.marker_side / 2;
+        fill_yuv(frame, g.marker_x, g.marker_y, half, g.marker_side, {uint16_t(marker_white ? kYWhite : kYBlack), kYNeutralChroma, kYNeutralChroma});
+        fill_yuv(frame, g.marker_x + half, g.marker_y, g.marker_side - half, g.marker_side, {uint16_t(marker_white ? kYBlack : kYWhite), kYNeutralChroma, kYNeutralChroma});
         break;
+    }
     case kAvs2Event:
         draw_text_box(frame, g.qr_x, g.qr_y + g.qr_size + l.gap, "Event " + std::to_string(seq) + " / " + info.offset_line, l.scale);
         break;
@@ -562,7 +566,7 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
 {
     draw_smpte_eg1(frame);
     LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
-    if(info.qr_json.starts_with("AVS2:")) {
+    if((info.qr_json.starts_with("AVS2:") || info.qr_json.starts_with("AVS3:"))) {
         const auto layout=avs2_layout(frame.width,frame.height);
         avs2_static(frame,info,layout);
         for(int part=0;part<kAvs2Parts;++part)avs2_part(frame,part,info,layout,seq,frame_in_period,period_frames,marker_white);
@@ -656,7 +660,7 @@ const std::vector<uint8_t>& LivePicture::render(int width, int rows, const Pictu
     bool marker_white)
 {
     packed_.resize(v210_line_bytes(width) * static_cast<size_t>(rows));
-    if (!info.qr_json.starts_with("AVS2:")) {
+    if (!(info.qr_json.starts_with("AVS2:") || info.qr_json.starts_with("AVS3:"))) {
         key_.clear();
         if (frame_.width != width || frame_.height != rows) frame_.resize(width, rows);
         render_picture(frame_, info, seq, frame_in_period, period_frames, marker_white);

@@ -16,7 +16,7 @@ QrPayload PhoneGeneratorPlan::qr(uint64_t seq) const {
     QrPayload p;
     p.test_id = id_; p.mode = "LIVE"; p.rate = rate_; p.format = "720p60";
     p.k = seq; p.tk = epoch_ + int64_t(seq - 1) * (1000000000LL / rate_);
-    p.source_id = source_; p.timecode = true; p.qr_flash = true; p.estimated_source = true;
+    p.source_id = source_; p.timecode = true; p.qr_flash = true; p.optical_code = true; p.estimated_source = true;
     return p;
 }
 double PhoneGeneratorPlan::host_seconds(uint64_t seq) const {
@@ -26,6 +26,9 @@ double PhoneGeneratorPlan::host_seconds(uint64_t seq) const {
 std::vector<float> PhoneGeneratorPlan::audio(uint64_t seq, int sample_rate) const {
     const auto p = qr(seq);
     return timecode_waveform(encode_timecode(source_, p.tk, 0, true, true), 1200, sample_rate);
+}
+bool PhoneGeneratorPlan::a_white(uint64_t frame) const {
+    return optical_a_white(int64_t(frame % uint64_t(period_frames())), optical_chip_grains(fps, rate_), 1 + frame / uint64_t(period_frames()));
 }
 uint64_t PhoneGeneratorPlan::frame_at(double target) const {
     if (!std::isfinite(target) || target < host_) return 0;
