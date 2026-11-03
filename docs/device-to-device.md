@@ -14,7 +14,7 @@ more of it, without a lab clock.
 
 ## The two exchanges
 
-Both use the existing AVS2 signal. The audio packet carries a source id and
+Both use the AVS3 signal. The audio packet carries a source id and
 the emission time on the emitter's own clock (`audio_send_ns`), and every
 reception time refers to the chirp onset.
 
@@ -31,7 +31,7 @@ reception time refers to the chirp onset.
      carries. Then the roles swap.
    - Each device also measures its own loopback: own onset − own emission
      time.
-   - This is the same recording as in 1. With AVS2 one combined run gives
+   - This is the same recording as in 1. With AVS3 one combined run gives
      both.
 
 ## Maths
@@ -100,7 +100,7 @@ reception time refers to the chirp onset.
    - show the distance, the loopback of each device and `θ + skew`.
 3. Audio session: `AVAudioSession` `measurement` mode, built-in route only,
    and repeat the run on a route change (C6).
-4. Video (camera ↔ screen) uses the same algebra with flash onsets. The
+4. Video (camera ↔ screen) uses the same algebra with burst times. The
    display adds 1–4 frames of jitter (C7).
 5. Combine with C4: with a trusted `θ`, the skew (in_B − in_A) follows. With a
    reference latency, the per-device split follows.

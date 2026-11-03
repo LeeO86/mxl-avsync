@@ -226,7 +226,7 @@ Events are paired by identity, not by nearest neighbour:
 1. **QR code** (top left, about 18 % of the height): changes once per second (`AVSYNC_QR_PERIOD_MS`, default 1000), error correction level M. Payload §5.6. It identifies the test and the event; it is not needed for timing.
 2. **Frame counter** (text): the grain index the generator wrote, and in LIVE mode the TAI time of the grain. The text says "frame as written by the generator"; the analyzer reports the frame it saw separately.
 3. **Free text**: `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES`, and the format, rate, audio format and set offset, drawn once per change.
-4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal flashes white (Y 940) for 100 ms from each event, then black (Y 64). Its rising edge coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
+4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal (AVS3, 2.1.0) splits it into two always-opposite fields that swap in an 8-transition burst from each event (see QR + optical code below). Its first transition coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
 7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). The live analyzer retains a fast full-raster path and can also locate/rectify an optical or scaled test picture using these fiducials.
@@ -1028,67 +1028,61 @@ identity or imply source-output calibration. Text rasterization is CoreText
 on iOS with the same bundled DejaVu font, avoiding media/GUI dependencies in
 avsync-core and desktop rendering dependencies in the mobile binary.
 
-### QR + flash signal (AVS2, 2026-10-29)
+### QR + optical code (AVS3, 2.1.0)
 
-The compact audio-timecode generator now uses the shared AVS2 video layout in
-file, MXL and iPhone sources. A large version-4 QR (33 modules, correction Q,
-four quiet modules per side) sits beside an equal 41-module flash panel with a
-four-module gap. All measurement identity is carried in the QR; the Gray strip
-and outside fiducials are absent. Colour bars, source labels/image and the
-visual sync scale remain. Legacy audio mode retains its original video layout.
+The compact audio-timecode generator (file, MXL and phone sources) uses one
+large version-4 QR (33 modules, correction Q, four quiet modules per side)
+beside a 41-module panel with a four-module gap, as in AVS2. The panel holds two
+fields: A is its left half, B its right half (both in the same rows). A and B
+are always opposite. Rest: A black (Y 64), B white (Y 940). Colour bars, source
+labels/image and the visual sync scale remain. Legacy audio mode retains its
+original video layout. See [docs/qr-flash.md](docs/qr-flash.md).
 
-AVS2 is `AVS2:` followed by 54 uppercase hexadecimal characters, encoded as QR
-alphanumeric data. The 27 big-endian bytes are: flags u8 (bit 0 LIVE, bit 1
-estimated phone source; other bits forbidden), source id u32, full event
-sequence u64, video send time i64 non-negative nanoseconds (TAI for LIVE,
-media timeline for FILE), signed source AV offset i32 in 1/16 ms, format u8
-and event rate u8 (1 or 2). Format indices 0–8 are respectively 1080p50,
-1080p25, 1080p59.94, 1080i25, 2160p50, 720p60, 720p50,
-960x540p25 and its 540p25 alias. Presentation labels are outside the payload.
-The independent CRC/FEC audio packet and its onset reference are unchanged.
+The payload is `AVS3:` followed by the 54 hexadecimal characters of the AVS2
+layout: flags u8 (bit 0 LIVE, bit 1 estimated phone source), source id u32,
+full event sequence u64, video send time i64 (TAI for LIVE, media timeline for
+FILE), source AV offset i32 in 1/16 ms, format u8 (0–8: 1080p50, 1080p25,
+1080p59.94, 1080i25, 2160p50, 720p60, 720p50, 960x540p25, 540p25) and event
+rate u8 (1 or 2). `AVS2:` payloads still parse but no longer create events.
 
-The QR changes on the source flash's first frame and remains for the complete
-event period. No next-event prediction or nearest-chirp association is used.
-A decoder passes identified QR corners in normalized capture coordinates to
-the dependency-free QrFlashTracker. It projects only sparse photometry samples
-in the adjacent panel and static finder patterns; it never rectifies a raster.
-Two black observations then two white observations confirm the rising edge,
-retaining the first white frame and its original index/arrival metadata.
-Mixed transition frames may bridge a bounded 60-ms black-to-white interval.
-A QR captured 25 ms to 85% of a source period after that edge identifies it;
-a late decoding callback does not change the edge timestamp. Missing identity
-or edges, stale geometry, source changes and duplicates cannot create events.
-Geometry expires after 750 ms. The normal QR retry target is 100 ms; scans are
-bounded to one in flight on iOS. Motion/finder failure withholds measurements.
+**Burst.** Around event k the fields swap 8 times at chip offsets {0, 1, 2, 4,
+5, 6, 7, 8} (k even) or {0, 1, 2, 3, 4, 6, 7, 8} (k odd); transition 0 is the
+event time T_k, the audio onset at zero offset. A chip is the whole number of
+grains closest to 40 ms at 2 events/s and 80 ms at 1 event/s, at least one
+(`optical_chip_grains`). The burst always ends in the rest state and leaves a
+pause of at least 150 ms before the next one.
 
-iOS adaptively schedules that QR worker around observed pulses (pre-pulse
-geometry and eligible post-transition identity), with a 350-ms geometry refresh
-and the existing 100-ms retry cap. The cheap flash probe still runs on every
-camera frame, including outside the predicted window. Predictions never create
-events or replace their original timestamps. Deep module verification occurs
-only on actual white-pulse frames; unchanged black-frame evidence does not
-trigger another identity match. Phone acquisition throttles unidentified
-full-raster searches; a detected legacy pose restores its normal legacy path.
-Bounded normalized photometry traces and separated CPU/camera-buffer timings
-permit physical diagnosis without storing camera images.
+**QR timing.** The QR names event k from grain k·P − P/2 to k·P + P/2
+(`optical_named_seq`), so it is still during the whole burst.
 
-A crop is supported only while the QR including quiet zone and the sampled
-flash area remain visible. Frozen pictures cannot produce repeating events.
-AVS2 does not claim the old strip's per-frame drop/duplicate diagnostics.
-Optical paths retain unknown capture uncertainty; phone-clock latency remains
-explicitly estimated. Digital-path grain timing is still the received frame
-index; arrival time remains the first-edge arrival, not QR processing time.
+**Detection** (`OpticalCodeDetector`, used by the analyzer, the file tool and
+both phone apps through `QrFlashTracker`). The tracker projects a 5×5 grid into
+each field through the QR's corners and takes the medians a and b. Each field
+is scaled to its own 5th–95th percentile over the last period and linearized
+with gamma 2.2; d = A − B. A hysteresis of ±0.3 finds each transition. Its
+A = B time comes from the samples on the edge, each standing for the centre of
+its exposure (digital grains integrate the whole grain): a line fit over the
+monotonic edge samples, the box model when one sample is on the edge, or the
+middle of the gap between two exposures. A burst ends after a pause of 3.2
+chips. It is fitted to both patterns and needs at least 6 matched crossings
+(tolerance 0.4 chip), 3 rising and 3 falling. Its time is the mean residual
+after dropping outliers beyond max(6 ms, 3.5 robust σ). Digital grains give
+the exact grain time.
 
-For AVS2 identity, up to 32 sparse 33×33 module-center samples are retained
-from the start of each pulse. The later decoded QR is re-encoded using the
-same fixed version/ECC/mask-selection rules; at least 80% confidently sampled
-modules and zero contradictory confident bits are required in one sample.
-Unknown/transition modules are erased, not corrected by a permissive timing
-window. A QR already observed before the pulse cannot identify a new pulse.
-This prevents frozen QR or skipped-event callbacks from relabelling an edge.
-Nayuki is vendored into the portable core for this check, with no new external
-media/GUI dependency. Sampling occurs only within the first 100 ms of the pulse and stops after identification. This allows QR pixels to settle after the flash has already started.
+**Identity.** A burst takes the sequence of a QR captured within 3/8 of a
+period of it, with matching parity and later than the last named event. With
+no such QR after half a period, it counts on from the last named burst on the
+event grid (within 0.12 period, matching parity, up to 20 s). Source changes,
+expired geometry (750 ms), frozen pictures and wrong-parity QRs create no
+events. Digital-path arrival, index and TAI fields come from the grain nearest
+transition 0.
 
+**Phone analyzer** (`PhoneAnalyzer`, docs/mobile-native.md). One live session
+for iOS and Android: frames, audio and QR results on the capture clock in, a
+JSON report about once a second out. The reading is the median AV offset of the
+last 8 valid pairs within 10 s (at least 3) with the 10–90 % spread; video and
+audio latency are the medians of the per-event latencies against device UTC
+(the app adds its NTP correction).
 
 ### AVS2 presentation (2.0.0)
 
