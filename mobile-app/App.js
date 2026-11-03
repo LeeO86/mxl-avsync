@@ -35,7 +35,7 @@ export default function App() {
  const [foreground, setForeground] = useState(AppState.currentState === 'active');
  useEffect(() => { const s = AppState.addEventListener('change', value => setForeground(value === 'active')); return () => s.remove(); }, []);
  const [cameraPermission, requestCamera] = useCameraPermissions(), [micPermission, requestMic] = useMicrophonePermissions();
- const granted = cameraPermission?.granted && micPermission?.granted;
+ const granted = Boolean(cameraPermission?.granted && micPermission?.granted);
 
  // Live reports.
  const camera = useRef(null);
@@ -118,7 +118,7 @@ export default function App() {
  };
 
  const measuring = tab === 'measure' && foreground;
- const awake = screenAwakeEnabled(session) && measuring && granted;
+ const awake = Boolean(screenAwakeEnabled(session) && measuring && granted);
  useEffect(() => { native?.setScreenAwake?.(awake); return () => native?.setScreenAwake?.(false); }, [awake]);
  const applyDebug = patch => {
   try { clockSettings({ ...session, ...patch }); update(patch); if ('captureFps' in patch) restart(); }

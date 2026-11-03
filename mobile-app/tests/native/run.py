@@ -2,6 +2,7 @@
 simulated AVS3 camera capture. Requires Xcode and a booted arm64 iOS simulator.
 """
 import json
+import math
 from pathlib import Path
 import subprocess
 import tempfile
@@ -37,7 +38,10 @@ with tempfile.TemporaryDirectory(prefix='avsync-native-') as temp:
 
     take = spawn('calibration')
     assert take['kind'] == 'calibration', take
-    assert len(take['frames']) > 100 and abs(take['spikeTimeMs'] - (2300 - 3.1)) < 15, {k: take[k] for k in take if k != 'frames'}
+    # The take starts at the first pushed camera frame: the first 239.48 fps frame from 3.1 ms once the 30 ms display delay has passed.
+    camera = 1000 / 239.48
+    first = 3.1 + math.ceil((30 - 3.1) / camera) * camera
+    assert len(take['frames']) > 100 and abs(take['spikeTimeMs'] - (2300 - first)) < 2, {k: take[k] for k in take if k != 'frames'}
     assert all(Path(unquote(urlparse(frame['uri']).path)).is_file() for frame in take['frames'])
     assert Path(unquote(urlparse(take['uri']).path)).is_file() and len(take['waveform']) >= 200
     print(f"PASS: native AVS3 live: AV {reading['offsetMs']:+.2f} ms (+20), video {reading['videoLatencyMs']:.2f} ms (30), "
