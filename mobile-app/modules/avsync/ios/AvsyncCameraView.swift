@@ -2,45 +2,33 @@ import AVFoundation
 import Vision
 import ExpoModulesCore
 
+// Live camera + microphone capture for the shared PhoneAnalyzer (docs/mobile-native.md).
+// Queues: control (session/device), samples (capture callbacks and the analyzer),
+// qrWorker (Vision), analysis (polls a snapshot), main (preview and events).
 final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
   let onReport = EventDispatcher()
   private let session = AVCaptureSession()
   private let control = DispatchQueue(label: "avsync.camera.control")
   private let samples = DispatchQueue(label: "avsync.camera.samples", qos: .userInitiated)
-  private let processor = AVSyncStreamAnalyzer()
-  private let analysis = DispatchQueue(label:"avsync.analysis",qos:.userInitiated,autoreleaseFrequency:.workItem)
-  private var analysisBusy = false
-  private var preview: AVCaptureVideoPreviewLayer!
-  private var configured = false
-  private var targetFps = 0.0
-  private var requestedFps = 120.0
-  private var cameraDevice: AVCaptureDevice?
-  private let telemetry = CaptureTelemetry()
-  private var lastPoll = 0.0
-  private var taiUtcSeconds = 37.0
+  private let analysis = DispatchQueue(label: "avsync.analysis", qos: .userInitiated, autoreleaseFrequency: .workItem)
   private let qrWorker = DispatchQueue(label: "avsync.qr", qos: .utility)
-  private var qrBusy = false
-  private var lastQrScan = -10.0
-  private var generation = 0
-  private var captureMode = "unknown"
-  private var capturedSampleRate = 0.0
+  private let processor = AVSyncPhoneAnalyzer()
+  private let telemetry = CaptureTelemetry()
+  private var preview: AVCaptureVideoPreviewLayer!
   private let pictureOutline = CAShapeLayer()
   private var outlineTracker = PreviewOutlineTracker()
   private var outlineWatchdog: Timer?
-  private var active = true
-  private var background = false
-  private let diagnostics = DispatchQueue(label: "avsync.diagnostics")
-  private var diagnosticReports: [[String: Any]] = []
   private var notifications: [NSObjectProtocol] = []
+  // control queue
+  private var configured = false, cameraDevice: AVCaptureDevice?, requestedFps = 0.0, lockGeneration = 0
+  // samples queue
+  private var analysisBusy = false, qrBusy = false, lastQrScan = -10.0, lastPoll = 0.0, generation = 0
+  private var targetFps = 0.0, captureMode = "unknown", capturedSampleRate = 0.0, exposureMs = 0.0
+  // main queue
+  private var active = true, background = false
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
-    processor.setSparseAcquisition(true)
-    if let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-       let data = try? Data(contentsOf: directory.appendingPathComponent("avsync-diagnostics.json")),
-       let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
-      diagnosticReports = Array(rows.suffix(120))
-    }
     preview = AVCaptureVideoPreviewLayer(session: session)
     preview.videoGravity = .resizeAspectFill
     layer.addSublayer(preview)
@@ -50,107 +38,61 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     pictureOutline.actions = ["path": NSNull(), "strokeColor": NSNull()]
     layer.addSublayer(pictureOutline)
     outlineWatchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.drawPicture() }
-    notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = true; self?.updateRunning() })
-    notifications.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = false; self?.updateRunning() })
-    notifications.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object:nil, queue:.main) { [weak self] _ in
+    let center = NotificationCenter.default
+    notifications.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = true; self?.updateRunning() })
+    notifications.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in self?.background = false; self?.updateRunning() })
+    notifications.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
       guard let self else { return }
       self.clearOutline()
-      self.samples.async { self.generation += 1; self.processor.reset(); self.emit(["kind":"error","message":"Audio route changed · capture restarted; check calibration compatibility"]) }
+      self.samples.async { self.restart(); self.emit(["kind": "error", "message": "Audio input or output changed · measurement restarted"]) }
     })
   }
-  private func captureContext() -> [String:Any] {
-    var system = utsname(); uname(&system)
-    let model = Mirror(reflecting:system.machine).children.compactMap { item -> String? in
-      guard let value = item.value as? Int8, value != 0 else { return nil }; return String(UnicodeScalar(UInt8(bitPattern:value)))
-    }.joined()
-    let audio = AVAudioSession.sharedInstance()
-    let route = audio.currentRoute.inputs.map { $0.portType.rawValue }.sorted().joined(separator:"+") + "/" + audio.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator:"+")
-    return ["platform":"ios","model":model,"os":UIDevice.current.systemVersion,"audioRoute":route,
-            "sampleRate":capturedSampleRate,"cameraMode":captureMode]
-  }
-  override func layoutSubviews() { super.layoutSubviews(); preview.frame = bounds; drawPicture() }
-  private func observePicture(_ value: [String: Any], at now: Double) {
-    let rows = value["points"] as? [[String: Double]] ?? []
-    let points = value["found"] as? Bool == true ? rows.compactMap { row -> CGPoint? in
-      guard let x=row["x"], let y=row["y"] else { return nil }; return CGPoint(x:x,y:y)
-    } : []
-    outlineTracker.observe(points, image:CGSize(width:(value["width"] as? Double) ?? 0,height:(value["height"] as? Double) ?? 0), decoded:value["codeDecoded"] as? Bool == true, at:now)
-    drawPicture()
-  }
-  private func clearOutline() { outlineTracker.reset(); pictureOutline.path=nil }
-  private func drawPicture() {
-    pictureOutline.frame = bounds
-    guard let outline=outlineTracker.current(at:ProcessInfo.processInfo.systemUptime) else { pictureOutline.path=nil; return }
-    let mapped=previewPoints(outline.points,image:outline.image,view:bounds.size)
-    guard mapped.count == 4 else { pictureOutline.path=nil;return }
-    let path=UIBezierPath();path.move(to:mapped[0]);for point in mapped.dropFirst(){path.addLine(to:point)};path.close()
-    pictureOutline.path=path.cgPath
-    pictureOutline.strokeColor=(outline.decoded ? UIColor.systemGreen : UIColor.systemOrange).cgColor
-    pictureOutline.opacity=outline.held ? 0.45 : 1
-  }
-  func setTaiUtcOffset(_ seconds: Double) { samples.async { [weak self] in self?.taiUtcSeconds = seconds } }
-  override func didMoveToWindow() { super.didMoveToWindow(); updateRunning() }
   deinit {
     outlineWatchdog?.invalidate()
     for notification in notifications { NotificationCenter.default.removeObserver(notification) }
     let old = session
     control.async { if old.isRunning { old.stopRunning() } }
   }
+  override func layoutSubviews() { super.layoutSubviews(); preview.frame = bounds; drawPicture() }
+  override func didMoveToWindow() { super.didMoveToWindow(); updateRunning() }
+
+  // MARK: props and methods
+
   func setActive(_ value: Bool) { active = value; updateRunning() }
+  func setTaiUtcOffset(_ seconds: Double) { samples.async { [weak self] in self?.processor.setTaiUtcOffset(seconds) } }
   func setRequestedFps(_ fps: Double) {
-    guard [0,60,120,240].contains(fps) else { return }
+    guard [0, 30, 60, 120, 240].contains(fps) else { return }
     control.async { [weak self] in
       guard let self, fps != self.requestedFps else { return }
-      let old=self.requestedFps
-      guard self.configured, let device=self.cameraDevice else { self.requestedFps=fps;return }
-      let wasRunning=self.session.isRunning
-      if wasRunning { self.session.stopRunning() }
-      self.samples.sync { self.generation += 1 } // Invalidate old DSP before changing mode/report identity.
-      self.requestedFps=fps
+      self.requestedFps = fps
+      guard self.configured, let device = self.cameraDevice else { return }
+      let running = self.session.isRunning
+      if running { self.session.stopRunning() }
       do {
         self.session.beginConfiguration()
-        do { try self.applyFrameRate(device) } catch { self.session.commitConfiguration();throw error }
-        self.session.commitConfiguration()
-        self.samples.sync { self.generation += 1;self.processor.reset();self.telemetry.reset(fps:self.targetFps) }
-        DispatchQueue.main.async { self.clearOutline() }
-        self.samples.async { self.emit(["kind":"status","fps":0,"message":"Capture rate changed · collecting fresh events"]) }
+        defer { self.session.commitConfiguration() }
+        try self.applyFrameRate(device)
       } catch {
-        self.requestedFps=old
-        self.samples.async { self.emit(["kind":"error","message":error.localizedDescription,"requestedFps":fps,"captureRateRejected":old]) }
+        self.samples.async { self.emit(["kind": "error", "message": error.localizedDescription]) }
       }
-      if wasRunning { self.session.startRunning() }
+      self.samples.sync { self.restart() }
+      if running { self.session.startRunning(); self.scheduleExposureLock() }
     }
+  }
+  func beginCalibration() {
+    DispatchQueue.main.async { [weak self] in self?.clearOutline() }
+    samples.async { [weak self] in guard let self else { return }; self.generation += 1; self.processor.beginCalibration() }
+  }
+  // Re-aim: drop the history and lock exposure again for the new view.
+  func resumeAnalysis() {
+    DispatchQueue.main.async { [weak self] in self?.clearOutline() }
+    samples.async { [weak self] in self?.restart() }
+    control.async { [weak self] in self?.scheduleExposureLock() }
   }
 
-  func beginCalibration() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.beginCalibration() } }
-  func resumeAnalysis() { DispatchQueue.main.async { [weak self] in self?.clearOutline() }; samples.async { [weak self] in self?.generation += 1; self?.processor.reset() } }
-  private func emit(_ value: [String: Any]) {
-    var report = value; report["configuredFps"] = targetFps; report["captureContext"] = captureContext();report["requestedFps"] = value["requestedFps"] ?? requestedFps
-    report["captureStats"] = telemetry.snapshot(events:value["events"] as? [[String:Any]] ?? [])
-    if let captureMs = value["timeMs"] as? Double, let clock = session.masterClock,
-       let offsetMs = value["deviceUtcOffsetMs"] as? Double {
-      let host = CMSyncConvertTime(CMTime(seconds:captureMs/1000,preferredTimescale:1_000_000_000), from:clock, to:CMClockGetHostTimeClock())
-      let hostMs = CMTimeGetSeconds(host)*1000
-      if hostMs.isFinite {
-        report["clockMapping"] = ["monotonicMs":hostMs,"deviceUnixMs":captureMs+offsetMs,
-                                 "clockId":PhoneClock.identifier,"timebase":"ios-host"]
-      }
-    }
-    if report["kind"] as? String != "calibration" {
-      let snapshot = report
-      diagnostics.async { [weak self] in
-        guard let self else { return }
-        var row = snapshot; row["savedAt"] = Date().timeIntervalSince1970 * 1000
-        self.diagnosticReports.append(row)
-        if self.diagnosticReports.count > 120 { self.diagnosticReports.removeFirst() }
-        if let data = try? JSONSerialization.data(withJSONObject: self.diagnosticReports),
-           let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-          try? data.write(to: directory.appendingPathComponent("avsync-diagnostics.json"), options: .atomic)
-        }
-      }
-    }
-    DispatchQueue.main.async { [weak self] in self?.onReport(report) }
-  }
+  // MARK: session
+
+  private func restart() { generation += 1; processor.reset(); telemetry.reset(fps: targetFps) }
   private func updateRunning() {
     let shouldRun = window != nil && active && !background
     control.async { [weak self] in
@@ -158,7 +100,11 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       if shouldRun {
         do {
           if !self.configured { try self.configure() }
-          if !self.session.isRunning { self.samples.sync { self.generation += 1; self.processor.reset();self.telemetry.reset(fps:self.targetFps) }; self.session.startRunning() }
+          if !self.session.isRunning {
+            self.samples.sync { self.restart() }
+            self.session.startRunning()
+            self.scheduleExposureLock()
+          }
         } catch { self.samples.async { self.emit(["kind": "error", "message": error.localizedDescription]) } }
       } else if self.session.isRunning {
         self.samples.sync { self.generation += 1 }
@@ -176,6 +122,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
           let microphone = AVCaptureDevice.default(for: .audio) else {
       throw NSError(domain: "Avsync", code: 2, userInfo: [NSLocalizedDescriptionKey: "Camera or microphone unavailable on this device."])
     }
+    // Calibration review plays sound; always take the audio session back for recording.
     let audioSession = AVAudioSession.sharedInstance()
     try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
     try audioSession.setPreferredSampleRate(48000)
@@ -185,7 +132,9 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     session.automaticallyConfiguresApplicationAudioSession = false
     let videoInput = try AVCaptureDeviceInput(device: device)
     let audioInput = try AVCaptureDeviceInput(device: microphone)
-    guard session.canAddInput(videoInput), session.canAddInput(audioInput) else { throw NSError(domain: "Avsync", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cannot configure camera/audio input."]) }
+    guard session.canAddInput(videoInput), session.canAddInput(audioInput) else {
+      throw NSError(domain: "Avsync", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cannot open the camera and microphone."])
+    }
     session.addInput(videoInput); session.addInput(audioInput)
     let video = AVCaptureVideoDataOutput()
     video.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
@@ -193,7 +142,9 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     video.setSampleBufferDelegate(self, queue: samples)
     let audio = AVCaptureAudioDataOutput()
     audio.setSampleBufferDelegate(self, queue: samples)
-    guard session.canAddOutput(video), session.canAddOutput(audio) else { throw NSError(domain: "Avsync", code: 4, userInfo: [NSLocalizedDescriptionKey: "Cannot configure synchronized capture outputs."]) }
+    guard session.canAddOutput(video), session.canAddOutput(audio) else {
+      throw NSError(domain: "Avsync", code: 4, userInfo: [NSLocalizedDescriptionKey: "Cannot start synchronized capture."])
+    }
     session.addOutput(video); session.addOutput(audio)
     if let connection = video.connection(with: .video) {
       if connection.isVideoOrientationSupported { connection.videoOrientation = .portrait }
@@ -201,114 +152,188 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     }
     DispatchQueue.main.async { [weak self] in self?.preview.connection?.videoOrientation = .portrait }
     try applyFrameRate(device)
-    cameraDevice=device
-    samples.sync { telemetry.reset(fps:targetFps) }
+    cameraDevice = device
     configured = true
-    samples.async { self.emit(["kind": "status", "fps": 0, "message": "Camera ready. Live analysis starts as frames and audio arrive."]) }
   }
+  // 0 = automatic: the fastest mode the camera has (up to 240 fps).
   private func applyFrameRate(_ device: AVCaptureDevice) throws {
-    let formats=device.formats
-    var ranges=[CaptureFormatRange](), source=[(AVCaptureDevice.Format, AVFrameRateRange)]()
-    for (index,format) in formats.enumerated() {
-      let size=CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-      for range in format.videoSupportedFrameRateRanges {
-        ranges.append(CaptureFormatRange(format:index,width:Int(size.width),height:Int(size.height),minFps:range.minFrameRate,maxFps:range.maxFrameRate))
-        source.append((format,range))
+    var ranges = [CaptureFormatRange](), source = [(AVCaptureDevice.Format, AVFrameRateRange)]()
+    for (index, format) in device.formats.enumerated() {
+      let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+      guard size.width >= 1280 else { continue }
+      for range in format.videoSupportedFrameRateRanges where range.maxFrameRate <= 240.5 {
+        ranges.append(CaptureFormatRange(format: index, width: Int(size.width), height: Int(size.height), minFps: range.minFrameRate, maxFps: range.maxFrameRate))
+        source.append((format, range))
       }
     }
-    guard let choice=chooseCaptureFormat(ranges,cap:requestedFps) else {
-      throw NSError(domain:"Avsync",code:5,userInfo:[NSLocalizedDescriptionKey:"Requested camera rate is unsupported. Choose another rate."])
+    guard let choice = chooseCaptureFormat(ranges, cap: requestedFps == 30 ? 60 : requestedFps) else {
+      throw NSError(domain: "Avsync", code: 5, userInfo: [NSLocalizedDescriptionKey: "This camera rate is not supported."])
     }
-    let selected=source[choice.range]
+    let selected = source[choice.range]
+    let fps = requestedFps == 30 ? 30 : choice.fps
     try device.lockForConfiguration()
     defer { device.unlockForConfiguration() }
-    device.activeFormat=selected.0
-    let duration=abs(choice.fps-selected.1.maxFrameRate)<0.0001 ? selected.1.minFrameDuration : CMTime(seconds:1/choice.fps,preferredTimescale:1_000_000_000)
-    device.activeVideoMinFrameDuration=duration;device.activeVideoMaxFrameDuration=duration
-    targetFps=choice.fps
-    let size=CMVideoFormatDescriptionGetDimensions(selected.0.formatDescription)
-    captureMode="\(size.width)x\(size.height)@\(choice.fps)"
+    device.activeFormat = selected.0
+    let duration = abs(fps - selected.1.maxFrameRate) < 0.0001 ? selected.1.minFrameDuration : CMTime(seconds: 1 / fps, preferredTimescale: 1_000_000_000)
+    device.activeVideoMinFrameDuration = duration
+    device.activeVideoMaxFrameDuration = duration
+    // Automatic again until the lock below.
+    if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+    if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+    if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
+    let size = CMVideoFormatDescriptionGetDimensions(selected.0.formatDescription)
+    let mode = "\(size.width)x\(size.height)@\(Int(fps.rounded()))"
+    samples.async { [weak self] in self?.targetFps = fps; self?.captureMode = mode }
   }
+  // After 1.5 s of automatic exposure and focus: lock focus and white balance, and expose for
+  // the whole frame interval at the ISO that keeps the same brightness. A full-frame exposure
+  // turns each light edge into a ramp across one frame, which the core times exactly.
+  private func scheduleExposureLock() {
+    lockGeneration += 1
+    let ticket = lockGeneration
+    if let device = cameraDevice, (try? device.lockForConfiguration()) != nil {
+      if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+      if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+      if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
+      device.unlockForConfiguration()
+    }
+    control.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+      guard let self, ticket == self.lockGeneration, let device = self.cameraDevice, self.session.isRunning,
+            (try? device.lockForConfiguration()) != nil else { return }
+      defer { device.unlockForConfiguration() }
+      let frame = device.activeVideoMinFrameDuration, longest = device.activeFormat.maxExposureDuration
+      let duration = CMTimeCompare(frame, longest) <= 0 ? frame : longest
+      let iso = min(max(device.iso * Float(device.exposureDuration.seconds / duration.seconds), device.activeFormat.minISO), device.activeFormat.maxISO)
+      if device.isExposureModeSupported(.custom) { device.setExposureModeCustom(duration: duration, iso: iso, completionHandler: nil) }
+      if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+      if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
+      let ms = duration.seconds * 1000
+      self.samples.async { self.exposureMs = ms }
+    }
+  }
+
+  // MARK: reports and preview
+
+  private func captureContext() -> [String: Any] {
+    var system = utsname(); uname(&system)
+    let model = Mirror(reflecting: system.machine).children.compactMap { item -> String? in
+      guard let value = item.value as? Int8, value != 0 else { return nil }; return String(UnicodeScalar(UInt8(bitPattern: value)))
+    }.joined()
+    let audio = AVAudioSession.sharedInstance()
+    let route = audio.currentRoute.inputs.map { $0.portType.rawValue }.sorted().joined(separator: "+") + "/" + audio.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator: "+")
+    return ["platform": "ios", "model": model, "os": UIDevice.current.systemVersion, "audioRoute": route,
+            "sampleRate": capturedSampleRate, "cameraMode": captureMode]
+  }
+  // samples queue
+  private func emit(_ value: [String: Any]) {
+    var report = value
+    report["configuredFps"] = targetFps
+    report["exposureMs"] = exposureMs
+    report["captureContext"] = captureContext()
+    report["captureStats"] = telemetry.snapshot()
+    if let captureMs = value["timeMs"] as? Double, let offsetMs = value["deviceUtcOffsetMs"] as? Double, let clock = session.masterClock {
+      let host = CMSyncConvertTime(CMTime(seconds: captureMs / 1000, preferredTimescale: 1_000_000_000), from: clock, to: CMClockGetHostTimeClock())
+      let hostMs = CMTimeGetSeconds(host) * 1000
+      if hostMs.isFinite {
+        report["clockMapping"] = ["monotonicMs": hostMs, "deviceUnixMs": captureMs + offsetMs, "clockId": PhoneClock.identifier, "timebase": "ios-host"]
+      }
+    }
+    DispatchQueue.main.async { [weak self] in self?.onReport(report) }
+  }
+  private func observePicture(_ value: [String: Any], at now: Double) {
+    let rows = value["points"] as? [[String: Double]] ?? []
+    let points = value["found"] as? Bool == true ? rows.compactMap { row -> CGPoint? in
+      guard let x = row["x"], let y = row["y"] else { return nil }; return CGPoint(x: x, y: y)
+    } : []
+    outlineTracker.observe(points, image: CGSize(width: (value["width"] as? Double) ?? 0, height: (value["height"] as? Double) ?? 0), decoded: true, at: now)
+    drawPicture()
+  }
+  private func clearOutline() { outlineTracker.reset(); pictureOutline.path = nil }
+  private func drawPicture() {
+    pictureOutline.frame = bounds
+    guard let outline = outlineTracker.current(at: ProcessInfo.processInfo.systemUptime) else { pictureOutline.path = nil; return }
+    let mapped = previewPoints(outline.points, image: outline.image, view: bounds.size)
+    guard mapped.count == 4 else { pictureOutline.path = nil; return }
+    let path = UIBezierPath(); path.move(to: mapped[0]); for point in mapped.dropFirst() { path.addLine(to: point) }; path.close()
+    pictureOutline.path = path.cgPath
+    pictureOutline.strokeColor = UIColor.systemGreen.cgColor
+    pictureOutline.opacity = outline.held ? 0.45 : 1
+  }
+
+  // MARK: capture callbacks (samples queue)
+
   func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     guard output is AVCaptureVideoDataOutput else { return }
-    let value=CMGetAttachment(sampleBuffer,key:kCMSampleBufferAttachmentKey_DroppedFrameReason,attachmentModeOut:nil) as? String
-    let reason=value == kCMSampleBufferDroppedFrameReason_FrameWasLate as String ? "late" : value == kCMSampleBufferDroppedFrameReason_OutOfBuffers as String ? "outOfBuffers" : value == kCMSampleBufferDroppedFrameReason_Discontinuity as String ? "discontinuity" : "unknown"
-    telemetry.drop(reason:reason)
+    let value = CMGetAttachment(sampleBuffer, key: kCMSampleBufferAttachmentKey_DroppedFrameReason, attachmentModeOut: nil) as? String
+    telemetry.drop(reason: value == kCMSampleBufferDroppedFrameReason_FrameWasLate as String ? "late" : value == kCMSampleBufferDroppedFrameReason_OutOfBuffers as String ? "outOfBuffers" : "other")
   }
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-    let started=PhoneClock.nowMs(),isVideo=output is AVCaptureVideoDataOutput
-    defer { telemetry.processing(isVideo ? "video" : "audio",ms:PhoneClock.nowMs()-started) }
+    let started = PhoneClock.nowMs(), isVideo = output is AVCaptureVideoDataOutput
+    defer { telemetry.processing(isVideo ? "video" : "audio", ms: PhoneClock.nowMs() - started) }
     autoreleasepool {
       if isVideo {
-        telemetry.frame(at:CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))*1000)
-        let work=processor.pushVideo(sampleBuffer)
-        telemetry.processing("videoLock",ms:work.lockMs)
-        telemetry.processing("videoProbe",ms:work.processMs)
-        telemetry.processing("videoUnlock",ms:work.unlockMs)
-        telemetry.videoPath(Int(work.path))
-        let scanTime = ProcessInfo.processInfo.systemUptime
-        let frameTime=CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))*1000
-        if !qrBusy && scanTime - lastQrScan >= 0.1, processor.qrScanSuggested(at:frameTime), let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
-          qrBusy = true; lastQrScan = scanTime
-          let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000
-          let captureGeneration = generation
-          qrWorker.async { [weak self] in
-            let qrStarted=PhoneClock.nowMs()
-            let result=AVSyncQRCodeReader.read(pixel) ?? [:]
-            let detections = result["detections"] as? [[String: Any]] ?? []
-            let timings=result["timingsMs"] as? [NSNumber] ?? []
-            let qrElapsed=PhoneClock.nowMs()-qrStarted
-            self?.samples.async { [weak self] in
-              guard let self else { return }; self.qrBusy = false
-              guard self.generation == captureGeneration else { return }
-              self.telemetry.processing("qrVision",ms:qrElapsed)
-              if let first=timings.first { self.telemetry.processing("qrVisionFirst",ms:first.doubleValue) }
-              if timings.count>1 { self.telemetry.processing("qrVisionFallback",ms:timings[1].doubleValue) }
-              let applyStarted=PhoneClock.nowMs()
-              for detection in detections { self.processor.observeQRDetection(detection, timeMs: timestamp) }
-              self.telemetry.processing("qrApply",ms:PhoneClock.nowMs()-applyStarted)
-            }
-          }
-        }
+        let frameTime = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000
+        telemetry.frame(at: frameTime)
+        processor.pushVideo(sampleBuffer, exposureMs: exposureMs)
+        scanQR(sampleBuffer, at: frameTime)
       } else {
         if let description = CMSampleBufferGetFormatDescription(sampleBuffer), let format = CMAudioFormatDescriptionGetStreamBasicDescription(description) { capturedSampleRate = format.pointee.mSampleRate }
         processor.pushAudio(sampleBuffer)
       }
       let now = ProcessInfo.processInfo.systemUptime
-      if now - lastPoll > 0.1 {
-        let housekeepingStarted=PhoneClock.nowMs()
-        defer { telemetry.processing("housekeeping",ms:PhoneClock.nowMs()-housekeepingStarted) }
-        lastPoll = now
-        if let clock = session.masterClock {
-          let before = CMTimeGetSeconds(CMClockGetTime(clock)) * 1000
-          let unix = Date().timeIntervalSince1970 * 1000
-          let after = CMTimeGetSeconds(CMClockGetTime(clock)) * 1000
-          processor.setClockAnchor((before + after) / 2, unixTimeMs: unix)
-        }
-        processor.setTaiUtcOffset(taiUtcSeconds)
-        let picture = processor.pictureObservation() as? [String: Any] ?? [:]
-        DispatchQueue.main.async { [weak self] in self?.observePicture(picture, at:now) }
-        if let report=processor.pollCalibration() as? [String:Any] { emit(report) }
-        else if !analysisBusy {
-          let copyStart=PhoneClock.nowMs()
-          if let snapshot=processor.liveSnapshotForPolling() {
-            telemetry.processing("snapshot",ms:PhoneClock.nowMs()-copyStart)
-            analysisBusy=true
-            let captureGeneration=generation
-            let captureSignature=captureContext()
-            analysis.async { [weak self] in
-              let started=PhoneClock.nowMs()
-              let report=snapshot.poll() as? [String:Any]
-              let elapsed=PhoneClock.nowMs()-started
-              self?.samples.async { [weak self] in
-                guard let self else { return };self.analysisBusy=false
-                guard self.generation == captureGeneration, NSDictionary(dictionary:captureSignature).isEqual(to:self.captureContext()), self.processor.acceptLiveAnalysis(snapshot) else { return }
-                self.telemetry.processing("poll",ms:elapsed)
-                if var report { report["analysisMode"]="async-snapshot-v1";report["analysisDelayMs"]=PhoneClock.nowMs()-copyStart;self.emit(report) }
-              }
-            }
-          }
-        }
+      if now - lastPoll > 0.1 { lastPoll = now; housekeeping(at: now) }
+    }
+  }
+  private func scanQR(_ sampleBuffer: CMSampleBuffer, at frameTime: Double) {
+    let now = ProcessInfo.processInfo.systemUptime
+    guard !qrBusy, now - lastQrScan >= 0.1, processor.qrScanSuggested(at: frameTime), let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+    qrBusy = true; lastQrScan = now
+    let ticket = generation
+    qrWorker.async { [weak self] in
+      let started = PhoneClock.nowMs()
+      let detections = AVSyncQRCodeReader.read(pixel)?["detections"] as? [[String: Any]] ?? []
+      let elapsed = PhoneClock.nowMs() - started
+      self?.samples.async { [weak self] in
+        guard let self else { return }
+        self.qrBusy = false
+        guard self.generation == ticket else { return }
+        self.telemetry.processing("qrVision", ms: elapsed)
+        for detection in detections { self.processor.observeQRDetection(detection, timeMs: frameTime) }
+      }
+    }
+  }
+  private func housekeeping(at now: Double) {
+    if let clock = session.masterClock {
+      let before = CMTimeGetSeconds(CMClockGetTime(clock)) * 1000
+      let unix = Date().timeIntervalSince1970 * 1000
+      let after = CMTimeGetSeconds(CMClockGetTime(clock)) * 1000
+      processor.setDeviceUtcOffset(unix - (before + after) / 2)
+    }
+    let picture = processor.pictureObservation() as? [String: Any] ?? [:]
+    DispatchQueue.main.async { [weak self] in self?.observePicture(picture, at: now) }
+    if var report = processor.pollCalibration() as? [String: Any] {
+      report["captureContext"] = captureContext()
+      emit(report)
+      return
+    }
+    guard !analysisBusy, processor.reportDue() else { return }
+    // The audio scan is slow: poll a copy away from the capture queue, then merge its audio packets.
+    let copyStarted = PhoneClock.nowMs()
+    let snapshot = processor.snapshotForPoll()
+    telemetry.processing("snapshot", ms: PhoneClock.nowMs() - copyStarted)
+    analysisBusy = true
+    let ticket = generation
+    analysis.async { [weak self] in
+      let started = PhoneClock.nowMs()
+      let report = snapshot.poll() as? [String: Any]
+      let elapsed = PhoneClock.nowMs() - started
+      self?.samples.async { [weak self] in
+        guard let self else { return }
+        self.analysisBusy = false
+        guard self.generation == ticket else { return }
+        self.processor.mergeAudio(snapshot)
+        self.telemetry.processing("poll", ms: elapsed)
+        if let report { self.emit(report) }
       }
     }
   }

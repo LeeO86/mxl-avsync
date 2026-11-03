@@ -13,7 +13,8 @@ final class AvsyncGeneratorController: UIViewController {
   private let syncCenter = CALayer()
   private let syncForeground = CALayer()
   private let canvas = UIView()
-  private let marker = CALayer()
+  // AVS3 optical code: field A (left half of the panel) and B (right half), always opposite.
+  private let markerA = CALayer(), markerB = CALayer()
   private var cells: [CALayer] = []
   private let status = UILabel()
   private let toggle = UIButton(type: .system)
@@ -59,14 +60,14 @@ final class AvsyncGeneratorController: UIViewController {
     canvas.bounds = CGRect(x: 0, y: 0, width: 1280, height: 720)
     canvas.layer.magnificationFilter = .nearest
     view.addSubview(canvas)
-    marker.backgroundColor = UIColor.black.cgColor
-    canvas.layer.addSublayer(marker)
+    markerA.backgroundColor = UIColor.black.cgColor; markerB.backgroundColor = UIColor.white.cgColor
+    canvas.layer.addSublayer(markerA); canvas.layer.addSublayer(markerB)
     canvas.layer.addSublayer(syncDot)
     syncCenter.backgroundColor = UIColor.black.cgColor
     syncDot.addSublayer(syncCenter)
     syncForeground.frame = canvas.bounds
     canvas.layer.addSublayer(syncForeground)
-    // AVS2 carries identity in the QR; no per-frame strip layers.
+    // AVS3 carries identity in the QR; no per-frame strip layers.
     status.textColor = .lightGray; status.font = .systemFont(ofSize: 12); status.numberOfLines = 3
     status.textAlignment = .center; status.accessibilityIdentifier = "generatorStatus"
     view.addSubview(status)
@@ -153,7 +154,9 @@ final class AvsyncGeneratorController: UIViewController {
       syncForeground.contents = plan.syncForeground().cgImage
       let geometry = plan.geometry()
       func n(_ key: String) -> CGFloat { CGFloat((geometry[key] as? NSNumber)?.doubleValue ?? 0) }
-      marker.frame = CGRect(x: n("markerX"), y: n("markerY"), width: n("markerSide"), height: n("markerSide"))
+      let half = (n("markerSide") / 2).rounded(.down)
+      markerA.frame = CGRect(x: n("markerX"), y: n("markerY"), width: half, height: n("markerSide"))
+      markerB.frame = CGRect(x: n("markerX") + half, y: n("markerY"), width: n("markerSide") - half, height: n("markerSide"))
       for (i, cell) in cells.enumerated() { cell.frame = CGRect(x: n("stripX") + CGFloat(i)*n("stripWidth"), y: n("stripY"), width: n("stripWidth"), height: n("stripHeight")) }
       nextAudio = 1; shown = 0; lateFrames = 0; lastFrame = nil; lastStatus = 0; images.removeAll()
       renderGeneration += 1
@@ -207,16 +210,20 @@ final class AvsyncGeneratorController: UIViewController {
     if let previous = lastFrame, current > previous + 1 { lateFrames += Int(current - previous - 1) }
     lastFrame = current
     CATransaction.begin(); CATransaction.setDisableActions(true)
-    if sequence != shown {
-      guard let image = images[sequence] else { CATransaction.commit(); stop("Picture scheduling deadline missed. Restart the signal."); return }
-      shown = sequence; canvas.layer.contents = image.cgImage
+    // The QR names the next event from half a period before its burst.
+    let named = (frame["named"] as? NSNumber)?.uint64Value ?? sequence
+    if named != shown {
+      guard let image = images[named] else { CATransaction.commit(); stop("Picture scheduling deadline missed. Restart the signal."); return }
+      shown = named; canvas.layer.contents = image.cgImage
     }
     func n(_ key: String) -> CGFloat { CGFloat((frame[key] as? NSNumber)?.doubleValue ?? 0) }
     syncDot.isHidden = false
     syncDot.frame = CGRect(x: n("syncX"), y: n("syncY"), width: n("syncSize"), height: n("syncSize"))
     syncCenter.frame = CGRect(x: (n("syncSize")-n("syncLineWidth"))/2, y: 0, width: n("syncLineWidth"), height: n("syncSize"))
     syncDot.backgroundColor = UIColor(red: n("syncR")/255, green: n("syncG")/255, blue: n("syncB")/255, alpha: 1).cgColor
-    marker.backgroundColor = (frame["white"] as? Bool == true ? UIColor.white : UIColor.black).cgColor
+    let aWhite = frame["white"] as? Bool == true
+    markerA.backgroundColor = (aWhite ? UIColor.white : UIColor.black).cgColor
+    markerB.backgroundColor = (aWhite ? UIColor.black : UIColor.white).cgColor
     let bits = (frame["strip"] as? NSNumber)?.uint32Value ?? 0
     for (i, cell) in cells.enumerated() { cell.backgroundColor = (bits & (1 << (31-i)) != 0 ? UIColor.white : UIColor.black).cgColor }
     CATransaction.commit()
@@ -237,7 +244,7 @@ final class AvsyncGeneratorController: UIViewController {
     link?.invalidate(); link = nil; renderGeneration += 1
     player.stop(); engine.stop(); plan = nil; images.removeAll()
     CATransaction.begin(); CATransaction.setDisableActions(true)
-    canvas.layer.contents = nil; syncDot.isHidden = true; marker.backgroundColor = UIColor.black.cgColor
+    canvas.layer.contents = nil; syncDot.isHidden = true; markerA.backgroundColor = UIColor.black.cgColor; markerB.backgroundColor = UIColor.white.cgColor
     for cell in cells { cell.backgroundColor = UIColor.black.cgColor }
     CATransaction.commit()
     screenAwake.setActive(false); UIScreen.main.brightness = oldBrightness
