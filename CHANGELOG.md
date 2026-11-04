@@ -16,7 +16,7 @@
   report leaves out `diagnostics.qrAgeMs` until then.
 - Audio timecodes decode in rooms with strong echo or a weak 2100 Hz tone. A
   packet that fails as received is tried again through an equalizer fitted to
-  its known start. A field recording (TV across a living room) went from 0 to
+  its known start. A field recording (phone in a room) went from 0 to
   27 of 27 packets; louder playback had not helped. AV timing is unchanged.
   Debug marks such bursts "ok (echo filter)"; the report adds `eq` per burst.
 - The live decoder no longer decodes the same burst again on every scan, so

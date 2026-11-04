@@ -283,7 +283,7 @@ const std::vector<float> &known_start(int baud) {
     static const std::vector<float> fast = make(1200), slow = make(600);
     return baud == 1200 ? fast : slow;
 }
-// Room echo and a weak tone smear the bits: a TV across a living room measured 2100 Hz 17 dB
+// Room echo and a weak tone smear the bits: a phone recording in a room measured 2100 Hz 17 dB
 // below 1300 Hz and echo only 8 dB below the direct sound, and no packet decoded, however loud.
 // A short filter, fitted to the packet's known start (least squares), undoes most of that.
 // Returns a copy of x, filtered from that start on (empty when the start is out of range).

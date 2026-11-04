@@ -62,7 +62,7 @@ It also reads the experimental 25-byte `0x21` centre / `0x23` onset packets.
 When a packet does not decode as received, the receiver tries again through an
 equalizer: a 96-tap filter at 8 kHz (12 ms, centred), fitted by least squares
 to the start every packet shares (chirp, guard, preamble, sync). It undoes a
-weak tone and room echo. In a field test (TV speaker across a living room) 2100
+weak tone and room echo. In a field test (phone recording in a room) 2100
 Hz arrived 17 dB below 1300 Hz with echo 8 dB below the direct sound; no packet
 decoded at any volume, and 27 of 27 did through the filter. Timing still comes
 from the chirp as received, so the filter does not move AV or latency. A live
