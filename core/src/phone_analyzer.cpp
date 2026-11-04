@@ -313,7 +313,7 @@ std::string PhoneAnalyzer::poll()
     for (size_t i = attempts.size() > 6 ? attempts.size() - 6 : 0; i < attempts.size(); ++i) {
         const auto& a = attempts[i];
         bursts.push_back(Json().num("t", a.time_ms).num("match", a.correlation).num("dbfs", a.level_dbfs)
-                             .integer("syncErrors", a.sync_errors).boolean("ok", a.decoded).text());
+                             .integer("syncErrors", a.sync_errors).boolean("ok", a.decoded).boolean("eq", a.equalized).text());
     }
     out.raw("diagnostics", Json().num("fps", fps).integer("frames", frames_).integer("bursts", long(d.optical_bursts))
                                .integer("crossings", long(d.optical_crossings)).integer("rejected", long(d.optical_rejected))

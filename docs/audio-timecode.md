@@ -59,6 +59,15 @@ bits, permutation `73*i mod coded_bits`, and soft Viterbi decoding with CRC gate
 620 / 566.667 ms at 600 baud. The receiver blindly tries both rates and lengths.
 It also reads the experimental 25-byte `0x21` centre / `0x23` onset packets.
 
+When a packet does not decode as received, the receiver tries again through an
+equalizer: a 96-tap filter at 8 kHz (12 ms, centred), fitted by least squares
+to the start every packet shares (chirp, guard, preamble, sync). It undoes a
+weak tone and room echo. In a field test (TV speaker across a living room) 2100
+Hz arrived 17 dB below 1300 Hz with echo 8 dB below the direct sound; no packet
+decoded at any volume, and 27 of 27 did through the filter. Timing still comes
+from the chirp as received, so the filter does not move AV or latency. A live
+stream decodes each chirp until it decodes or its longest packet is complete.
+
 The main generator, file analyzer, live analyzer and native iOS module link the
 same `core/src/timecode.cpp`. The old probe remains as a historical experiment;
 test the actual shipped codec with `tests/audio-timecode/run.py --production`.

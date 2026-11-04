@@ -9,11 +9,19 @@
   limit (at most every 30 s), not only after 4 minutes. With a ±14 ms NTP
   check, latency was hidden from about 2 minutes after each check.
 - Debug shows the last six audio bursts: decoded or not, start-chirp match,
-  wrong sync bits (of 56) and level; on iOS also the microphone gain. This is
+  wrong sync bits (of 32) and level; on iOS also the microphone gain. This is
   to find why the phone needs a loud signal. The phone report gains
   `diagnostics.audioBursts`.
 - Debug shows "QR age —" before any QR was seen, not "1e+30 ms". The phone
   report leaves out `diagnostics.qrAgeMs` until then.
+- Audio timecodes decode in rooms with strong echo or a weak 2100 Hz tone. A
+  packet that fails as received is tried again through an equalizer fitted to
+  its known start. A field recording (TV across a living room) went from 0 to
+  27 of 27 packets; louder playback had not helped. AV timing is unchanged.
+  Debug marks such bursts "ok (echo filter)"; the report adds `eq` per burst.
+- The live decoder no longer decodes the same burst again on every scan, so
+  the audio scan costs less than before (about 6 instead of 14 ms per scan on
+  a server core for that recording).
 - Video latency is shown again for a platform (PTP) source. The shared phone
   analyzer gave it only for the phone's own generator; audio latency was not
   affected.

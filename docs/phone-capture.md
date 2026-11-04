@@ -24,7 +24,8 @@ Both apps capture through the shared analyzer ([native contract](mobile-native.m
 Debug shows the delivered frame rate, the largest frame gap, dropped frames,
 the locked exposure and the detector counters (bursts, crossings, rejected
 fits, bursts without a QR, bursts named by the event grid). For each of the
-last six audio bursts it shows whether the timecode decoded, how well the
-start chirp matched (0–1), how many of the 56 sync bits were wrong (a packet
-decodes with at most 6) and the level. On iOS it also shows the microphone
+last six audio bursts it shows whether the timecode decoded ("echo filter"
+when it decoded only through the equalizer, see audio-timecode.md), how well
+the start chirp matched (0–1), how many of the 32 sync bits were wrong (a
+packet decodes with at most 6) and the level. On iOS it also shows the microphone
 gain and whether iOS lets the app change it.

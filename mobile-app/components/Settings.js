@@ -63,7 +63,7 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
      `Rejected ${d.rejected ?? '—'} · no QR ${d.unbound ?? '—'} · by grid ${d.byGrid ?? '—'}\n` +
      `Video events ${d.videoEvents ?? '—'} · audio timecodes ${d.audioTimecodes ?? '—'} · audio peak ${Number.isFinite(d.audioPeakDbfs) ? d.audioPeakDbfs.toFixed(0) + ' dBFS' : '—'}`}
    </Text>
-   {(d.audioBursts || []).slice().reverse().map(b => <Text key={`a${b.t}`} selectable style={small}>{`Audio ${b.ok ? 'ok' : 'failed'} · match ${Number(b.match).toFixed(2)} · sync errors ${b.syncErrors}/56 · ${Number(b.dbfs).toFixed(0)} dBFS`}</Text>)}
+   {(d.audioBursts || []).slice().reverse().map(b => <Text key={`a${b.t}`} selectable style={small}>{`Audio ${b.ok ? (b.eq ? 'ok (echo filter)' : 'ok') : 'failed'} · match ${Number(b.match).toFixed(2)} · sync errors ${b.syncErrors}/32 · ${Number(b.dbfs).toFixed(0)} dBFS`}</Text>)}
    {(report?.events || []).slice(-8).reverse().map(e => <Text key={e.seq} selectable style={small}>{`#${e.seq}  AV ${offsetText(e.offsetMs)}  V ${latencyText(e.videoLatencyMs)}  A ${latencyText(e.audioLatencyMs)}  (device UTC)`}</Text>)}
   </Card>
   <Card style={card}>

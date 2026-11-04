@@ -272,9 +272,93 @@ std::vector<float> timecode_waveform(const std::vector<uint8_t> &bytes, int baud
     return x;
 }
 
+namespace {
+// The start every packet shares (chirp, gap, preamble, sync) at 8 kHz: known, so it trains the equalizer.
+const std::vector<float> &known_start(int baud) {
+    static const auto make = [](int b) {
+        auto x = timecode_waveform(Bytes(15, 0), b, 8000, -12);
+        x.resize(size_t(8000 * 40 / 1000 + 64 * 8000 / b));
+        return x;
+    };
+    static const std::vector<float> fast = make(1200), slow = make(600);
+    return baud == 1200 ? fast : slow;
+}
+// Room echo and a weak tone smear the bits: a TV across a living room measured 2100 Hz 17 dB
+// below 1300 Hz and echo only 8 dB below the direct sound, and no packet decoded, however loud.
+// A short filter, fitted to the packet's known start (least squares), undoes most of that.
+// Returns a copy of x, filtered from that start on (empty when the start is out of range).
+std::vector<float> equalized(const std::vector<float> &x, double start_guess, int baud) {
+    constexpr int taps = 96, delay = 48; // 12 ms at 8 kHz, centred: rooms are not minimum phase
+    const auto &ref = known_start(baud);
+    const long n = long(ref.size());
+    long start = -1;
+    double best = 0;
+    for (long d = -32; d <= 32; d++) {
+        const long a = std::lround(start_guess) + d;
+        if (a < taps || a + n + delay >= long(x.size()))
+            continue;
+        double c = 0;
+        for (long i = 0; i < n; i++)
+            c += x[size_t(a + i)] * ref[size_t(i)];
+        if (c > best) {
+            best = c;
+            start = a;
+        }
+    }
+    if (start < 0)
+        return {};
+    // Normal equations for w: sum_k w[k] x[start + i + delay - k] = ref[i].
+    std::vector<double> m(taps * taps, 0), v(taps, 0), w(taps, 0);
+    for (long i = 0; i < n; i++) {
+        const float *at = &x[size_t(start + i + delay)];
+        for (int j = 0; j < taps; j++) {
+            v[j] += at[-j] * ref[size_t(i)];
+            for (int k = 0; k <= j; k++)
+                m[j * taps + k] += double(at[-j]) * at[-k];
+        }
+    }
+    double trace = 0;
+    for (int j = 0; j < taps; j++)
+        trace += m[j * taps + j];
+    for (int j = 0; j < taps; j++)
+        m[j * taps + j] += 1e-3 * trace / taps + 1e-12;
+    // Cholesky (lower triangle), then forward and back substitution.
+    for (int j = 0; j < taps; j++)
+        for (int k = 0; k <= j; k++) {
+            double sum = m[j * taps + k];
+            for (int q = 0; q < k; q++)
+                sum -= m[j * taps + q] * m[k * taps + q];
+            m[j * taps + k] = j == k ? std::sqrt(std::max(sum, 1e-30)) : sum / m[k * taps + k];
+        }
+    for (int j = 0; j < taps; j++) {
+        double sum = v[j];
+        for (int q = 0; q < j; q++)
+            sum -= m[j * taps + q] * w[q];
+        w[j] = sum / m[j * taps + j];
+    }
+    for (int j = taps - 1; j >= 0; j--) {
+        double sum = w[j];
+        for (int q = j + 1; q < taps; q++)
+            sum -= m[q * taps + j] * w[q];
+        w[j] = sum / m[j * taps + j];
+    }
+    std::vector<float> y(x);
+    const long end = std::min(long(x.size()) - delay,
+                              start + long(std::ceil(timecode_duration_ms(25, baud) * 8)) + 8);
+    for (long i = start; i < end; i++) {
+        double sum = 0;
+        for (int k = 0; k < taps && i + delay - k >= 0; k++)
+            sum += w[k] * x[size_t(i + delay - k)];
+        y[size_t(i)] = float(sum);
+    }
+    return y;
+}
+} // namespace
+
 std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, int rate,
                                             double origin_ms,
-                                            std::vector<TimecodeAttempt> *attempts) {
+                                            std::vector<TimecodeAttempt> *attempts,
+                                            double from_ms) {
     if (!audio || count == 0 || rate < 8000 || !std::isfinite(origin_ms))
         return {};
     std::vector<float> x = rate == 8000 ? std::vector<float>(audio, audio + count)
@@ -287,12 +371,20 @@ std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, in
     auto hits = detector.detect(x.data(), x.size(), 0);
     std::vector<AudioTimecode> result;
     for (const auto &hit : hits) {
-        if (hit.chirp_id != 0)
+        if (hit.chirp_id != 0 || hit.time_ms + origin_ms < from_ms)
             continue;
-        bool found = false;
-        int sync_errors = 56;
-        for (int baud : {1200, 600}) {
-            Demod d(x, baud);
+        bool found = false, filtered = false;
+        int sync_errors = 32;
+        // As received first, then through the equalizer; 1200 baud before the 600 fallback.
+        for (int pass = 0; pass < 4; pass++) {
+            const int baud = pass % 2 ? 600 : 1200;
+            filtered = pass >= 2;
+            std::vector<float> eq;
+            // Only once the shortest packet is complete: earlier scans would filter it in vain.
+            if (filtered && (hit.sample_pos - 120 + timecode_duration_ms(15, baud) * 8 + 8 >= x.size() ||
+                             (eq = equalized(x, hit.sample_pos - 120, baud)).empty()))
+                continue;
+            Demod d(filtered ? eq : x, baud);
             double nominal = hit.sample_pos + 200;
             std::vector<Candidate> best;
             for (int shift = -32; shift <= 32; shift++) {
@@ -345,7 +437,7 @@ std::vector<AudioTimecode> decode_timecodes(const float *audio, size_t count, in
                 break;
         }
         if (attempts)
-            attempts->push_back({hit.time_ms + origin_ms, hit.correlation, hit.level_dbfs, sync_errors, found});
+            attempts->push_back({hit.time_ms + origin_ms, hit.correlation, hit.level_dbfs, sync_errors, found, found && filtered});
     }
     return result;
 }
@@ -411,9 +503,15 @@ const std::vector<AudioTimecode> &AudioTimecodeStream::scan(bool force) {
     const double end = origin_ms_ + audio_.size() * 1000.0 / std::max(1, rate_);
     if (!force && end - last_scan_ms_ < 100)
         return decoded_;
+    // A burst that was complete at the last scan keeps its result, and so does a decoded one:
+    // only newer chirps are decoded (the longest packet, 25 bytes at 600 baud, lasts 833 ms).
+    double from = last_scan_ms_ - 900;
+    for (const auto &attempt : attempts_)
+        if (attempt.decoded)
+            from = std::max(from, attempt.time_ms + 50);
     last_scan_ms_ = end;
     std::vector<TimecodeAttempt> found;
-    for (auto packet : decode_timecodes(audio_.data(), audio_.size(), rate_, origin_ms_, &found)) {
+    for (auto packet : decode_timecodes(audio_.data(), audio_.size(), rate_, origin_ms_, &found, from)) {
         for (const auto &clock : arrivals_)
             if (packet.time_ms >= clock.start - 0.2 && packet.time_ms < clock.end) {
                 packet.arrival_ms = clock.arrival + packet.time_ms - clock.start;
