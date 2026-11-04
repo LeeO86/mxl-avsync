@@ -123,6 +123,70 @@ TEST_CASE("stream decoder remembers chirp arrival instead of telegram completion
     CHECK(std::abs(decoded[0].arrival_ms - 9100) < 0.12);
 }
 
+TEST_CASE("stream decoder reports one attempt per burst, also when the packet fails") {
+    // Burst 1 is clean; burst 2 keeps its start chirp but its bits are replaced by noise.
+    const auto wave =
+        timecode_waveform(encode_timecode(123, 1700000037000000000LL, 35000000, true), 1200);
+    std::vector<float> signal(48000 * 2, 0);
+    std::copy(wave.begin(), wave.end(), signal.begin() + 4800);
+    std::copy(wave.begin(), wave.end(), signal.begin() + 28800);
+    uint32_t seed = 1;
+    for (size_t i = 28800 + 48 * 45; i < 28800 + wave.size(); ++i) {
+        seed = seed * 1664525 + 1013904223;
+        signal[i] = 0.25f * (float(seed >> 8) / float(1 << 24) - 0.5f);
+    }
+    AudioTimecodeStream decoder;
+    for (size_t at = 0; at < signal.size(); at += 480) {
+        decoder.push(signal.data() + at, 480, 48000, at / 48.0, at / 48.0);
+        decoder.scan();
+    }
+    decoder.scan(true);
+    const auto &attempts = decoder.attempts();
+    REQUIRE(attempts.size() == 2);
+    CHECK(attempts[0].decoded);
+    CHECK(attempts[0].sync_errors == 0);
+    CHECK(attempts[0].correlation > 0.9);
+    CHECK_FALSE(attempts[1].decoded);
+    CHECK(attempts[1].sync_errors > 6);
+    CHECK(std::abs(attempts[1].time_ms - attempts[0].time_ms - 500) < 1);
+}
+
+TEST_CASE("echo filter decodes a packet that a weak tone and room echo break") {
+    // A room like a field test: a reflection after 0.23 ms puts a deep dip near 2100 Hz, three
+    // early reflections (1.5-7 ms) and a diffuse tail smear the bits. Loudness does not help here.
+    const auto wave =
+        timecode_waveform(encode_timecode(123, 1700000037000000000LL, 35000000, true), 1200);
+    std::vector<float> room(48 * 60, 0);
+    room[0] = 1;
+    room[11] = 0.8f;
+    room[72] = 0.7f;
+    room[178] = -0.49f;
+    room[336] = 0.42f;
+    uint32_t seed = 7;
+    for (size_t i = 48; i < room.size(); ++i) {
+        seed = seed * 1664525 + 1013904223;
+        room[i] += 0.1f * std::exp(-double(i) / (48 * 12)) * (float(seed >> 8) / float(1 << 24) - 0.5f);
+    }
+    std::vector<float> signal(48000, 0), heard(48000, 0);
+    std::copy(wave.begin(), wave.end(), signal.begin() + 4800);
+    for (size_t i = 0; i < signal.size(); ++i)
+        if (signal[i] != 0)
+            for (size_t k = 0; k < room.size() && i + k < heard.size(); ++k)
+                heard[i + k] += signal[i] * room[k];
+    std::vector<TimecodeAttempt> attempts;
+    const auto decoded = decode_timecodes(heard.data(), heard.size(), 48000, 0, &attempts);
+    REQUIRE(attempts.size() == 1);
+    REQUIRE(decoded.size() == 1);
+    CHECK(attempts[0].equalized); // as received, the packet did not decode
+    CHECK(decoded[0].source_id == 123);
+    CHECK(std::abs(decoded[0].time_ms - 100) < 0.5); // timing still comes from the chirp
+    // A clean packet still decodes as received.
+    attempts.clear();
+    CHECK(decode_timecodes(signal.data(), signal.size(), 48000, 0, &attempts).size() == 1);
+    REQUIRE(attempts.size() == 1);
+    CHECK_FALSE(attempts[0].equalized);
+}
+
 TEST_CASE(
     "timecode identity pairs beyond the old repeating chirp window and rejects other sources") {
     VideoObservation video;

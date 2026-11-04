@@ -307,11 +307,19 @@ std::string PhoneAnalyzer::poll()
     const auto& d = session_.qr_flash_diagnostics();
     std::vector<std::string> trace;
     for (const auto& s : d.samples) trace.push_back(Json().num("t", s.time_ms).num("d", s.level).text());
+    // The last audio bursts: start chirp match, level, wrong sync bits (of 56) and whether the packet decoded.
+    std::vector<std::string> bursts;
+    const auto& attempts = session_.timecode_attempts();
+    for (size_t i = attempts.size() > 6 ? attempts.size() - 6 : 0; i < attempts.size(); ++i) {
+        const auto& a = attempts[i];
+        bursts.push_back(Json().num("t", a.time_ms).num("match", a.correlation).num("dbfs", a.level_dbfs)
+                             .integer("syncErrors", a.sync_errors).boolean("ok", a.decoded).boolean("eq", a.equalized).text());
+    }
     out.raw("diagnostics", Json().num("fps", fps).integer("frames", frames_).integer("bursts", long(d.optical_bursts))
                                .integer("crossings", long(d.optical_crossings)).integer("rejected", long(d.optical_rejected))
                                .integer("unbound", long(d.optical_unbound)).integer("byGrid", long(d.optical_by_grid))
                                .integer("videoEvents", long(report.video_events)).integer("audioTimecodes", long(report.audio_timecodes.size()))
-                               .num("audioPeakDbfs", report.audio_peak_dbfs).num("qrAgeMs", now - qr_ms_).raw("trace", array(trace)).text());
+                               .num("audioPeakDbfs", report.audio_peak_dbfs).num("qrAgeMs", qr_ms_ > -1e29 ? now - qr_ms_ : NAN).raw("audioBursts", array(bursts)).raw("trace", array(trace)).text());
     return out.text();
 }
 

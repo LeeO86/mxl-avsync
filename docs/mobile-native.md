@@ -25,7 +25,8 @@ Props: `active` (bool), `captureFps` (0 = automatic best rate), `taiUtcOffset`
 Event `onReport` with one of:
 
 - **status** — `PhoneAnalyzer::poll()` parsed, plus `captureContext`
-  `{platform, model, os, audioRoute, sampleRate, cameraMode}`, `configuredFps`
+  `{platform, model, os, audioRoute, sampleRate, cameraMode}` (iOS adds
+  `inputGain, inputGainSettable`), `configuredFps`
   and `clockMapping {monotonicMs, deviceUnixMs, clockId, timebase}` for the
   report's `timeMs`.
 - **calibration** — `{frames:[{timeMs, uri}], spikeTimeMs, fps, uri (WAV),

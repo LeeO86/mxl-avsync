@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { liveView, offsetText, offsetSentence, savedResult, clockCorrection, HOLD_MS } from './live.mjs';
+import { liveView, offsetText, offsetSentence, savedResult, clockCorrection, clockText, HOLD_MS } from './live.mjs';
 
 const status = extra => ({ kind: 'status', stage: 'measuring', timeMs: 5000, signal: { live: true, sourceId: 7 },
  reading: { offsetMs: 12.5, spreadMs: 0.8, events: 8, videoLatencyMs: 70, audioLatencyMs: 82.5 }, ...extra });
@@ -48,4 +48,9 @@ test('texts and saved results', () => {
  assert.equal(offsetSentence(0.2), 'Audio and video in sync');
  const saved = savedResult(liveView(status()).reading, { calibration: { offset_ms: 1 }, now: 42 });
  assert.deepEqual([saved.id, saved.offsetMs, saved.calibrationMs, saved.held], ['42', 12.5, 1, false]);
+});
+
+test('the clock label shows the check accuracy and its age, not the holdover allowance', () => {
+ assert.equal(clockText({ ageMs: 42400, sampleUncertaintyMs: 1.23, uncertaintyMs: 3.35 }), 'NTP ±1.2 ms · checked 42 s ago');
+ assert.equal(clockText({ ageMs: 185000, sampleUncertaintyMs: 0.8, uncertaintyMs: 10 }), 'NTP ±0.8 ms · checked 3 min ago');
 });

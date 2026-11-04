@@ -24,8 +24,8 @@ inline constexpr int kYWhite = 940;
 inline constexpr int kYBackground = 502;
 inline constexpr int kYNeutralChroma = 512;
 
-inline constexpr char kCoreVersion[] = "2.1.0";
-inline constexpr char kAppVersion[] = "2.1.0";
+inline constexpr char kCoreVersion[] = "2.1.1";
+inline constexpr char kAppVersion[] = "2.1.1";
 inline constexpr char kMxlRevision[] = "218ddaa0a08c12ffe75fc475ae65aa3d9eef16d7";
 inline constexpr char kQrSchema[] = "mxl-avsync/1";
 inline constexpr char kManifestSchema[] = "mxl-avsync-manifest/1";
@@ -633,6 +633,7 @@ public:
     bool qr_flash_active() const { return signal_ && signal_->qr_flash; }
     bool qr_scan_suggested(double time_ms) const { return !qr_flash_active() || qr_flash_.qr_scan_suggested(time_ms); }
     const QrFlashTracker::Diagnostics& qr_flash_diagnostics() const { return qr_flash_.diagnostics(); }
+    const std::vector<TimecodeAttempt>& timecode_attempts() const { return timecode_stream_.attempts(); }
     // AVS3 camera frame: time_ms is the exposure start of the first row.
     void push_video_u8(const uint8_t* luma, int width, int height, int stride, double time_ms, double exposure_ms = 0, double readout_ms = 0);
     PhoneReport finish(const std::string& test_id = "PHONE");

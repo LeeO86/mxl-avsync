@@ -1,15 +1,20 @@
-# Phone time reference (mobile 2.0.5)
+# Phone time reference (mobile 2.1.0)
 
 The native phone app incorporates the shared 2.0.5 detector/quality fixes.
 This does not make a phone a PTP endpoint. AV offset uses the common capture
 clock and does not need UTC. Latency additionally needs a source time and a
 mapping from the capture clock to UTC.
 
-## iOS: explicit SNTP exchange
+## SNTP exchange (iOS and Android)
 
-Settings → Time reference selects an NTP hostname/IP (UDP port 123), default
-`time.cloudflare.com`. Synchronize is explicit; there is no background polling.
-The native client makes up to four requests, one second apart, on a worker.
+Settings → Debug → NTP server selects a hostname/IP (UDP port 123), default
+`time.cloudflare.com`. The app checks the clock on its own when it starts or
+comes to the front, and again every 4 minutes (a check is valid for 5 minutes).
+When the holdover allowance (below) pushes the uncertainty past the limit, it
+checks again sooner, at most every 30 s.
+Settings → Sync clock now repeats it at once. The iOS client makes up to four
+requests, one second apart, on a worker; Android (`Sntp.kt`) makes eight,
+250 ms apart, with the same checks.
 It uses RFC 5905's four timestamps and validates mode/version, synchronized
 stratum, the echoed request timestamp, nonzero/ordered timestamps, clock
 continuity and server root distance. Kiss-of-death stops further requests.
@@ -23,28 +28,13 @@ on the selected server's correctness, not independently certified bounds.
 The system clock is never changed. LAN time servers may require iOS's local
 network permission. The former HTTPS check is not used for correction.
 
-## Android: native GNSS clock
+## Android: no GPS time
 
-Android 10+ and a device exposing raw GNSS clock measurements are required.
-The user grants precise location and starts a check, normally outdoors. The
-module requests GPS updates only during the check (maximum 25 seconds), never
-reads/stores coordinates, and unregisters on success, failure, cancellation
-or backgrounding. Unsupported receiver/disabled location/missing permission
-is explicit; no fabricated GPS time or silent network fallback.
-
-`GnssClock.timeNanos - fullBiasNanos - biasNanos` supplies GPS time. The
-receiver's leap-second value converts GPS to UTC. Crucially, its
-`elapsedRealtimeNanos` and uncertainty map that time to Android's monotonic
-clock; callback delivery time is not used as the GNSS timestamp. Three
-consistent samples are required. A hardware-clock discontinuity clears the
-sample set. Bias and elapsedRealtime uncertainties are combined at three
-reported standard deviations, plus a rounding allowance: a statistical
-estimate, not a guaranteed maximum error. Actual receiver accuracy remains
-to be field-tested.
-
-This adds an Android **clock module and permission/UI path**, not the missing
-camera/microphone NDK analyzer port or Android signal generator. Both return
-unsupported rather than offering a nonfunctional capture screen.
+Android uses NTP like iOS. The GNSS clock code (`GnssTime.kt`) stays in the
+module for later, but the app requests no location permission and never uses
+GPS time. Without a reachable NTP server (no network) Settings shows
+"Not synchronized · no latency": the AV offset still works, the two latencies
+are not shown.
 
 ## Applying and retaining the reference
 
@@ -54,9 +44,10 @@ not advance across sleep) and an in-flight check cannot reinstate a pre-sleep
 reference. They expire after five minutes. The uncertainty grows by
 an explicit 50-ppm holdover assumption (not a device accuracy guarantee).
 That is exactly 0.1 ms per two seconds: it increases the uncertainty allowance,
-never the UTC correction or the measured latency. The UI separates the fixed
-**sync estimate** from the growing **holdover allowance**. Settings names the
-assumption and displays the NTP-minus-device-UTC offset measured at sync.
+never the UTC correction or the measured latency. Settings shows only the
+fixed **sync estimate** and the age of the check ("NTP ±1.2 ms · checked
+42 s ago"). The growing **holdover allowance** is used internally against the
+limit; Settings → Debug names it with the NTP-minus-device-UTC offset.
 Repeat checks from the same server, process and timebase, one second to five
 minutes apart, compare their UTC mappings at a common native timestamp. Their
 difference and combined sample uncertainty are shown separately. Agreement

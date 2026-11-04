@@ -10,7 +10,7 @@ import Generate from './components/Generate';
 import Results from './components/Results';
 import { Debug, Settings, Sheet } from './components/Settings';
 import { Button, colors, small, text } from './components/ui';
-import { liveView, offsetText, savedResult, formatWhen } from './src/live.mjs';
+import { liveView, offsetText, savedResult, formatWhen, clockText } from './src/live.mjs';
 import { clockCheckDetails, clockSettings, generatorClockOptions, referenceAt, synchronizeClock, CLOCK_MAX_AGE_MS } from './src/time-reference.mjs';
 import { calibrationSummary, makeCalibration, validCalibration } from './src/workflow.mjs';
 import { generatorOptions } from './src/generator.mjs';
@@ -18,6 +18,7 @@ import { screenAwakeEnabled } from './src/screen-awake.mjs';
 
 const NativeCamera = native?.supportsLiveCapture?.() ? requireNativeViewManager('Avsync') : null;
 const RESYNC_MS = CLOCK_MAX_AGE_MS - 60000; // renew the clock reference a minute before it expires
+const UNCERTAIN_RESYNC_MS = 30000; // or sooner, at most every 30 s, once the holdover passes the limit
 const TABS = [['measure', 'Measure', 'speedometer-outline'], ['generate', 'Signal', 'tv-outline'], ['results', 'Results', 'list-outline']];
 
 function loadSession() {
@@ -58,11 +59,11 @@ export default function App() {
  useEffect(() => {
   if (!foreground) return;
   const age = reference ? performance.now() - reference.receivedJsMonoMs + reference.ageAtReceiptMs : Infinity;
-  if (age > RESYNC_MS && !syncBusy.current) syncClock();
+  if ((age > RESYNC_MS || (clockNow.state === 'uncertain' && age > UNCERTAIN_RESYNC_MS)) && !syncBusy.current) syncClock();
  }, [tick]);
  const limits = useMemo(() => { try { return clockSettings(session); } catch { return clockSettings({}); } }, [session.ntpServer, session.clockMaxUncertaintyMs]);
  const clockNow = referenceAt(reference, native?.clockNow?.(), limits.maxUncertaintyMs);
- const clockLabel = syncing && !reference ? 'Synchronizing…' : clockNow.state === 'estimated' ? `NTP ±${clockNow.uncertaintyMs.toFixed(1)} ms`
+ const clockLabel = syncing && !reference ? 'Synchronizing…' : clockNow.state === 'estimated' ? clockText(clockNow)
   : clockError ? 'Not synchronized · no latency' : clockNow.state === 'uncertain' ? 'Too uncertain · no latency' : 'Not synchronized · no latency';
 
  // Calibration.
