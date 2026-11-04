@@ -1,6 +1,9 @@
 # Changelog
 
-## Mobile 2.1.0 (not released yet)
+## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
+
+TestFlight build 12 was built from the PR head before this release commit (same
+code, it still reports core version 2.1.0); the app version stays 2.0.8.
 
 - Settings shows the clock as the NTP check's accuracy and its age
   ("NTP ±1.2 ms · checked 42 s ago"). The growing 50-ppm holdover allowance
@@ -26,7 +29,7 @@
   analyzer gave it only for the phone's own generator; audio latency was not
   affected.
 
-## 2.1.0 (2026-11-03) and Mobile 2.1.0 (not released yet)
+## 2.1.0 (2026-11-03); its app part ships in Mobile 2.0.8 build 12
 
 - **AVS3 optical code** replaces the AVS2 single white flash in every
   generator (MXL, file, phone). The flash panel is split into two fields that

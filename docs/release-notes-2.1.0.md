@@ -31,7 +31,7 @@ unchanged from 2.0.7.
   and a 2.0.x analyzer does not read AVS3. Files for playback must be
   generated again with 2.1.0.
 - The phone app TestFlight build 11 (Mobile 2.0.8) reads only AVS2. The
-  matching phone app is Mobile 2.1.0 (not released yet).
+  matching phone app ships as Mobile 2.0.8 build 12 (with 2.1.1).
 - Events gain the flag `optical_code`. No metric is new, renamed or removed.
 - Generator render time per grain (one core, live writer): 1080p50 p50
   0.89 ms, p99 3.8 ms; 2160p50 p50 3.3 ms. Same as 2.0.7.
