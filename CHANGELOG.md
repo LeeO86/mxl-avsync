@@ -3,8 +3,9 @@
 ## Mobile (not released yet)
 
 - Android: the icons (Settings gear and others) show in the release build (the
-  Ionicons font is loaded at start), and the status bar is dark with light icons
-  instead of white. Found on the Android emulator.
+  Ionicons font is loaded at start; `expo-file-system` is now a direct dependency,
+  since loading the font needs it and it was not linked), and the status bar is
+  dark with light icons instead of white. Found on the Android emulator.
 - Android: the instrumented test (`connectedDebugAndroidTest`) builds; React
   Native's `libc++_shared.so` and the module's no longer collide.
 
