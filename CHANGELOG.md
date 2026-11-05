@@ -2,6 +2,24 @@
 
 ## Mobile (not released yet)
 
+- Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
+  release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
+  that touch the app or the core (`mobile-app/README.md`).
+- Android: 120 and 240 fps also on phones that offer them only in the
+  camera's high-speed mode. The frames are read on the GPU as small luma
+  copies (320 px wide live, 640 px for calibration, 960 px for the QR about
+  10 times a second); exposure is AE-locked there because that mode allows no
+  manual exposure. If the mode fails the app uses the normal camera.
+  `captureContext.capturePath` (`normal` or `high_speed`) and
+  `captureStats.gpuReadMaxMs` are new; Debug shows both.
+- Android: a normal session that lists 90 or 120 fps gets it at a size whose
+  YUV and preview streams both keep up (1 % slack on the listed frame time).
+- Android: the exposure lock retries every 100 ms when no camera result has arrived
+  yet, instead of giving up.
+- Android Debug shows the locked exposure (it always said "auto": the Android report
+  had no `exposureMs`, while the lock itself worked), "AE locked" for the high-speed
+  path, and "(asked N, camera max)" when the camera cannot reach the chosen rate. The
+  30 fps choice works on Android.
 - Android: the icons (Settings gear and others) show in the release build (the
   Ionicons font is loaded at start; `expo-file-system` is now a direct dependency,
   since loading the font needs it and it was not linked), and the status bar is

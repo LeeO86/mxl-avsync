@@ -13,6 +13,7 @@ import android.graphics.Path
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
@@ -40,8 +41,9 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.Executors
 
-// The live camera view (docs/mobile-native.md). Camera2 YUV frames and AudioRecord blocks go to the
-// shared PhoneAnalyzer on one capture thread; QR reads, live polls and calibration files run on workers.
+// The live camera view (docs/mobile-native.md). Camera2 YUV frames (or, in a constrained high-speed
+// session, GPU-read luma from HighSpeedCapture) and AudioRecord blocks go to the shared PhoneAnalyzer
+// on one capture thread; QR reads, live polls and calibration files run on workers.
 class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(context, appContext), TextureView.SurfaceTextureListener {
   private val onReport by EventDispatcher()
   private val preview = TextureView(context)
@@ -60,6 +62,9 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var camera: CameraDevice? = null
   private var session: CameraCaptureSession? = null
   private var reader: ImageReader? = null
+  private var fast: HighSpeedCapture? = null
+  // Set when a high-speed session failed; the normal session is used until the rate changes.
+  private var highSpeedFailed = false
   private var audio: AudioCapture? = null
   private var running = false
   private var choice: CaptureProfile.Choice? = null
@@ -71,7 +76,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private val frameMeta = object : LinkedHashMap<Long, Pair<Double, Double>>() {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Pair<Double, Double>>?) = size > 32
   }
-  private var lastResult: TotalCaptureResult? = null
+  @Volatile private var lastResult: TotalCaptureResult? = null
   private var analysisBusy = false
   private var qrBusy = false
   private var lastQrScan = 0L
@@ -105,9 +110,10 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   fun setTaiUtcOffset(seconds: Double) { taiUtcSeconds = seconds }
   fun setRequestedFps(fps: Double) {
     val value = fps.toInt()
-    if (value !in listOf(0, 60, 120, 240) || value == requestedFps) return
+    if (value !in listOf(0, 30, 60, 120, 240) || value == requestedFps) return
     requestedFps = value
     capture.post {
+      highSpeedFailed = false
       if (!running) return@post
       stopCapture(); startCapture()
       emit(mapOf("kind" to "status", "fps" to 0, "message" to "Capture rate changed · collecting fresh events"))
@@ -158,20 +164,30 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
         ?: throw IllegalStateException("Camera or microphone unavailable on this device.")
       val c = manager.getCameraCharacteristics(id)
       val map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
+      // The preview stream runs at the same rate, so the slower of the two limits the size.
       val outputs = map.getOutputSizes(ImageFormat.YUV_420_888).map {
-        CaptureProfile.Output(CaptureProfile.Size(it.width, it.height), map.getOutputMinFrameDuration(ImageFormat.YUV_420_888, it))
+        CaptureProfile.Output(CaptureProfile.Size(it.width, it.height), maxOf(map.getOutputMinFrameDuration(ImageFormat.YUV_420_888, it),
+          runCatching { map.getOutputMinFrameDuration(SurfaceTexture::class.java, it) }.getOrDefault(0L)))
       }
       val ranges = c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty().map { it.lower to it.upper }
-      val picked = CaptureProfile.choose(ranges, outputs, requestedFps) ?: throw IllegalStateException("Requested camera rate is unsupported. Choose another rate.")
-      characteristics = c; choice = picked
+      val normal = CaptureProfile.choose(ranges, outputs, requestedFps)
+      val highSpeed = if (highSpeedFailed || CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO !in
+          c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList().orEmpty()) null
+        else CaptureProfile.chooseHighSpeed(map.highSpeedVideoSizes.orEmpty().map { size ->
+          CaptureProfile.HighSpeed(CaptureProfile.Size(size.width, size.height), map.getHighSpeedVideoFpsRangesFor(size).map { it.lower to it.upper })
+        }, requestedFps, normal?.fps ?: 0)
+      val picked = highSpeed ?: normal ?: throw IllegalStateException("Requested camera rate is unsupported. Choose another rate.")
+      characteristics = c; choice = picked; lastResult = null
       // REALTIME timestamps are CLOCK_BOOTTIME, like the microphone. UNKNOWN is checked on the first frame.
       cameraClock = if (c.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) "realtime" else null
       monotonicToBootNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
       generation++; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0; failedFrames = 0
       main.post { configureTransform() }
-      val imageReader = ImageReader.newInstance(picked.size.width, picked.size.height, ImageFormat.YUV_420_888, 4)
-      imageReader.setOnImageAvailableListener({ onFrame(it) }, capture)
-      reader = imageReader
+      if (!picked.highSpeed) {
+        val imageReader = ImageReader.newInstance(picked.size.width, picked.size.height, ImageFormat.YUV_420_888, 4)
+        imageReader.setOnImageAvailableListener({ onFrame(it) }, capture)
+        reader = imageReader
+      }
       val microphone = AudioCapture(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager) { samples, n, pts ->
         capture.post { if (running) { analyzer.pushAudio(samples, n, pts, 48_000); housekeeping() } }
       }
@@ -195,6 +211,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     runCatching { session?.close() }; session = null
     runCatching { camera?.close() }; camera = null
     runCatching { reader?.close() }; reader = null
+    runCatching { fast?.close() }; fast = null
     capture.removeCallbacksAndMessages(LOCK)
     main.post { outline.clear() }
   }
@@ -203,6 +220,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private fun openSession(device: CameraDevice) {
     val texture = surface ?: return fail("Camera preview unavailable.")
     val picked = choice!!
+    if (picked.highSpeed) return openHighSpeedSession(device, texture, picked)
     texture.setDefaultBufferSize(picked.size.width, picked.size.height)
     val targets = listOf(Surface(texture), reader!!.surface)
     device.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
@@ -225,10 +243,51 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     }, capture)
   }
 
+  // One output (the GPU texture): with two, the burst list would give the second only 30 fps.
+  // HighSpeedCapture draws the preview from the same frames.
+  @Suppress("DEPRECATION") // the List<Surface> form: the only one on API 24–27.
+  private fun openHighSpeedSession(device: CameraDevice, texture: SurfaceTexture, picked: CaptureProfile.Choice) {
+    val sideways = sensorRotation() % 180 != 0
+    val gpu = try {
+      HighSpeedCapture(picked.size.width, picked.size.height, texture,
+        if (sideways) picked.size.height else picked.size.width, if (sideways) picked.size.width else picked.size.height,
+        maxOf(1, picked.fps / 30), capture, { onHighSpeedFrame(it) }, { fallBack(it) })
+    } catch (e: Exception) { return fallBack(e.message ?: "GPU setup failed") }
+    fast = gpu
+    device.createConstrainedHighSpeedCaptureSession(listOf(gpu.surface), object : CameraCaptureSession.StateCallback() {
+      override fun onConfigured(s: CameraCaptureSession) {
+        if (camera != device) { s.close(); return }
+        session = s
+        val burst = s as CameraConstrainedHighSpeedCaptureSession
+        val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+          addTarget(gpu.surface)
+          set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(picked.aeMin, picked.aeMax))
+        }
+        exposureMode = "auto"
+        try { burst.setRepeatingBurst(burst.createHighSpeedRequestList(request.build()), results, capture) }
+        catch (e: Exception) { return fallBack(e.message ?: "burst refused") }
+        capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
+        capture.postAtTime({ if (session == s && lastFrameMs < 0) fallBack("no frames") }, LOCK, SystemClock.uptimeMillis() + 3000)
+      }
+      override fun onConfigureFailed(s: CameraCaptureSession) = fallBack("session not configured")
+    }, capture)
+  }
+
+  // High-speed capture did not work: restart with the normal session until the rate changes.
+  private fun fallBack(reason: String) {
+    if (!running) return
+    highSpeedFailed = true
+    stopCapture(); startCapture()
+    emit(mapOf("kind" to "status", "fps" to 0, "message" to "High-speed capture failed ($reason) · using normal capture"))
+  }
+
   // Exposure = the full frame interval, with the ISO that keeps the automatic brightness.
   private fun lockExposure(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
     if (session != s) return
-    val c = characteristics!!; val result = lastResult ?: return
+    // The first result can come late (slow cameras, the emulator): try again every 100 ms.
+    val result = lastResult ?: return retryLock(device, s, request)
+    if (s is CameraConstrainedHighSpeedCaptureSession) return lockHighSpeed(s, request)
+    val c = characteristics!!
     val capabilities = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList().orEmpty()
     val frameNs = 1_000_000_000L / choice!!.fps
     request.set(CaptureRequest.CONTROL_AWB_LOCK, true)
@@ -254,6 +313,24 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       exposureMode = "ae-locked"
     }
     runCatching { s.setRepeatingRequest(request.build(), results, capture) }.onFailure { fail(it.message ?: "Cannot lock the camera exposure.") }
+  }
+
+  private fun retryLock(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
+    capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 100)
+  }
+
+  // High-speed requests ignore manual exposure and focus: lock AE and AWB where AE stands, and
+  // lock focus with one AF trigger (the burst keeps continuous-video AF).
+  private fun lockHighSpeed(s: CameraConstrainedHighSpeedCaptureSession, request: CaptureRequest.Builder) {
+    request.set(CaptureRequest.CONTROL_AE_LOCK, true)
+    request.set(CaptureRequest.CONTROL_AWB_LOCK, true)
+    runCatching {
+      request.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+      s.captureBurst(s.createHighSpeedRequestList(request.build()), results, capture)
+      request.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+      s.setRepeatingBurst(s.createHighSpeedRequestList(request.build()), results, capture)
+      exposureMode = "ae-locked"
+    }.onFailure { fail(it.message ?: "Cannot lock the camera exposure.") }
   }
 
   private val results = object : CameraCaptureSession.CaptureCallback() {
@@ -285,26 +362,39 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private fun onFrame(source: ImageReader) {
     val image = runCatching { source.acquireNextImage() }.getOrNull() ?: return
     image.use {
-      if (!running) return
-      if (cameraClock == null && !identifyClock(it.timestamp)) return
       val plane = it.planes[0]
-      val pts = bootMs(it.timestamp)
-      // The result can arrive after the image; then the previous frame's values stand in.
-      val (exposure, readout) = frameMeta[it.timestamp] ?: frameMeta.values.lastOrNull() ?: (0.0 to 0.0)
-      if (lastFrameMs >= 0) maxFrameGapMs = maxOf(maxFrameGapMs, pts - lastFrameMs)
-      lastFrameMs = pts
-      analyzer.pushVideo(plane.buffer, it.width, it.height, plane.rowStride, pts, exposure, readout)
-      val now = SystemClock.uptimeMillis()
-      if (!qrBusy && now - lastQrScan >= 100 && analyzer.qrScanSuggested(pts)) {
-        qrBusy = true; lastQrScan = now
-        val frame = qr.copy(plane.buffer, it.width, it.height, plane.rowStride)
-        val scanGeneration = generation
-        qrWorker.execute {
-          val found = runCatching { qr.read(frame) }.getOrDefault(emptyList())
-          capture.post {
-            qrBusy = false
-            if (scanGeneration == generation) found.forEach { d -> analyzer.observeQr(d.payload, d.corners, pts) }
-          }
+      pushFrame(it.timestamp, plane.buffer, it.width, it.height, plane.rowStride) { qr.copy(plane.buffer, it.width, it.height, plane.rowStride) }
+    }
+  }
+
+  // The flash detector only samples 50 points, so live frames are read 320 px wide; a calibration
+  // take keeps up to 640 px (the core's review copy), and QR reads get 960 px (QrReader's limit).
+  private fun onHighSpeedFrame(timestampNs: Long) {
+    val gpu = fast ?: return
+    val luma = gpu.read(if (analyzer.calibrating()) 640 else 320)
+    pushFrame(timestampNs, luma.buffer, luma.width, luma.height, luma.width) { gpu.read(960).let { qr.copy(it.buffer, it.width, it.height, it.width) } }
+  }
+
+  // One frame from either path: timestamp on the camera clock, luma plane, and a QR copy on demand.
+  private fun pushFrame(timestampNs: Long, luma: java.nio.ByteBuffer, width: Int, height: Int, stride: Int, qrCopy: () -> QrReader.Frame) {
+    if (!running) return
+    if (cameraClock == null && !identifyClock(timestampNs)) return
+    val pts = bootMs(timestampNs)
+    // The result can arrive after the image; then the previous frame's values stand in.
+    val (exposure, readout) = frameMeta[timestampNs] ?: frameMeta.values.lastOrNull() ?: (0.0 to 0.0)
+    if (lastFrameMs >= 0) maxFrameGapMs = maxOf(maxFrameGapMs, pts - lastFrameMs)
+    lastFrameMs = pts
+    analyzer.pushVideo(luma, width, height, stride, pts, exposure, readout)
+    val now = SystemClock.uptimeMillis()
+    if (!qrBusy && now - lastQrScan >= 100 && analyzer.qrScanSuggested(pts)) {
+      qrBusy = true; lastQrScan = now
+      val frame = qrCopy()
+      val scanGeneration = generation
+      qrWorker.execute {
+        val found = runCatching { qr.read(frame) }.getOrDefault(emptyList())
+        capture.post {
+          qrBusy = false
+          if (scanGeneration == generation) found.forEach { d -> analyzer.observeQr(d.payload, d.corners, pts) }
         }
       }
     }
@@ -349,8 +439,10 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
         if (pollGeneration == generation && text != null) {
           analyzer.mergeAudio(snapshot)
           pollMaxMs = maxOf(pollMaxMs, elapsed)
-          emit(toMap(JSONObject(text)) + mapOf("analysisMode" to "async-snapshot-v1", "captureStats" to
-            mapOf("maxFrameGapMs" to maxFrameGapMs, "dropCallbacks" to failedFrames, "pollProcessingMaxMs" to pollMaxMs)))
+          val stats = mapOf("maxFrameGapMs" to maxFrameGapMs, "dropCallbacks" to failedFrames, "pollProcessingMaxMs" to pollMaxMs)
+          // High-speed path: the longest GPU draw + read of one frame since the last report.
+          val gpuRead = fast?.let { mapOf("gpuReadMaxMs" to it.takeReadMaxMs()) }.orEmpty()
+          emit(toMap(JSONObject(text)) + mapOf("analysisMode" to "async-snapshot-v1", "captureStats" to stats + gpuRead))
           maxFrameGapMs = 0.0
         }
         snapshot.close()
@@ -363,12 +455,15 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     return mapOf("platform" to "android", "model" to "${Build.MANUFACTURER} ${Build.MODEL}", "os" to Build.VERSION.RELEASE,
       "audioRoute" to (audio?.route ?: "unknown"), "sampleRate" to 48_000.0,
       "cameraMode" to (picked?.let { "${it.size.width}x${it.size.height}@${it.fps}" } ?: "unknown"),
+      "capturePath" to (picked?.let { if (it.highSpeed) "high_speed" else "normal" } ?: "unknown"),
       "exposureMode" to exposureMode, "cameraClock" to (cameraClock ?: "unknown"),
       "audioClock" to (audio?.clock ?: "unknown"))
   }
 
   private fun emit(value: Map<String, Any?>) {
     val report = value.toMutableMap()
+    // Exposure once locked (as iOS reports it; 0 = still automatic): what the last frame used.
+    report["exposureMs"] = if (exposureMode == "auto") 0.0 else (lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L) / 1e6
     report["configuredFps"] = choice?.fps?.toDouble() ?: 0.0
     report["requestedFps"] = requestedFps.toDouble()
     report["captureContext"] = captureContext()

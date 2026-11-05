@@ -71,9 +71,12 @@ per seq, share diagnostics, and clear results or calibration.
 `modules/avsync/android` builds the core into `libavsync-jni` (CMake, C++20,
 arm64-v8a and x86_64 only: the core uses `__int128`) and implements the
 [native contract](../docs/mobile-native.md) with Camera2, AudioRecord and ML Kit
-(bundled QR model). Capture is 60 fps on most devices (ImageReader, no
-constrained high-speed session); after 1.5 s of auto exposure the exposure is
-fixed at the full frame interval. Camera timestamps must be on the microphone's
+(bundled QR model). Capture uses the normal session (ImageReader) up to the
+best rate it lists; when 120/240 fps exist only in the constrained high-speed
+mode, `HighSpeedCapture.kt` reads the frames on the GPU instead, with a
+fallback to the normal session ([capture paths](../docs/mobile-native.md#android-capture-paths)).
+After 1.5 s of auto exposure the exposure is fixed at the full frame interval
+(high-speed: AE locked). Camera timestamps must be on the microphone's
 boot clock: REALTIME is used directly, an UNKNOWN source is matched against
 elapsedRealtime/nanoTime on the first frame, else the view reports
 "Camera clock unknown on this device". The clock check is SNTP, like iOS; the
@@ -88,13 +91,24 @@ cd android
 ./gradlew :avsync:connectedDebugAndroidTest   # with an emulator or device
 ```
 
-Unit tests cover the camera mode choice, the fixed-exposure ISO, SNTP and the
+Unit tests cover the camera mode choice (normal and high-speed), the
+high-speed texture crop, the fixed-exposure ISO, SNTP and the
 calibration WAV/waveform. `src/androidTest` checks the JNI bridge (live
 snapshot/poll and a clap calibration take).
 
 Not yet verified: the app on the emulator with a camera preview, the
 instrumented JNI test, and any real device (frame rate, exposure lock, the
 audio/camera clock alignment and calibration).
+
+## Android test APK
+
+GitHub Actions builds a release APK (arm64-v8a) for side-loading:
+`.github/workflows/android-apk.yaml`, on demand (Actions → Android APK → Run
+workflow) and on pull requests that touch the app or the core. Download the
+artifact `avsync-<version>-<commit>`, unzip it and install the `.apk` (allow
+installs from unknown sources, or `adb install -r -g`). It is signed with the Expo
+template's debug key, so a newer build installs over an older one; it is not for a
+store.
 
 ## EAS Cloud and TestFlight
 
