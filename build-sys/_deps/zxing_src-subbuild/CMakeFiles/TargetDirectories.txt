@@ -1,3 +1,0 @@
-/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/CMakeFiles/zxing_src-populate.dir
-/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/CMakeFiles/edit_cache.dir
-/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/CMakeFiles/rebuild_cache.dir
