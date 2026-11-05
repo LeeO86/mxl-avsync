@@ -76,7 +76,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private val frameMeta = object : LinkedHashMap<Long, Pair<Double, Double>>() {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Pair<Double, Double>>?) = size > 32
   }
-  private var lastResult: TotalCaptureResult? = null
+  @Volatile private var lastResult: TotalCaptureResult? = null
   private var analysisBusy = false
   private var qrBusy = false
   private var lastQrScan = 0L
@@ -110,7 +110,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   fun setTaiUtcOffset(seconds: Double) { taiUtcSeconds = seconds }
   fun setRequestedFps(fps: Double) {
     val value = fps.toInt()
-    if (value !in listOf(0, 60, 120, 240) || value == requestedFps) return
+    if (value !in listOf(0, 30, 60, 120, 240) || value == requestedFps) return
     requestedFps = value
     capture.post {
       highSpeedFailed = false
@@ -462,6 +462,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
 
   private fun emit(value: Map<String, Any?>) {
     val report = value.toMutableMap()
+    // Exposure once locked (as iOS reports it; 0 = still automatic): what the last frame used.
+    report["exposureMs"] = if (exposureMode == "auto") 0.0 else (lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L) / 1e6
     report["configuredFps"] = choice?.fps?.toDouble() ?: 0.0
     report["requestedFps"] = requestedFps.toDouble()
     report["captureContext"] = captureContext()

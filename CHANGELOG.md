@@ -14,6 +14,9 @@
 - Android: the exposure lock no longer gives up when the first camera result
   arrives after 1.5 s (seen on the emulator); it retries every 100 ms.
 
+- Android Debug shows the locked exposure (it always said "auto": the Android report
+  had no `exposureMs`), "AE locked" for the high-speed path, and "(asked N, camera max)"
+  when the camera cannot reach the chosen rate. The 30 fps choice works on Android.
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 
 TestFlight build 12 was built from the PR head before this release commit (same

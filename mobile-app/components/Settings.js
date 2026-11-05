@@ -50,7 +50,7 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
    <Text style={small}>Camera rate (fps)</Text>
    <Choice options={RATES} value={Number(session.captureFps) || 0} onChange={value => onChange({ captureFps: value })} />
    <Text style={{ ...small, marginTop: 8 }}>
-    {`Mode ${report?.captureContext?.cameraMode || '—'} · delivered ${Number.isFinite(d.fps) ? d.fps.toFixed(1) : '—'} fps · exposure ${Number.isFinite(report?.exposureMs) && report.exposureMs > 0 ? report.exposureMs.toFixed(2) + ' ms (locked)' : 'auto'}`}
+    {`Mode ${report?.captureContext?.cameraMode || '—'}${report?.requestedFps > 0 && report?.configuredFps > 0 && report.configuredFps < report.requestedFps ? ` (asked ${report.requestedFps}, camera max)` : ''} · delivered ${Number.isFinite(d.fps) ? d.fps.toFixed(1) : '—'} fps · exposure ${Number.isFinite(report?.exposureMs) && report.exposureMs > 0 ? report.exposureMs.toFixed(2) + (report?.captureContext?.exposureMode === 'ae-locked' ? ' ms (AE locked)' : ' ms (locked)') : 'auto'}`}
    </Text>
    <Text style={small}>{`Max frame gap ${Number.isFinite(stats.maxFrameGapMs) ? stats.maxFrameGapMs.toFixed(1) : '—'} ms · drops ${stats.dropCallbacks ?? '—'}`}</Text>
    {report?.captureContext?.capturePath !== undefined ? <Text style={small}>{`Capture path ${report.captureContext.capturePath === 'high_speed' ? 'high-speed' : report.captureContext.capturePath}${Number.isFinite(stats.gpuReadMaxMs) ? ` · GPU read ${stats.gpuReadMaxMs.toFixed(2)} ms max` : ''}`}</Text> : null}
