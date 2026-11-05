@@ -11,12 +11,13 @@
   `captureStats.gpuReadMaxMs` are new; Debug shows both.
 - Android: a normal session that lists 90 or 120 fps gets it at a size whose
   YUV and preview streams both keep up (1 % slack on the listed frame time).
-- Android: the exposure lock no longer gives up when the first camera result
-  arrives after 1.5 s (seen on the emulator); it retries every 100 ms.
-
+- Android: the exposure lock retries every 100 ms when no camera result has arrived
+  yet, instead of giving up.
 - Android Debug shows the locked exposure (it always said "auto": the Android report
-  had no `exposureMs`), "AE locked" for the high-speed path, and "(asked N, camera max)"
-  when the camera cannot reach the chosen rate. The 30 fps choice works on Android.
+  had no `exposureMs`, while the lock itself worked), "AE locked" for the high-speed
+  path, and "(asked N, camera max)" when the camera cannot reach the chosen rate. The
+  30 fps choice works on Android.
+
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 
 TestFlight build 12 was built from the PR head before this release commit (same
