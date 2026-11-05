@@ -17,6 +17,12 @@
   had no `exposureMs`, while the lock itself worked), "AE locked" for the high-speed
   path, and "(asked N, camera max)" when the camera cannot reach the chosen rate. The
   30 fps choice works on Android.
+- Android: the icons (Settings gear and others) show in the release build (the
+  Ionicons font is loaded at start; `expo-file-system` is now a direct dependency,
+  since loading the font needs it and it was not linked), and the status bar is
+  dark with light icons instead of white. Found on the Android emulator.
+- Android: the instrumented test (`connectedDebugAndroidTest`) builds; React
+  Native's `libc++_shared.so` and the module's no longer collide.
 
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 

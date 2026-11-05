@@ -3,6 +3,7 @@ import { AppState, Image, Linking, Modal, Platform, Pressable, SafeAreaView, Sha
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { requireNativeViewManager } from 'expo-modules-core';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useFonts } from 'expo-font';
 import native from './modules/avsync';
 import CalibrationReview from './components/CalibrationReview';
 import Measure from './components/Measure';
@@ -26,6 +27,7 @@ function loadSession() {
 }
 
 export default function App() {
+ useFonts(Ionicons.font); // the Android release showed no icons until the font was loaded here
  const [session, setSession] = useState(loadSession);
  const update = patch => setSession(previous => ({ ...previous, ...(typeof patch === 'function' ? patch(previous) : patch) }));
  useEffect(() => { native?.saveState?.(JSON.stringify(session)); }, [session]);
@@ -133,7 +135,7 @@ export default function App() {
    : <View style={{ padding: 20 }}><Text style={text}>AVsync needs the camera and the microphone to measure.</Text><Button primary title="Allow access" onPress={async () => { await requestCamera(); await requestMic(); }} /></View>;
 
  return <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-  <StatusBar barStyle="light-content" />
+  <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 6 }}>
    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
     <Image source={require('./assets/header-icon.png')} resizeMode="contain" style={{ width: 36, height: 36, marginRight: 10 }} />
