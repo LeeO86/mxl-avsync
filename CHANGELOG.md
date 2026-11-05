@@ -2,6 +2,9 @@
 
 ## Mobile (not released yet)
 
+- Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
+  release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
+  that touch the app or the core (`mobile-app/README.md`).
 - Android: 120 and 240 fps also on phones that offer them only in the
   camera's high-speed mode. The frames are read on the GPU as small luma
   copies (320 px wide live, 640 px for calibration, 960 px for the QR about

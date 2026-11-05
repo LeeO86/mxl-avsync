@@ -100,6 +100,16 @@ Not yet verified: the app on the emulator with a camera preview, the
 instrumented JNI test, and any real device (frame rate, exposure lock, the
 audio/camera clock alignment and calibration).
 
+## Android test APK
+
+GitHub Actions builds a release APK (arm64-v8a) for side-loading:
+`.github/workflows/android-apk.yaml`, on demand (Actions → Android APK → Run
+workflow) and on pull requests that touch the app or the core. Download the
+artifact `avsync-<version>-<commit>`, unzip it and install the `.apk` (allow
+installs from unknown sources, or `adb install -r -g`). It is signed with the Expo
+template's debug key, so a newer build installs over an older one; it is not for a
+store.
+
 ## EAS Cloud and TestFlight
 
 The linked EAS project is `@leeo86/mxl-avsync`. Run EAS commands from
