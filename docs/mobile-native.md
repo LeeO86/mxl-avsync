@@ -26,7 +26,8 @@ Event `onReport` with one of:
 
 - **status** — `PhoneAnalyzer::poll()` parsed, plus `captureContext`
   `{platform, model, os, audioRoute, sampleRate, cameraMode}` (iOS adds
-  `inputGain, inputGainSettable`), `configuredFps`
+  `inputGain, inputGainSettable`; Android adds `capturePath` `normal` or
+  `high_speed`, and `captureStats.gpuReadMaxMs` on the high-speed path), `configuredFps`
   and `clockMapping {monotonicMs, deviceUnixMs, clockId, timebase}` for the
   report's `timeMs`.
 - **calibration** — `{frames:[{timeMs, uri}], spikeTimeMs, fps, uri (WAV),
@@ -46,8 +47,40 @@ Event `onReport` with one of:
   edge falls between exposures (simulation: about 6 ms instead of 1 ms spread).
 - Pass each frame's exposure start (`pts_ms`), exposure and rolling-shutter
   readout (0 when unknown) on the same clock as the audio.
+- The core needs only the luma plane. The flash detector reads 50 points (two
+  5×5 grids placed by the QR), a calibration take keeps at most 640 px, so any
+  size that still shows the QR panel works.
 - Audio: mono float, 48 kHz preferred, timestamps on the camera clock.
 - QR: about 10 reads per second on a background thread, with the four corners
   normalized to the camera image; pass the capture time of that frame.
 - Every 100 ms: set the device-UTC offset (`unix ms − capture ms`), redraw the
   picture outline, and poll (calibration) or snapshot + poll on a worker (live).
+
+## Android capture paths
+
+- **Normal:** a `CameraCaptureSession` with the preview and a YUV `ImageReader`.
+  Used whenever its AE fps ranges reach the rate (Auto: the highest up to 240).
+  A phone that lists 90 or 120 fps there gets it here, at the size whose YUV and
+  preview streams both keep up (1 % slack on the listed frame duration).
+- **High speed:** used when the rate (or Auto) is above what the normal session
+  offers and the camera lists a constrained high-speed mode with a fixed range
+  (`120–120`, `240–240`) at 1280×720 or more. That session takes GPU surfaces
+  only, so `HighSpeedCapture.kt` gives it one `SurfaceTexture`:
+  - each frame is drawn into a small offscreen target, four luma pixels per
+    RGBA pixel, and read with `glReadPixels`: 320 px wide live, 640 px during a
+    calibration take, 960 px about 10 times a second for the QR reader;
+  - the texture is sampled in buffer order, so the luma has the orientation of
+    the normal path's Y plane and QR corners need no change;
+  - the timestamp is `SurfaceTexture.getTimestamp()`, the sensor timestamp, and
+    goes through the same camera-clock mapping as the normal path;
+  - the preview is drawn from the same frames at about 30 fps (one camera
+    output only: with two, the burst list gives one of them only 30 fps);
+  - exposure: high-speed requests ignore manual exposure and focus, so after
+    1.5 s AE and white balance are locked where they stand and focus is locked
+    with one AF trigger. `exposureMode` is `ae-locked`; the exposure is often
+    shorter than the frame interval in bright light.
+- **Fallback:** if the GPU setup, the session or the burst fails, or no frame
+  arrives within 3 s, the view restarts with the normal session (status
+  "High-speed capture failed (…) · using normal capture") until the rate changes.
+- **Exposure lock timing:** the lock waits for the first capture result and
+  retries every 100 ms (slow cameras such as the emulator's start late).

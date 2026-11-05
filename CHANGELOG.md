@@ -1,5 +1,19 @@
 # Changelog
 
+## Mobile (not released yet)
+
+- Android: 120 and 240 fps also on phones that offer them only in the
+  camera's high-speed mode. The frames are read on the GPU as small luma
+  copies (320 px wide live, 640 px for calibration, 960 px for the QR about
+  10 times a second); exposure is AE-locked there because that mode allows no
+  manual exposure. If the mode fails the app uses the normal camera.
+  `captureContext.capturePath` (`normal` or `high_speed`) and
+  `captureStats.gpuReadMaxMs` are new; Debug shows both.
+- Android: a normal session that lists 90 or 120 fps gets it at a size whose
+  YUV and preview streams both keep up (1 % slack on the listed frame time).
+- Android: the exposure lock no longer gives up when the first camera result
+  arrives after 1.5 s (seen on the emulator); it retries every 100 ms.
+
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 
 TestFlight build 12 was built from the PR head before this release commit (same

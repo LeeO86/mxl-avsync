@@ -7,6 +7,13 @@ Both apps capture through the shared analyzer ([native contract](mobile-native.m
   exposure, focus and white balance are locked and the exposure is set to the
   full frame interval, with the ISO that keeps the same brightness. Restart
   (or re-aiming after a rate change) repeats this.
+- **Android 120/240 fps:** many phones offer these rates only in the camera's
+  high-speed mode. The app then reads the frames on the GPU (small luma copies)
+  and locks the automatic exposure instead of fixing it to the frame interval,
+  because that mode does not allow manual exposure. If the mode fails, the app
+  falls back to the normal camera at its best rate. Debug shows the path
+  ("Capture path normal" or "high-speed") and the GPU read time
+  ([details](mobile-native.md#android-capture-paths)).
 - **Why a full-frame exposure:** each light edge then becomes a ramp across
   one frame, which the detector times exactly from the edge samples. With a
   short exposure the edge can fall between two exposures, and the time can only

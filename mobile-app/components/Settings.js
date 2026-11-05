@@ -53,6 +53,7 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
     {`Mode ${report?.captureContext?.cameraMode || '—'} · delivered ${Number.isFinite(d.fps) ? d.fps.toFixed(1) : '—'} fps · exposure ${Number.isFinite(report?.exposureMs) && report.exposureMs > 0 ? report.exposureMs.toFixed(2) + ' ms (locked)' : 'auto'}`}
    </Text>
    <Text style={small}>{`Max frame gap ${Number.isFinite(stats.maxFrameGapMs) ? stats.maxFrameGapMs.toFixed(1) : '—'} ms · drops ${stats.dropCallbacks ?? '—'}`}</Text>
+   {report?.captureContext?.capturePath !== undefined ? <Text style={small}>{`Capture path ${report.captureContext.capturePath === 'high_speed' ? 'high-speed' : report.captureContext.capturePath}${Number.isFinite(stats.gpuReadMaxMs) ? ` · GPU read ${stats.gpuReadMaxMs.toFixed(2)} ms max` : ''}`}</Text> : null}
    {report?.captureContext?.inputGain !== undefined ? <Text style={small}>{`Mic gain ${Number(report.captureContext.inputGain).toFixed(2)} · ${report.captureContext.inputGainSettable ? 'settable' : 'fixed'}`}</Text> : null}
   </Card>
   <Card style={card}>
