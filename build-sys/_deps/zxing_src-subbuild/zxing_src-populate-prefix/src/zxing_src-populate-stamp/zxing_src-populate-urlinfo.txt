@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/usr/bin/cmake;-P;/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/download-zxing_src-populate.cmake;COMMAND;/usr/bin/cmake;-P;/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/verify-zxing_src-populate.cmake;COMMAND;/usr/bin/cmake;-P;/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/extract-zxing_src-populate.cmake
+source_dir=/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-src
+work_dir=/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps
+url(s)=https://github.com/zxing-cpp/zxing-cpp/archive/refs/tags/v2.3.0.tar.gz
+hash=SHA256=64e4139103fdbc57752698ee15b5f0b0f7af9a0331ecbdc492047e0772c417ba
+no_extract=
+

@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/CMakeFiles/zxing_src-populate"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/CMakeFiles/zxing_src-populate.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/CMakeFiles/zxing_src-populate-complete.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-build.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-configure.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-download.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-install.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-mkdir.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-patch.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-test.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/zxing_src-subbuild/zxing_src-populate-prefix/src/zxing_src-populate-stamp/zxing_src-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"zxing_src-populate"
+		],
+		"name" : "zxing_src-populate"
+	}
+}

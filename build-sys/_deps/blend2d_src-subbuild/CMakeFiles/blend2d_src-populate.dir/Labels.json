@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/CMakeFiles/blend2d_src-populate"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/CMakeFiles/blend2d_src-populate.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/CMakeFiles/blend2d_src-populate-complete.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-build.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-configure.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-download.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-install.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-mkdir.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-patch.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-test.rule"
+		},
+		{
+			"file" : "/tmp/claude-1000/-home-team42-mxl-lab/ab2ee25b-5594-4c0a-9c31-63e411ece620/scratchpad/pr62/build-sys/_deps/blend2d_src-subbuild/blend2d_src-populate-prefix/src/blend2d_src-populate-stamp/blend2d_src-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"blend2d_src-populate"
+		],
+		"name" : "blend2d_src-populate"
+	}
+}
