@@ -293,10 +293,11 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   // Exposure = the full frame interval, with the ISO that keeps the automatic brightness.
-  private fun lockExposure(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
+  private fun lockExposure(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder, tries: Int = 0) {
     if (session != s) return
-    // The first result can come late (slow cameras, the emulator): try again every 100 ms.
-    val result = lastResult ?: return retryLock(device, s, request)
+    // The first result can come late (slow cameras, the emulator): try again every 100 ms for 3 s,
+    // then give up on the lock and end the hold, so the analysis runs with what the camera has.
+    val result = lastResult ?: return if (tries < 30) retryLock(device, s, request, tries + 1) else endFocus()
     if (s is CameraConstrainedHighSpeedCaptureSession) return lockHighSpeed(s, request)
     val c = characteristics!!
     val capabilities = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList().orEmpty()
@@ -327,8 +328,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     endFocus()
   }
 
-  private fun retryLock(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
-    capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 100)
+  private fun retryLock(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder, tries: Int) {
+    capture.postAtTime({ lockExposure(device, s, request, tries) }, LOCK, SystemClock.uptimeMillis() + 100)
   }
 
   // High-speed requests ignore manual exposure and focus: lock AE and AWB where AE stands, and
