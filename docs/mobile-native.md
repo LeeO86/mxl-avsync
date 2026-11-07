@@ -102,4 +102,6 @@ Event `onReport` with one of:
   arrives within 3 s, the view restarts with the normal session (status
   "High-speed capture failed (…) · using normal capture") until the rate changes.
 - **Exposure lock timing:** the lock waits for the first capture result and
-  retries every 100 ms (slow cameras such as the emulator's start late).
+  retries every 100 ms (slow cameras such as the emulator's start late). After
+  3 s of retries it gives up: the camera stays automatic and the hold ends, so
+  frames are measured anyway.
