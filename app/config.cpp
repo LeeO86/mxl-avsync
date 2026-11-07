@@ -98,7 +98,9 @@ std::string Config::effective_test_id() const
     if (!test_id.empty()) return test_id;
     return generator_test_id(seed() + "-", seed(), kAppVersion,
                              {"rate=" + std::to_string(event_rate), "timecode=" + audio_timecode,
-                              "format=" + video_format, "offset_ms=" + std::to_string(offset_ms)});
+                              "format=" + video_format, "offset_ms=" + std::to_string(offset_ms),
+                              "audio_lead_ms=" + std::to_string(audio_lead_ms), "video_lead_ms=" + std::to_string(video_lead_ms),
+                              "emit_video_ms=" + source_emit_video_ms, "emit_audio_ms=" + source_emit_audio_ms});
 }
 
 std::string Config::label() const

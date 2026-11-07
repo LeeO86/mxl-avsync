@@ -59,9 +59,10 @@ output paths have unverified delays; use the built-in speaker.
 
 The source ID (the QR test id; the audio packet carries its CRC-32) stays the
 same when you stop and start the generator again. It is `phone-` plus 12 hex
-digits of a hash of a random install ID, the app version and the timing
-settings (now only the event rate). So you get a new ID after a reinstall, a
-new app version or another event rate. Name, subtitle and image do not change
+digits of a hash of a random install ID, the app version with its build
+number (for example `2.0.8 (12)`) and the timing settings (now only the event
+rate). So you get a new ID after a reinstall, a new app version or build (also a
+new TestFlight build) or another event rate. Name, subtitle and image do not change
 it. The install ID is random, not a hardware ID, and only lives in the app's
 settings. The container generator uses the same rule with its NMOS seed in
 place of the install ID (`AVSYNC_TEST_ID` in the specification, §10.2). Test

@@ -164,14 +164,15 @@ final class AvsyncGeneratorController: UIViewController {
       canvas.layer.contents = first.cgImage
       try fillAhead(now: after)
   }
-  // Same install, app version and timing settings give the same ID, so a restart keeps it.
+  // Same install, app version (with build number) and timing settings give the same ID, so a restart keeps it.
   // The install ID is random, kept in UserDefaults and gone after a reinstall.
   // Name, subtitle and image are cosmetic and stay out. Add a new timing setting to `settings`.
   private static func stableSourceID(rate: Int) -> String {
     let defaults = UserDefaults.standard, key = "avsync.generator.installId"
     let install = defaults.string(forKey: key) ?? UUID().uuidString
     defaults.set(install, forKey: key)
-    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    let info = Bundle.main.infoDictionary ?? [:]
+    let version = "\(info["CFBundleShortVersionString"] as? String ?? "") (\(info["CFBundleVersion"] as? String ?? ""))"
     let settings = ["rate=\(rate)"]
     return AVSyncGenerator.testID(prefix: "phone-", installID: install, version: version, settings: settings)
   }
