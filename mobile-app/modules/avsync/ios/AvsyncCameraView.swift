@@ -220,8 +220,10 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       device.unlockForConfiguration()
     }
     control.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-      guard let self, ticket == self.lockGeneration, let device = self.cameraDevice, self.session.isRunning,
-            (try? device.lockForConfiguration()) != nil else { return }
+      guard let self, ticket == self.lockGeneration else { return } // a newer tap or restart owns the lock
+      // A tap-to-focus hold ends here even when the lock fails: analyse with the focus it has.
+      defer { self.samples.async { if self.focusing { self.restart() } } }
+      guard let device = self.cameraDevice, self.session.isRunning, (try? device.lockForConfiguration()) != nil else { return }
       defer { device.unlockForConfiguration() }
       let frame = device.activeVideoMinFrameDuration, longest = device.activeFormat.maxExposureDuration
       let duration = CMTimeCompare(frame, longest) <= 0 ? frame : longest
@@ -230,7 +232,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
       if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
       if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
       let ms = duration.seconds * 1000
-      self.samples.async { self.exposureMs = ms; if self.focusing { self.restart() } }
+      self.samples.async { self.exposureMs = ms }
     }
   }
 
