@@ -132,7 +132,7 @@ final class AvsyncGeneratorController: UIViewController {
     } catch { stop("Cannot start: \(error.localizedDescription)") }
   }
   private func beginPlan(target: Double) throws {
-      sourceID = "phone-" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24)
+      sourceID = Self.stableSourceID(rate: rate)
       // Date and AV host time are sampled as a bracket. Preserve one mapping for
       // the whole session; stop if wall clock later jumps instead of rewriting it.
       let before = CACurrentMediaTime(), utc = Date().timeIntervalSince1970, after = CACurrentMediaTime()
@@ -163,6 +163,17 @@ final class AvsyncGeneratorController: UIViewController {
       let first = plan.image(sequence: 1); images[1] = first
       canvas.layer.contents = first.cgImage
       try fillAhead(now: after)
+  }
+  // Same install, app version and timing settings give the same ID, so a restart keeps it.
+  // The install ID is random, kept in UserDefaults and gone after a reinstall.
+  // Name, subtitle and image are cosmetic and stay out. Add a new timing setting to `settings`.
+  private static func stableSourceID(rate: Int) -> String {
+    let defaults = UserDefaults.standard, key = "avsync.generator.installId"
+    let install = defaults.string(forKey: key) ?? UUID().uuidString
+    defaults.set(install, forKey: key)
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    let settings = ["rate=\(rate)"]
+    return AVSyncGenerator.testID(prefix: "phone-", installID: install, version: version, settings: settings)
   }
   private func fillAhead(now: Double) throws {
     guard let plan else { return }

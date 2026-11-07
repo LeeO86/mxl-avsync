@@ -455,3 +455,18 @@ TEST_CASE("cross runs give the round trip; a trusted clock plus one reference la
     CHECK(std::abs(known.split->in_b_ms - r.in_b) < 0.05);
     CHECK(std::abs(known.split->out_b_ms - r.out_b) < 0.1);
 }
+
+TEST_CASE("generator test id is stable per install, version and timing settings") {
+    const std::string install = "00000000-0000-4000-8000-000000000000";
+    const auto id = generator_test_id("phone-", install, "2.0.8", {"rate=1"});
+    CHECK(id == "phone-985274814721"); // shared test vector, see docs/phone-generator.md
+    CHECK(generator_test_id("phone-", install, "2.0.8", {"rate=1"}) == id);  // restart
+    CHECK(generator_test_id("phone-", install, "2.0.9", {"rate=1"}) != id);  // new app version
+    CHECK(generator_test_id("phone-", install, "2.0.8", {"rate=2"}) != id);  // new event rate
+    CHECK(generator_test_id("phone-", install, "2.0.8", {"rate=1", "music=on"}) != id); // added setting
+    CHECK(generator_test_id("phone-", "11111111-1111-4111-8111-111111111111", "2.0.8", {"rate=1"}) != id); // reinstall
+    // Name, subtitle and image are not inputs, so they cannot change the id.
+    const auto long_id = generator_test_id(std::string(80, 'x') + "-", install, "2.0.8", {"rate=1"});
+    CHECK(long_id.size() == 64);
+    CHECK(long_id.substr(52) == id.substr(6));
+}

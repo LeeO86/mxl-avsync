@@ -90,6 +90,17 @@ std::string Config::seed() const
     return nmos_seed.empty() ? host_id + "-avsync" : nmos_seed;
 }
 
+// An operator-set AVSYNC_TEST_ID stays as it is. Empty: the NMOS seed plus a short hash of the
+// seed, the app version and the timing settings, the same rule as the phone generator.
+// Title, source and subtitle are not inputs.
+std::string Config::effective_test_id() const
+{
+    if (!test_id.empty()) return test_id;
+    return generator_test_id(seed() + "-", seed(), kAppVersion,
+                             {"rate=" + std::to_string(event_rate), "timecode=" + audio_timecode,
+                              "format=" + video_format, "offset_ms=" + std::to_string(offset_ms)});
+}
+
 std::string Config::label() const
 {
     return nmos_label.empty() ? host_id : nmos_label;
@@ -175,7 +186,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.qr_period_ms = static_cast<int>(num(pick("AVSYNC_QR_PERIOD_MS", "1000"), "AVSYNC_QR_PERIOD_MS"));
     config.host_id = short_host(pick("HOST_ID", config.host_id));
     config.nmos_seed = pick("NMOS_SEED", config.host_id + "-avsync");
-    config.test_id = pick("AVSYNC_TEST_ID", config.nmos_seed);
+    config.test_id = pick("AVSYNC_TEST_ID", "");
     config.title = pick("AVSYNC_TITLE", "");
     config.source = pick("AVSYNC_SOURCE", "");
     config.subtitle = pick("AVSYNC_SUBTITLE", "");

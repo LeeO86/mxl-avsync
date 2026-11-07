@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace avsync {
@@ -29,6 +30,11 @@ struct AudioTimecode {
 };
 
 uint32_t timecode_source_id(const char *text);
+// Stable sender (generator) test id: prefix + 12 hex digits of FNV-1a 64 over the install id,
+// the app version and the timing settings ("key=value", one entry each). Same inputs give the
+// same id. Name, subtitle and image are not inputs. A long prefix is cut to keep 64 characters.
+std::string generator_test_id(const std::string &prefix, const std::string &install_id,
+                              const std::string &app_version, const std::vector<std::string> &settings);
 int64_t quantize_timecode_ns(int64_t ns);
 std::vector<uint8_t> encode_timecode(uint32_t source_id, int64_t video_ns, int64_t offset_ns,
                                      bool live, bool estimated_source = false);

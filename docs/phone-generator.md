@@ -52,8 +52,21 @@ It prevents automatic screen lock and raises brightness while active, restoring
 both when stopped. Stop/Close cancel queued sound and remove the timing picture.
 App inactivity, audio interruptions, output/configuration changes, a wall-clock
 jump over 100 ms, missed scheduling deadlines and the 23-hour session limit stop
-the source. Restart creates a fresh source ID and clock mapping. Bluetooth and
-other external output paths have unverified delays; use the built-in speaker.
+the source. Restart creates a fresh clock mapping. Bluetooth and other external
+output paths have unverified delays; use the built-in speaker.
+
+## Source ID
+
+The source ID (the QR test id; the audio packet carries its CRC-32) stays the
+same when you stop and start the generator again. It is `phone-` plus 12 hex
+digits of a hash of a random install ID, the app version and the timing
+settings (now only the event rate). So you get a new ID after a reinstall, a
+new app version or another event rate. Name, subtitle and image do not change
+it. The install ID is random, not a hardware ID, and only lives in the app's
+settings. The container generator uses the same rule with its NMOS seed in
+place of the install ID (`AVSYNC_TEST_ID` in the specification, §10.2). Test
+vector: install ID `00000000-0000-4000-8000-000000000000`, version `2.0.8`,
+`rate=1` gives `phone-985274814721`.
 
 The live reader first tries the inexpensive full-raster marker path, then a
 cached, validated fiducial pose. Searches are limited to a 960-pixel search raster;
