@@ -7,6 +7,11 @@ Both apps capture through the shared analyzer ([native contract](mobile-native.m
   exposure, focus and white balance are locked and the exposure is set to the
   full frame interval, with the ISO that keeps the same brightness. Restart
   (or re-aiming after a rate change) repeats this.
+- **Tap to focus:** a quick tap on the camera picture runs the same 1.5 s step
+  again, but focus and exposure look at the tapped spot. A yellow square shows
+  the spot and fades after the lock. Frames from those 1.5 s are not used: the
+  last reading stays greyed and the measurement starts fresh after the lock.
+  Taps are ignored during calibration, so the clap take is never cut.
 - **Android 120/240 fps:** many phones offer these rates only in the camera's
   high-speed mode. The app then reads the frames on the GPU (small luma copies)
   and locks the automatic exposure instead of fixing it to the frame interval,

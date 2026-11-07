@@ -37,6 +37,11 @@ The camera runs at its fastest mode up to 240 fps. After 1.5 s it locks focus
 and white balance and exposes for the full frame interval
 ([why](../docs/qr-flash.md)). A 30 fps camera needs a 1 event/s source.
 
+**Tap the camera picture** to focus on that spot: a yellow square shows where,
+the camera adjusts focus and exposure there for 1.5 s and locks again. The last
+reading stays greyed meanwhile; then the measurement starts fresh. Taps do
+nothing during calibration.
+
 ## Calibration
 
 Settings → Calibrate this phone. Point the camera at your hands, tap Start and

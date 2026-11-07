@@ -1,5 +1,19 @@
 # mxl-avsync — Implementation plan
 
+## Tap to focus (mobile, unreleased, 2026-11-07)
+
+Maintainer decision: a quick tap on the Measure camera picture re-runs the
+1.5 s automatic exposure/focus/white-balance step metered on the tapped spot,
+then locks exactly as at start (§12 and `docs/mobile-native.md` only describe
+the full-frame lock). Addition, not a change to the lock: frames and audio
+from the tap to the lock are dropped and the analyzer is reset at the lock, so
+no reading uses the refocus window. The JS side reuses the restart path but
+keeps the held reading (greyed) instead of clearing it. Taps are ignored while
+a calibration flow is open (aim, clap, review), because the reset at the lock
+would cut a running take. The tapped spot stays for a later Restart. The native
+parts (iOS point conversion, Android region mapping and high-speed AF cancel)
+were not compiled or run on a device in this change.
+
 ## Diagnostic TestFlight delivery (2026-11-01)
 
 After local validation the maintainer explicitly authorized one EAS Cloud build

@@ -2,6 +2,12 @@
 
 ## Mobile (not released yet)
 
+- Tap to focus (iOS and Android): a quick tap on the camera picture in Measure
+  runs the 1.5 s automatic focus and exposure again, metered on the tapped
+  spot, then locks as before. A yellow square marks the spot and fades after
+  the lock. Frames from those 1.5 s are dropped and the measurement starts
+  fresh after the lock; the last reading stays greyed meanwhile. Taps are
+  ignored during calibration. New camera view method `focusAt(x, y)`.
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
   release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
   that touch the app or the core (`mobile-app/README.md`).

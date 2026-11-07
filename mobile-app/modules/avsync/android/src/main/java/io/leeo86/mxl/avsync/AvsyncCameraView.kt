@@ -20,6 +20,7 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.media.AudioManager
 import android.media.ImageReader
 import android.os.Build
@@ -61,6 +62,10 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var generation = 0
   private var camera: CameraDevice? = null
   private var session: CameraCaptureSession? = null
+  // The repeating request of the session, kept for tap to focus.
+  private var repeating: CaptureRequest.Builder? = null
+  // Tap to focus: frames and audio are dropped until the new lock.
+  private var focusing = false
   private var reader: ImageReader? = null
   private var fast: HighSpeedCapture? = null
   // Set when a high-speed session failed; the normal session is used until the rate changes.
@@ -119,8 +124,9 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       emit(mapOf("kind" to "status", "fps" to 0, "message" to "Capture rate changed · collecting fresh events"))
     }
   }
-  fun beginCalibration() { outline.clear(); capture.post { generation++; calibrationReported = false; analyzer.beginCalibration() } }
-  fun resumeAnalysis() { outline.clear(); capture.post { generation++; calibrationReported = false; analyzer.reset() } }
+  fun beginCalibration() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.beginCalibration() } }
+  fun resumeAnalysis() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.reset() } }
+  fun focusAt(x: Double, y: Double) { capture.post { refocus(x, y) } }
 
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
@@ -181,7 +187,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       // REALTIME timestamps are CLOCK_BOOTTIME, like the microphone. UNKNOWN is checked on the first frame.
       cameraClock = if (c.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) "realtime" else null
       monotonicToBootNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
-      generation++; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0; failedFrames = 0
+      generation++; focusing = false; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0; failedFrames = 0
       main.post { configureTransform() }
       if (!picked.highSpeed) {
         val imageReader = ImageReader.newInstance(picked.size.width, picked.size.height, ImageFormat.YUV_420_888, 4)
@@ -189,7 +195,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
         reader = imageReader
       }
       val microphone = AudioCapture(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager) { samples, n, pts ->
-        capture.post { if (running) { analyzer.pushAudio(samples, n, pts, 48_000); housekeeping() } }
+        capture.post { if (running && !focusing) { analyzer.pushAudio(samples, n, pts, 48_000); housekeeping() } }
       }
       running = true
       manager.openCamera(id, object : CameraDevice.StateCallback() {
@@ -207,6 +213,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private fun stopCapture() {
     generation++
     running = false
+    focusing = false
+    repeating = null
     audio?.stop(); audio = null
     runCatching { session?.close() }; session = null
     runCatching { camera?.close() }; camera = null
@@ -235,6 +243,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
           set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         }
         exposureMode = "auto"
+        repeating = request
         s.setRepeatingRequest(request.build(), results, capture)
         // About 1.5 s of automatic exposure, then fixed focus, white balance and exposure.
         capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
@@ -264,6 +273,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
           set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(picked.aeMin, picked.aeMax))
         }
         exposureMode = "auto"
+        repeating = request
         try { burst.setRepeatingBurst(burst.createHighSpeedRequestList(request.build()), results, capture) }
         catch (e: Exception) { return fallBack(e.message ?: "burst refused") }
         capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
@@ -313,6 +323,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       exposureMode = "ae-locked"
     }
     runCatching { s.setRepeatingRequest(request.build(), results, capture) }.onFailure { fail(it.message ?: "Cannot lock the camera exposure.") }
+    endFocus()
   }
 
   private fun retryLock(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
@@ -331,6 +342,46 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       s.setRepeatingBurst(s.createHighSpeedRequestList(request.build()), results, capture)
       exposureMode = "ae-locked"
     }.onFailure { fail(it.message ?: "Cannot lock the camera exposure.") }
+    endFocus()
+  }
+
+  // Tap to focus (x, y: 0…1 across the view): hold the analysis, re-run the 1.5 s auto step with
+  // AF and AE metered on that spot, lock again as at start, then start fresh (endFocus), so no
+  // frame from the auto step reaches a reading.
+  private fun refocus(x: Double, y: Double) {
+    val s = session ?: return; val device = camera ?: return; val request = repeating ?: return
+    val c = characteristics ?: return; val picked = choice ?: return
+    if (!running || analyzer.calibrating() || lastFrameMs < 0) return
+    val active = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+    val (x0, y0, side) = CaptureProfile.meteringSquare(x, y, width, height, sensorRotation(), picked.size, active.width(), active.height())
+    val region = arrayOf(MeteringRectangle(x0, y0, side, side, MeteringRectangle.METERING_WEIGHT_MAX))
+    capture.removeCallbacksAndMessages(LOCK)
+    generation++; focusing = true; exposureMode = "auto"
+    main.post { outline.clear() }
+    if ((c.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0) > 0) request.set(CaptureRequest.CONTROL_AF_REGIONS, region)
+    if ((c.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0) > 0) request.set(CaptureRequest.CONTROL_AE_REGIONS, region)
+    request.set(CaptureRequest.CONTROL_AE_LOCK, false)
+    request.set(CaptureRequest.CONTROL_AWB_LOCK, false)
+    runCatching {
+      if (s is CameraConstrainedHighSpeedCaptureSession) {
+        // AF stays continuous-video in this mode: one cancel trigger releases the locked focus.
+        request.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+        s.captureBurst(s.createHighSpeedRequestList(request.build()), results, capture)
+        request.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+        s.setRepeatingBurst(s.createHighSpeedRequestList(request.build()), results, capture)
+      } else {
+        request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+        s.setRepeatingRequest(request.build(), results, capture)
+      }
+    }.onFailure { return fail(it.message ?: "Cannot refocus the camera.") }
+    capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
+  }
+
+  // After a tap-to-focus lock: drop what came before and start fresh.
+  private fun endFocus() {
+    if (!focusing) return
+    focusing = false; generation++; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0
   }
 
   private val results = object : CameraCaptureSession.CaptureCallback() {
@@ -377,7 +428,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
 
   // One frame from either path: timestamp on the camera clock, luma plane, and a QR copy on demand.
   private fun pushFrame(timestampNs: Long, luma: java.nio.ByteBuffer, width: Int, height: Int, stride: Int, qrCopy: () -> QrReader.Frame) {
-    if (!running) return
+    if (!running || focusing) return
     if (cameraClock == null && !identifyClock(timestampNs)) return
     val pts = bootMs(timestampNs)
     // The result can arrive after the image; then the previous frame's values stand in.

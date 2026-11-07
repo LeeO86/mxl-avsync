@@ -86,6 +86,8 @@ export default function App() {
  useEffect(() => { if (view.reading?.fresh) setHeld(view.reading); }, [report]);
 
  const restart = () => { setReport(null); setHeld(null); setNotice(null); camera.current?.resumeAnalysis?.(); };
+ // Tap to focus: like restart, but the last reading stays greyed (held) while the camera refocuses.
+ const refocus = (x, y) => { setReport(null); setNotice(null); camera.current?.focusAt?.(x, y); };
  const save = () => {
   const item = savedResult(view.reading, { calibration });
   if (!item) return;
@@ -147,7 +149,7 @@ export default function App() {
   </View>
   <View style={{ flex: 1, display: tab === 'measure' ? 'flex' : 'none' }}>
    <Measure camera={cameraView} view={view} flow={flow} calibrated={Boolean(calibration)} notice={notice}
-    onSave={save} onRestart={restart}
+    onSave={save} onRestart={restart} onFocus={NativeCamera && granted ? refocus : null}
     onStartCalibration={() => { setFlow('listening'); setNotice(null); camera.current?.beginCalibration?.(); }}
     onCancelCalibration={() => { setFlow(null); restart(); }} />
   </View>
