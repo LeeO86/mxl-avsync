@@ -78,7 +78,9 @@ int main(int argc, char** argv)
             PictureInfo info;
             info.title = "TEST SIGNAL";
             info.source = "Synthetic phone camera";
-            info.qr_json = qr_payload_text(plan.qr(plan.named_seq(frame)));
+            auto qr = plan.qr(plan.named_seq(frame));
+            qr.name = "Fixture phone"; // AVS4: the analyzer status shows it with the real test ID
+            info.qr_json = qr_payload_text(qr);
             info.period_ms = 1000.0 / rate;
             render_picture(source, info, sequence, position, plan.period_frames(), plan.a_white(frame));
             // Resample source pixels; its 60-Hz QR/flash must survive 50-Hz capture.

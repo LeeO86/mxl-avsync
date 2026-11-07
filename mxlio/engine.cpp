@@ -301,6 +301,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 payload.qr_flash = payload.optical_code = payload.timecode;
                 payload.test_id = config.effective_test_id();
                 payload.source_id = timecode_source_id(payload.test_id.c_str());
+                payload.name = config.source; // the Signal form Title; cosmetic. Output offset not calibrated yet
                 payload.mode = "LIVE";
                 payload.k = named_seq;
                 payload.tk = static_cast<int64_t>(time_of_index(pace, named));
@@ -625,6 +626,19 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     bool tracker_optical = false;
     AudioTimecodeStream timecode_stream;
     std::optional<QrPayload> signal_qr;
+    // Report the QR source (ID, name, sender calibration) to the status API when it changes.
+    std::optional<QrPayload> reported_signal;
+    auto report_signal = [&] {
+        auto same = [](const QrPayload& a, const QrPayload& b) {
+            return a.source_id == b.source_id && a.test_id == b.test_id && a.name == b.name && a.mode == b.mode && a.rate == b.rate &&
+                a.format == b.format && a.estimated_source == b.estimated_source && a.calibration.method == b.calibration.method &&
+                a.calibration.offset_ms == b.calibration.offset_ms && a.calibration.uncertainty_ms == b.calibration.uncertainty_ms &&
+                a.calibration.day == b.calibration.day;
+        };
+        if (bool(signal_qr) == bool(reported_signal) && (!signal_qr || same(*signal_qr, *reported_signal))) return;
+        reported_signal = signal_qr;
+        if (callbacks.set_signal) callbacks.set_signal(signal_qr);
+    };
     double qr_read_ms = -1e30;
     std::optional<Pairer> pairer;
     std::string tracker_flow;
@@ -942,9 +956,10 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 }
                 signal_qr=next;qr_flash.observe(*qr_detection,tai_ns/1e6);
             } else if(qr_detection&&signal_qr&&signal_qr->qr_flash) {
-                signal_qr.reset();qr_flash.reset();tracker.reset();continue;
+                signal_qr.reset();qr_flash.reset();tracker.reset();report_signal();continue;
             }
         }
+        report_signal();
         if(signal_qr&&signal_qr->qr_flash) {
             VideoObservation frame;frame.grain_index=int64_t(want);frame.time_ms=tai_ns/1e6;frame.tai_ns=tai_ns;
             frame.have_arrival=true;frame.arrival_ms=video_arrived_ns/1e6;
@@ -984,6 +999,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     signal_qr = std::move(next);
                 }
             }
+            report_signal();
         }
         // The picture's strip counts source frames, not the camera/encoder's
         // frame rate. Keep received MXL timestamps for the measurement itself.

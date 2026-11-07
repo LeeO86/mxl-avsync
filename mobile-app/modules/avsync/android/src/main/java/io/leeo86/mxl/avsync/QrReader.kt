@@ -8,7 +8,7 @@ import com.google.mlkit.vision.common.InputImage
 import java.nio.ByteBuffer
 
 // ML Kit QR reader (bundled model) on a downscaled copy of the camera luma. Corners come back
-// normalized to the camera image, x TL, TR, BR, BL then y; only AVS3 payloads count.
+// normalized to the camera image, x TL, TR, BR, BL then y; only AVS4 payloads count.
 class QrReader : AutoCloseable {
   class Detection(val payload: String, val corners: DoubleArray)
   // width × height is the copy; step maps it back to the camera image (cameraWidth × cameraHeight).
@@ -37,7 +37,7 @@ class QrReader : AutoCloseable {
     return Tasks.await(scanner.process(image)).mapNotNull { code ->
       val text = code.rawValue ?: return@mapNotNull null
       val points = code.cornerPoints ?: return@mapNotNull null
-      if (!text.startsWith("AVS3:") || points.size != 4) return@mapNotNull null
+      if (!text.startsWith("AVS4:") || points.size != 4) return@mapNotNull null
       Detection(text, DoubleArray(8) { i -> if (i < 4) points[i].x.toDouble() * frame.step / frame.cameraWidth else points[i - 4].y.toDouble() * frame.step / frame.cameraHeight })
     }
   }

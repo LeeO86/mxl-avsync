@@ -1278,3 +1278,38 @@ Generator name in the QR: not done. The live QR of the phone and the container
 the core parser rejects any other length and Android reads only `AVS3:`. A name
 in it would make today's analysers lose the picture. Only the JSON QR (legacy
 timecode, FILE) ignores unknown keys. Open for a maintainer decision.
+
+## AVS4 picture QR (2026-11-07)
+
+Maintainer decision: no backwards compatibility (two iPhones, one Android phone
+and two containers, all updated together). AVS4 replaces the AVS2/AVS3 QR text
+and answers the open "generator name in the QR" point above.
+
+- Carries everything AVS3 did, plus the real test id, the generator name
+  (container: Signal form Title, `AVSYNC_SOURCE`; phone: Name field; at most 24 UTF-8 bytes, cut at a
+  whole character) and the sender calibration (method none/clap/transponder/
+  pulse-train, offset, uncertainty, date). Generators send method none until the
+  source-output calibration exists. Layout: SPECIFICATION "QR + optical code".
+- Size: before, 59 alphanumeric characters at version 4 (33 modules), ECC Q.
+  After, at most 90 characters at version 4 (33 modules), ECC M. The module
+  count and the picture layout stay the same. Keeping ECC Q would need version 6
+  (41 modules, about 20 % smaller modules at the same QR size) for the same 90 characters.
+- Compact encoding, chosen to stay inside version 4: base45 (QR alphanumeric,
+  5.5 bits per character, against 4 bits per byte value for hex), flags, rate and
+  format packed into one byte, k in 40 bits, offset in 24 bits, test id at 6 bits
+  per character, source id derived from the id (CRC-32) instead of sent. A test
+  id that does not fit (more than 50 characters, 42 with a calibration block, or other characters than
+  `0-9a-zA-Z-_`) falls back to the source id alone and the analyzer shows
+  `source-<hex>` as before. Stable phone (18) and container ids fit.
+- Readability: a synthetic check (blur, noise, downscaling, ZXing, 40 seeds per
+  cell) gave the same smallest readable module size for AVS3/Q and AVS4/M
+  (about 1.6 px per module clean, 2 px with noise); with strong blur plus noise
+  ECC M read a little less often. The picture tests (QR through a simulated
+  240 fps camera at 640×360), the file QR round trips (crop, rotation, camera
+  tile, H.264) and the MXL phone fixture all pass. Not yet tried on a real
+  monitor at distance.
+- Analyzer outputs: phone report `signal.name`, the real `signal.testId` and
+  `signal.senderCalibration`; container `/api/v1/status` `signal` and the web UI
+  Input card. Results grouping (mobile app) will use `signal.name` later.
+- `AVS2:`/`AVS3:` are no longer generated or parsed (no test fixture needs them).
+  The JSON QR (legacy timecode) is unchanged.

@@ -109,6 +109,13 @@ def run_rate(binary, fixture, output, rate):
                 assert event.get('audio_latency_ms') is not None and event.get('video_latency_ms') is not None, event
                 # One received 50-Hz camera frame plus sub-sample modem tolerance.
                 assert abs(event['av_offset_ms'] - 35) <= 20.5, (rate, event)
+            # AVS4: the status names the real test ID, the generator name and "not calibrated".
+            signals = [s['status'].get('signal') for s in statuses if s['status'].get('signal')]
+            assert signals, (rate, 'no QR source in /api/v1/status')
+            assert signals[-1]['test_id'] == f'phone-fixture-{rate}', signals[-1]
+            assert signals[-1]['source_id'] == spec['source_id'], signals[-1]
+            assert signals[-1]['name'] == 'Fixture phone', signals[-1]
+            assert signals[-1]['sender_calibration'] == {'method': 'none'}, signals[-1]
             values = [event['av_offset_ms'] for event in good]
             result = {'rate': rate, 'valid_pairs': len(good), 'before_loss': len(before),
                       'after_recovery': len(after), 'video_events_inside_blank': len(blank),

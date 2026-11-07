@@ -34,7 +34,7 @@ identity/time and a 60-Hz source-frame strip (`720p60`). Source timestamps descr
   subtract phone output bias and isolate a downstream camera's contribution.
 
 A CRC-protected `estimated-source` flag (0x08) in the audio header and
-`clk: "phone-utc"` in the QR prevent a new analyzer from treating the phone as a
+the phone-clock flag in the QR prevent a new analyzer from treating the phone as a
 verified PTP generator. Old decoders reject these new audio flags; update both
 ends. Normal server and FILE packets retain their original bytes/semantics.
 
@@ -68,6 +68,27 @@ settings. The container generator uses the same rule with its NMOS seed in
 place of the install ID (`AVSYNC_TEST_ID` in the specification, §10.2). Test
 vector: install ID `00000000-0000-4000-8000-000000000000`, version `2.0.8`,
 `rate=1` gives `phone-985274814721`.
+
+## What the QR carries (AVS4)
+
+The picture QR is the compact `AVS4:` text (specification, "QR + optical code").
+Besides event and time it carries:
+
+- the **test id** itself, so the analyzer shows `phone-985274814721` and not
+  `source-<hex>`;
+- the **Name** field, at most 24 bytes (about 24 Latin letters, fewer with
+  umlauts or emoji), cut at a whole character. It is only a label: it does not
+  change the ID;
+- the **sender calibration** of the phone's own screen-vs-speaker offset
+  (method, offset, uncertainty, date). This calibration is not built yet, so the
+  phone sends "not calibrated" (method `none`).
+
+The QR keeps its size (version 4, 33 × 33 modules); it now uses error
+correction M instead of Q to make room. The phone analyzer report shows these
+fields in `signal`: `testId`, `name` and `senderCalibration` (`method`, and when
+calibrated `offsetMs`, `uncertaintyMs`, `date`). The container analyzer shows
+them in `/api/v1/status` `signal` and in the web UI's Input card. Old AVS2/AVS3
+phones and analyzers cannot read AVS4: update all of them together.
 
 The live reader first tries the inexpensive full-raster marker path, then a
 cached, validated fiducial pose. Searches are limited to a 960-pixel search raster;

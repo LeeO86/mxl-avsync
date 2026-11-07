@@ -6,6 +6,13 @@
   and started again. It changes only after a reinstall, a new app version or
   build, or another event rate; name, subtitle and image do not change it
   (`docs/phone-generator.md`).
+- New picture QR **AVS4** (replaces AVS2/AVS3; update all phones and containers
+  together, old ones cannot read it). It also carries the real test ID, the
+  generator Name (at most 24 bytes, cut at a whole character) and the sender
+  calibration (sent as "not calibrated" for now). Same QR size (version 4,
+  33 × 33 modules), error correction M instead of Q. The phone report's `signal`
+  has the new `name` and `senderCalibration` and the real `testId` (was
+  `source-<hex>`). The Android reader takes `AVS4:` (`docs/phone-generator.md`).
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
   release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
   that touch the app or the core (`mobile-app/README.md`).
@@ -40,6 +47,12 @@
   stays the same over restarts. A set `AVSYNC_TEST_ID` is used as before.
   `GET /api/v1/generator` shows the `test_id` in use; the settings page shows
   it greyed in the empty `AVSYNC_TEST_ID` field.
+- Picture QR **AVS4** (replaces AVS2/AVS3, no backwards compatibility): carries
+  the real test ID, the Signal form Title (`AVSYNC_SOURCE`) as the generator name and the sender
+  calibration (not calibrated for now). Same QR size, error correction M. The
+  analyzer's `/api/v1/status` has a new `signal` object (`test_id`, `name`,
+  `sender_calibration`, …) and the web UI shows it in the Input card. File
+  generator and analyzer use AVS4 too (SPECIFICATION "QR + optical code").
 
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 
