@@ -44,6 +44,7 @@ export function liveView(report, { reference = null, maxUncertaintyMs = 20, cali
    clockUncertaintyMs: clock.uncertaintyMs,
    live: Boolean(report.signal?.live),
    sourceId: report.signal?.sourceId ?? null,
+   testId: report.signal?.testId ?? null,
    atMs: Date.now(),
    fresh: true,
   };
@@ -81,13 +82,14 @@ export function clockText(estimate) {
  return `NTP ±${estimate.sampleUncertaintyMs.toFixed(1)} ms · checked ${s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`} ago`;
 }
 
-export function savedResult(reading, { calibration = null, now = Date.now() } = {}) {
+export function savedResult(reading, { calibration = null, captureContext = null, now = Date.now() } = {}) {
  if (!reading) return null;
  return {
   id: String(now), at: now,
   offsetMs: reading.offsetMs, rawOffsetMs: reading.rawOffsetMs, spreadMs: reading.spreadMs, events: reading.events,
   videoLatencyMs: reading.videoLatencyMs, audioLatencyMs: reading.audioLatencyMs, clockUncertaintyMs: reading.clockUncertaintyMs,
   calibrationMs: calibration?.offset_ms ?? null, held: !reading.fresh, sourceId: reading.sourceId,
+  testId: reading.testId ?? null, captureContext,
  };
 }
 

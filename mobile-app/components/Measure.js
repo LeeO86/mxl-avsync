@@ -1,9 +1,10 @@
 import { Text, View } from 'react-native';
 import { Button, colors, small, text } from './ui';
 import { latencyText, offsetSentence, offsetText } from '../src/live.mjs';
+import { deltaText } from '../src/results.mjs';
 
 // The camera fills the screen; below it one big number and the two latencies.
-export default function Measure({ camera, view, flow, calibrated, onSave, onRestart, onStartCalibration, onCancelCalibration, notice }) {
+export default function Measure({ camera, view, flow, calibrated, delta, onSave, onRestart, onStartCalibration, onCancelCalibration, notice }) {
  const reading = view.reading;
  const overlay = flow === 'aim' ? 'Point the camera at your hands, tap Start, then clap once.'
   : flow === 'listening' ? 'Clap once now. Keep the hands in view.'
@@ -26,6 +27,7 @@ export default function Measure({ camera, view, flow, calibrated, onSave, onRest
     {reading ? offsetSentence(reading.offsetMs) : 'No reading yet'}
     {reading && !reading.fresh ? ` · ${Math.round(reading.heldForMs / 1000)} s ago` : ''}
    </Text>
+   {reading && delta && Number.isFinite(delta.offsetMs) ? <Text style={{ ...small, color: colors.accent, marginTop: 4 }}>{`${deltaText(delta.offsetMs)} vs ${delta.name}${delta.check ? ' · check' : ''}`}</Text> : null}
    {reading ? <Text style={{ ...small, marginTop: 4 }}>{`±${(reading.spreadMs / 2).toFixed(1)} ms · ${reading.events} events${calibrated ? '' : ' · not calibrated'}`}</Text> : null}
    <View style={{ flexDirection: 'row', marginTop: 12 }}>
     <View style={{ flex: 1 }}><Text style={small}>VIDEO LATENCY</Text><Text style={{ ...text, fontSize: 20 }}>{latencyText(reading?.videoLatencyMs)}</Text></View>

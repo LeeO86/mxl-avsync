@@ -613,6 +613,14 @@ signal generation. Release on pause/stop, leaving capture, background/inactive
 or teardown; restore normal auto-lock. Disabling the preference restores normal
 behavior. Preserve measurement brightness and the original idle-timer state.
 
+### Saved results by sender (maintainer decision, 2026-11-07)
+
+"Compare" groups saved results by the QR/timecode sender ID (`sourceId`; none
+or 0 is "Unknown sender"). A sender has an optional local nickname and at most
+one reference result. Other results of that sender and the live reading show
+Δ AV offset, and Δ latency only when both values exist. A Δ is marked "check"
+when the camera mode or calibration offset differs from the reference.
+
 ### 12.1a Phone time reference (maintainer decision, 2026-10-31)
 
 Native iOS uses an explicit configurable SNTP exchange; Android uses raw GNSS

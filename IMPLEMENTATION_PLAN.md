@@ -1247,3 +1247,23 @@ callers retain synchronous scanning by default. Snapshot cost and worker delay
 are reported, and reading freshness includes that delay. No pulse timestamp
 smoothing or display/transport compensation is introduced. Protocol and
 container release version stay 2.0.7; real iPhone improvement remains a field test.
+
+
+## Saved results by sender (mobile, 2026-11-07)
+
+Maintainer request: group Results by sender, with nicknames and a per-sender
+reference. Pure logic in `mobile-app/src/results.mjs` (grouping, Δ, check
+marker, result limit, state loading) with node tests; Results, Measure and App
+only render it. Session state gains `senders: {[sourceId]: {nickname,
+referenceId}}`; older state loads with an empty map. Saved results now also keep
+the signal's `testId` and the report's `captureContext`. No native change.
+
+Deviations from the request: the default nickname is a short form of the
+sender ID (`testId`, e.g. `phone-3fa9…`, or the hex `sourceId`), not the
+generator title, because the title is only drawn in the picture and is in
+neither the QR nor the report. The check marker compares `cameraMode` and the
+calibration offset; results saved before this change have no `cameraMode`, so
+only calibration is compared for them. The 100-result limit stays, but a
+reference result is never dropped by it. `sourceId` 0 (a QR without a timecode
+ID) counts as unknown sender.
+
