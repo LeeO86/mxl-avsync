@@ -31,7 +31,8 @@ with its sound audible. After a few events the screen shows:
 
 When the signal drops, the last reading stays greyed for 8 s. **Save** stores
 it in Results (tap a result to share it as JSON). **Restart** clears the
-history, for example after moving the phone.
+history, for example after moving the phone; the camera then adjusts focus and
+exposure at the centre for 1.5 s and locks again before measuring.
 
 The camera runs at its fastest mode up to 240 fps. After 1.5 s it locks focus
 and white balance and exposes for the full frame interval

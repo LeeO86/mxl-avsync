@@ -23,7 +23,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private var configured = false, cameraDevice: AVCaptureDevice?, requestedFps = 0.0, lockGeneration = 0
   // samples queue
   private var analysisBusy = false, qrBusy = false, lastQrScan = -10.0, lastPoll = 0.0, generation = 0
-  private var focusing = false // tap to focus: frames are dropped until the new lock
+  private var focusing = false // the 1.5 s auto step: frames are dropped until the lock
   private var targetFps = 0.0, captureMode = "unknown", capturedSampleRate = 0.0, exposureMs = 0.0
   // main queue
   private var active = true, background = false
@@ -84,15 +84,13 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     DispatchQueue.main.async { [weak self] in self?.clearOutline() }
     samples.async { [weak self] in guard let self else { return }; self.generation += 1; self.focusing = false; self.processor.beginCalibration() }
   }
-  // Tap to focus (x, y: 0…1 across the view): hold the analysis, re-run the auto step metered on
-  // that spot, lock again, then start fresh, so no frame from the auto step reaches a reading.
+  // Tap to focus (x, y: 0…1 across the view): re-run the auto step metered on that spot.
   func focus(atX x: Double, y: Double) {
     DispatchQueue.main.async { [weak self] in
       guard let self, self.bounds.width > 0, self.bounds.height > 0 else { return }
       // The preview layer fills the view and knows its aspect fill and rotation.
       let point = self.preview.captureDevicePointConverted(fromLayerPoint: CGPoint(x: x * self.bounds.width, y: y * self.bounds.height))
       self.clearOutline()
-      self.samples.async { self.generation += 1; self.focusing = true }
       self.control.async { self.scheduleExposureLock(at: point) }
     }
   }
@@ -205,15 +203,17 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   // After 1.5 s of automatic exposure and focus: lock focus and white balance, and expose for
   // the whole frame interval at the ISO that keeps the same brightness. A full-frame exposure
   // turns each light edge into a ramp across one frame, which the core times exactly.
-  // With a tap point, focus and exposure are metered there (device coordinates).
+  // Focus and exposure are metered at the tap point, else at the centre (device coordinates).
+  // The analysis holds during the auto step and starts fresh at the lock (also on camera start
+  // and Restart), so no frame from the auto step reaches a reading.
   private func scheduleExposureLock(at point: CGPoint? = nil) {
     lockGeneration += 1
     let ticket = lockGeneration
+    samples.async { [weak self] in self?.generation += 1; self?.focusing = true }
     if let device = cameraDevice, (try? device.lockForConfiguration()) != nil {
-      if let point {
-        if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
-        if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
-      }
+      let spot = point ?? CGPoint(x: 0.5, y: 0.5)
+      if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = spot }
+      if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = spot }
       if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
       if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
       if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
@@ -221,7 +221,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     }
     control.asyncAfter(deadline: .now() + 1.5) { [weak self] in
       guard let self, ticket == self.lockGeneration else { return } // a newer tap or restart owns the lock
-      // A tap-to-focus hold ends here even when the lock fails: analyse with the focus it has.
+      // The hold ends here even when the lock fails: analyse with the focus it has.
       defer { self.samples.async { if self.focusing { self.restart() } } }
       guard let device = self.cameraDevice, self.session.isRunning, (try? device.lockForConfiguration()) != nil else { return }
       defer { device.unlockForConfiguration() }

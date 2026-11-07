@@ -64,7 +64,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var session: CameraCaptureSession? = null
   // The repeating request of the session, kept for tap to focus.
   private var repeating: CaptureRequest.Builder? = null
-  // Tap to focus: frames and audio are dropped until the new lock.
+  // The 1.5 s auto step (camera start, Restart, tap to focus): frames and audio are dropped until the lock.
   private var focusing = false
   private var reader: ImageReader? = null
   private var fast: HighSpeedCapture? = null
@@ -125,7 +125,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     }
   }
   fun beginCalibration() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.beginCalibration() } }
-  fun resumeAnalysis() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.reset() } }
+  // Restart: drop the history and run the auto step again, metered at the centre.
+  fun resumeAnalysis() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.reset(); refocus(null, null) } }
   fun focusAt(x: Double, y: Double) { capture.post { refocus(x, y) } }
 
   override fun onAttachedToWindow() {
@@ -243,7 +244,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
           set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         }
         exposureMode = "auto"
-        repeating = request
+        repeating = request; focusing = true
         s.setRepeatingRequest(request.build(), results, capture)
         // About 1.5 s of automatic exposure, then fixed focus, white balance and exposure.
         capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
@@ -273,7 +274,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
           set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(picked.aeMin, picked.aeMax))
         }
         exposureMode = "auto"
-        repeating = request
+        repeating = request; focusing = true
         try { burst.setRepeatingBurst(burst.createHighSpeedRequestList(request.build()), results, capture) }
         catch (e: Exception) { return fallBack(e.message ?: "burst refused") }
         capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
@@ -345,16 +346,18 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     endFocus()
   }
 
-  // Tap to focus (x, y: 0…1 across the view): hold the analysis, re-run the 1.5 s auto step with
-  // AF and AE metered on that spot, lock again as at start, then start fresh (endFocus), so no
-  // frame from the auto step reaches a reading.
-  private fun refocus(x: Double, y: Double) {
+  // Tap to focus (x, y: 0…1 across the view) or Restart (null: the camera's default, centred
+  // metering): hold the analysis, re-run the 1.5 s auto step with AF and AE metered there, lock
+  // again as at start, then start fresh (endFocus), so no frame from the auto step reaches a reading.
+  private fun refocus(x: Double?, y: Double?) {
     val s = session ?: return; val device = camera ?: return; val request = repeating ?: return
     val c = characteristics ?: return; val picked = choice ?: return
     if (!running || analyzer.calibrating() || lastFrameMs < 0) return
-    val active = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
-    val (x0, y0, side) = CaptureProfile.meteringSquare(x, y, width, height, sensorRotation(), picked.size, active.width(), active.height())
-    val region = arrayOf(MeteringRectangle(x0, y0, side, side, MeteringRectangle.METERING_WEIGHT_MAX))
+    val region = if (x == null || y == null) null else {
+      val active = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+      val (x0, y0, side) = CaptureProfile.meteringSquare(x, y, width, height, sensorRotation(), picked.size, active.width(), active.height())
+      arrayOf(MeteringRectangle(x0, y0, side, side, MeteringRectangle.METERING_WEIGHT_MAX))
+    }
     capture.removeCallbacksAndMessages(LOCK)
     generation++; focusing = true; exposureMode = "auto"
     main.post { outline.clear() }
@@ -378,10 +381,10 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
   }
 
-  // After a tap-to-focus lock: drop what came before and start fresh.
+  // After the lock: drop what came before and start fresh.
   private fun endFocus() {
     if (!focusing) return
-    focusing = false; generation++; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0
+    focusing = false; generation++; calibrationReported = false; analyzer.reset()
   }
 
   private val results = object : CameraCaptureSession.CaptureCallback() {
@@ -428,13 +431,15 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
 
   // One frame from either path: timestamp on the camera clock, luma plane, and a QR copy on demand.
   private fun pushFrame(timestampNs: Long, luma: java.nio.ByteBuffer, width: Int, height: Int, stride: Int, qrCopy: () -> QrReader.Frame) {
-    if (!running || focusing) return
+    if (!running) return
     if (cameraClock == null && !identifyClock(timestampNs)) return
     val pts = bootMs(timestampNs)
     // The result can arrive after the image; then the previous frame's values stand in.
     val (exposure, readout) = frameMeta[timestampNs] ?: frameMeta.values.lastOrNull() ?: (0.0 to 0.0)
     if (lastFrameMs >= 0) maxFrameGapMs = maxOf(maxFrameGapMs, pts - lastFrameMs)
     lastFrameMs = pts
+    // Counted (the high-speed no-frames check needs it) but not analysed during the auto step.
+    if (focusing) return
     analyzer.pushVideo(luma, width, height, stride, pts, exposure, readout)
     val now = SystemClock.uptimeMillis()
     if (!qrBusy && now - lastQrScan >= 100 && analyzer.qrScanSuggested(pts)) {

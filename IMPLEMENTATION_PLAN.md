@@ -10,7 +10,12 @@ from the tap to the lock are dropped and the analyzer is reset at the lock, so
 no reading uses the refocus window. The JS side reuses the restart path but
 keeps the held reading (greyed) instead of clearing it. Taps are ignored while
 a calibration flow is open (aim, clap, review), because the reset at the lock
-would cut a running take. The tapped spot stays for a later Restart. The native
+would cut a running take. Maintainer decision (same day): the hold applies to
+every 1.5 s auto step, so camera start and Restart also drop the auto-step
+frames and start the analyzer fresh at the lock, and Restart meters at the
+centre again (iOS point of interest 0.5/0.5, Android default regions). Android
+Restart now re-runs the auto step and lock like iOS. If the lock fails, the
+hold still ends and analysis continues with the focus it has. The native
 parts (iOS point conversion, Android region mapping and high-speed AF cancel)
 were not compiled or run on a device in this change.
 

@@ -46,6 +46,11 @@ Event `onReport` with one of:
   a fixed exposure of the **full frame interval** with the ISO that keeps the
   same brightness. A short exposure makes each edge time depend on where the
   edge falls between exposures (simulation: about 6 ms instead of 1 ms spread).
+- The 1.5 s automatic step runs on camera start, on `resumeAnalysis()`
+  (Restart, metered at the centre again) and on `focusAt`. Frames and audio of
+  that step are dropped and the analyzer starts fresh at the lock (also when
+  the lock fails), so no reading uses them. On Android, `resumeAnalysis()` now
+  re-runs the step too (before, it only reset the analyzer).
 - **Tap to focus** (`focusAt`): the same 1.5 s automatic step, with focus and
   exposure metered on the tapped spot, then the same lock. Frames and audio
   are dropped from the tap until the lock, and the analyzer starts fresh at the
@@ -57,7 +62,8 @@ Event `onReport` with one of:
   crop) and sets a square `CONTROL_AF_REGIONS` / `CONTROL_AE_REGIONS` (1/8 of
   the short side) where the camera supports regions; the high-speed session
   keeps continuous-video AF, so one AF cancel trigger releases the old focus
-  lock first. The spot stays for a later Restart.
+  lock first. Restart meters at the centre again (iOS point 0.5/0.5, Android
+  the camera's default regions).
 - Pass each frame's exposure start (`pts_ms`), exposure and rolling-shutter
   readout (0 when unknown) on the same clock as the audio.
 - The core needs only the luma plane. The flash detector reads 50 points (two

@@ -6,7 +6,9 @@ Both apps capture through the shared analyzer ([native contract](mobile-native.m
   more (Debug can force 240, 120, 60 or 30 fps). After 1.5 s of automatic
   exposure, focus and white balance are locked and the exposure is set to the
   full frame interval, with the ISO that keeps the same brightness. Restart
-  (or re-aiming after a rate change) repeats this.
+  (or re-aiming after a rate change) repeats this, metered at the centre again.
+  Frames from these 1.5 s are never measured: the measurement starts fresh
+  after the lock (camera start, Restart and tap to focus alike).
 - **Tap to focus:** a quick tap on the camera picture runs the same 1.5 s step
   again, but focus and exposure look at the tapped spot. A yellow square shows
   the spot and fades after the lock. Frames from those 1.5 s are not used: the
