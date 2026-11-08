@@ -160,6 +160,7 @@ flips, no timed delay). Then it ignores the sensors for **200 ms** (lock-out).
 | LED to click start | < 1 µs (same register write) |
 | Camera train | 3 start pulses (0/125/250 ms), 20 pulses every 500 ms from 1000 ms, 2 s pause |
 | Swap period (app) | 500 ms (300–1000 ms) |
+| Light change to comparator flip | ~15 µs filter (22 kΩ + 1 nF) plus sensor response (estimate) |
 | Comparator flip to click | a few µs (estimate) |
 | Lock-out after click | 200 ms |
 | Valid swap needs | ADC difference ≥ 80 mV and ≥ 25 %, opposite sign, within 100 ms |

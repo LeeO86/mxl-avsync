@@ -40,7 +40,8 @@ Schematic: [`renders/calibrator-schematic.pdf`](renders/calibrator-schematic.pdf
 - **Flash and click**: white LED (PA4, ~12 mA) and buzzer transistor (PA5) are on the same
   port, so one register write starts both.
 - **Light sensors**: two phototransistors feed comparator 3 (PA13 +, PA2 −, hysteresis on).
-  It flips at the crossing point of a black/white swap. The ADC reads the same nodes (PA0,
+  It flips at the crossing point of a black/white swap. 22 kΩ + 1 nF per sensor
+  (τ ≈ 22 µs) delays that point by only ~15 µs, the same on both sensors. The ADC reads the same nodes (PA0,
   PA2) for dark/light and to check that a flip is real. PB3 is the comparator output
   (used inside the firmware) and must stay unconnected.
 
@@ -124,7 +125,7 @@ USD per part at the order quantity of 10 and 100 boards. Ext = extended part
 | C1 | 10 µF 25 V 0805 | C15850 | Basic | 1 | 8.7 M | 0.0359 | 0.0359 |
 | C2 | 1 µF 0402 | C52923 | Basic | 1 | 11.5 M | 0.0058 | 0.0058 |
 | C3 | 100 nF 0402 | C1525 | Basic | 1 | 34.2 M | 0.0031 | 0.0031 |
-| C4, C5 | 10 nF 0402 | C15195 | Basic | 2 | 5.2 M | 0.0038 | 0.0038 |
+| C4, C5 | 1 nF 0402 | C1523 | Basic | 2 | 2.3 M | 0.0038 | 0.0038 |
 | R1, R2 | 5.1 kΩ 0402 | C25905 | Basic | 2 | 4.5 M | 0.0023 | 0.0023 |
 | R3 | 10 Ω 0402 | C25077 | Basic | 1 | 3.6 M | 0.001 | 0.001 |
 | R4 | 150 Ω 0603 | C22808 | Basic | 1 | 1.3 M | 0.0015 | 0.0015 |

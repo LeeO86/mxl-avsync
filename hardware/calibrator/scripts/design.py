@@ -61,11 +61,11 @@ PARTS = {
     "Q2": ("Device:Q_Photo_NPN", "VEMT2500X01", "calibrator:Vishay_VEMT2500X01_ReverseGullwing", "C3210911",
            {"1": "VDD", "2": "SENS_A"}, (5.0, SPLIT_Y - 4.5, 0, "F")),
     "R7": ("Device:R", "22k", FP_R0402, "C25768", {"1": "SENS_A", "2": "GND"}, (33.6, 8.4, 90, "F")),
-    "C4": ("Device:C", "10n", FP_C0402, "C15195", {"1": "SENS_A", "2": "GND"}, (35.0, 8.4, 90, "F")),
+    "C4": ("Device:C", "1n", FP_C0402, "C1523", {"1": "SENS_A", "2": "GND"}, (35.0, 8.4, 90, "F")),
     "Q3": ("Device:Q_Photo_NPN", "VEMT2500X01", "calibrator:Vishay_VEMT2500X01_ReverseGullwing", "C3210911",
            {"1": "VDD", "2": "SENS_B"}, (5.0, SPLIT_Y + 4.5, 0, "F")),
     "R8": ("Device:R", "22k", FP_R0402, "C25768", {"1": "SENS_B", "2": "GND"}, (33.6, 5.4, 90, "F")),
-    "C5": ("Device:C", "10n", FP_C0402, "C15195", {"1": "SENS_B", "2": "GND"}, (35.0, 5.4, 90, "F")),
+    "C5": ("Device:C", "1n", FP_C0402, "C1523", {"1": "SENS_B", "2": "GND"}, (35.0, 5.4, 90, "F")),
 }
 
 

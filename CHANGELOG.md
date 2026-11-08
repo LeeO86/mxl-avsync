@@ -12,6 +12,8 @@
   button, so the firmware can be updated over USB-C with open tools (wchisp, chprog); the
   firmware never enables USB, so phones only supply power. Comparator 3 with hysteresis
   for the sensor pair. No cables are supplied.
+- Calibrator sensor filter 10 nF → 1 nF (C4/C5): the comparator flips ~0.13 ms earlier
+  (filter delay ~0.15 ms → ~15 µs). Board copper unchanged.
 
 ## Mobile (not released yet)
 
