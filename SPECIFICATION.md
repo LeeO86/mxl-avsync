@@ -515,6 +515,7 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_VIDEO_FORMAT` | `1080p50` | flow | §5.4 |
 | `AVSYNC_AUDIO_CHANNELS` | 2 | flow | 1–16 |
 | `AVSYNC_AV_OFFSET_MS` | 0 | live | −500…+500, set offset |
+| `AVSYNC_PATTERN` | `test` | live | `test` (the AV sync test signal) or `calibration`: the calibrator board's pattern (halves swap every 500 ms, 1.5 kHz beep 100 ms after each swap at the chirp level; docs/calibrator.md). The flows and test id stay the same |
 | `AVSYNC_CHIRP_LEVEL_DBFS` | −12 | live | −40…−1 |
 | `AVSYNC_AUDIO_ENABLE` | `true` | live | `false` mutes the chirps (silence, flows keep running) |
 | `AVSYNC_AUDIO_LEAD_MS` | 20 | restart | how far ahead of TAI audio is written |
@@ -667,6 +668,7 @@ The camera and microphone have different capture latencies (OS buffers, exposure
 - The app measures the rig, stores the capture offset per device model and OS version with the date, the method, the number of events and the spread, and subtracts it from later measurements.
 - A calibration expires after an OS update or 90 days. Uncalibrated measurements are allowed and shown as **uncalibrated** in orange, with no grade colour.
 - Expected accuracy is unknown until measured on real devices; the app shows the measured spread of its own calibration as its uncertainty.
+- **Calibrator board** (maintainer design, 2026-11-08; contract docs/calibrator.md): Settings → With calibrator. Camera mode (flash + click on the rear camera) gives the capture calibration above (method `calibrator-pulse`, same record and validity as the clap). Display mode (the generator's calibration pattern, the board clicks at each swap, the generator beeps D = 100 ms later) gives the phone's **sender calibration** (screen vs speaker, AVS4 method `transponder`), which the phone generator then sends in the QR. The pattern is a mode of the generators themselves (same display and audio path); the container has it too (`AVSYNC_PATTERN`). Analysis in `core/…/calibrator.hpp`. Analysers report the sender calibration but do not subtract it yet.
 
 ---
 

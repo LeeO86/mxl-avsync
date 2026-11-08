@@ -55,6 +55,18 @@ jump over 100 ms, missed scheduling deadlines and the 23-hour session limit stop
 the source. Restart creates a fresh clock mapping. Bluetooth and other external
 output paths have unverified delays; use the built-in speaker.
 
+## Calibration mode
+
+`generateStyled(rate, taiUtc, {mode: 'calibration'})` opens the same screen
+with the calibration pattern instead of the test picture
+([calibrator.md](calibrator.md), display mode). It uses the same display link,
+layers, audio engine and player node; the beep (1.5 kHz, 4 ms) is scheduled
+100 ms after each swap on the host clock, minus the reported output latency,
+like the chirps. The audio session is play-and-record on the built-in speaker
+so the microphone can listen. The result comes back when the screen closes:
+`calibration` (`offsetMs`, `uncertaintyMs`, `pairs`, `directionMs`,
+`audioRoute`, `outputLatencyMs`) or `calibrationError`.
+
 ## Source ID
 
 The source ID (the QR test id; the audio packet carries its CRC-32) stays the
@@ -81,8 +93,12 @@ Besides event and time it carries:
   change the ID;
 - the **sender calibration** of the phone's own screen-vs-speaker offset
   (method, offset, uncertainty, date). The offset has the same sign as every
-  AV offset here: sound minus picture, positive = sound later. This calibration
-  is not built yet, so the phone sends "not calibrated" (method `none`).
+  AV offset here: sound minus picture, positive = sound later. It comes from
+  the calibrator wizard (Settings → With calibrator, step 3, method
+  `transponder`; [calibration.md](calibration.md#with-the-calibrator)). Without a
+  valid one (none saved, another OS version, older than 90 days) the phone sends
+  "not calibrated" (method `none`). It is not sent when the audio output differs
+  from the one it was measured on; the status line then says so.
 
 The QR keeps its size (version 4, 33 × 33 modules); it now uses error
 correction M instead of Q to make room. The phone analyzer report shows these

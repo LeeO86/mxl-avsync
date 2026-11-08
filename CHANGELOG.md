@@ -2,6 +2,19 @@
 
 ## Mobile (not released yet)
 
+- Calibrator wizard (iPhone): Settings → With calibrator. Step 2 measures
+  camera vs microphone with the calibrator board's flashes and clicks and saves
+  it like a clap calibration (method `calibrator-pulse`). Step 3 shows the
+  generator's calibration pattern (halves swap every 500 ms, a beep 100 ms
+  later) and saves screen vs speaker as the phone's sender calibration; the test
+  signal then sends it in the AVS4 QR (method `transponder`) instead of "not
+  calibrated". A TV fed by the container's calibration pattern can be measured
+  too (not saved). New camera view method `beginCalibrator(mode)`, generator
+  option `mode: 'calibration'` and `senderCalibration*` options. Not tested
+  with a real board yet (`docs/calibration.md`, `docs/calibrator.md`).
+- Container generator: `AVSYNC_PATTERN=calibration` (live; Signal API
+  `pattern`, web form "Picture") sends the calibration pattern instead of the
+  test signal, for a phone with the calibrator on a TV or monitor.
 - iPhone generator: the source ID stays the same when the generator is stopped
   and started again. It changes only after a reinstall, a new app version or
   build, or another event rate; name, subtitle and image do not change it

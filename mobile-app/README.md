@@ -68,6 +68,14 @@ clap once. Then pick the first frame where the hands touch; the sound is marked
 orange. Save stores sound time minus that frame's time; it applies to AV offset
 only, for this OS version and camera mode, for 90 days.
 
+Settings → With calibrator (iPhone): a wizard for the calibrator board. Step 2
+measures camera vs microphone with the board's flashes and clicks and saves it
+like the clap calibration. Step 3 measures this phone's screen vs speaker with
+the generator's calibration pattern and saves it as the sender calibration,
+which the test signal then sends in its QR. Settings shows it under "Sender
+calibration"; Debug → Clear calibration clears both. Details:
+[calibration](../docs/calibration.md#with-the-calibrator).
+
 ## Signal
 
 Signal → Start test signal shows the fullscreen AVS4 source with its sound
@@ -83,7 +91,7 @@ per seq, share diagnostics, and clear results or calibration.
 
 ## Verification
 
-- `npm test`: the view model, clock reference, calibration, playback and saved-results logic.
+- `npm test`: the view model, clock reference, calibration (clap and calibrator), playback and saved-results logic.
 - `npm run test:ios-native`: the real iOS bridge, CoreMedia buffers and Vision
   on a simulated 240 fps capture of the phone source (+20 ms AV, 30/50 ms
   latency; spread below 2 ms) and a calibration take.
