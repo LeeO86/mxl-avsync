@@ -36,9 +36,29 @@ calibration stays as it is). Three steps:
 
 Why through the generator: the calibration picture and sound use the same
 screen layers, display clock, audio engine and speaker as the real test signal,
-so the offset belongs to the real signal. The analysers show the sender
-calibration (phone report `signal.senderCalibration`, container
-`/api/v1/status` `signal.sender_calibration`) but do not subtract it yet.
+so the offset belongs to the real signal.
+
+**Analysers subtract it.** When the QR carries a sender calibration, every
+analyser (phone, container, file) takes it off the measured AV offset. The
+result is the corrected value; the raw value and the calibration stay visible:
+
+- phone: Measure and Results show "raw +50.5 ms · sender calibration +38.0 ms"
+  under the result; the report `reading` has `offsetMs` (corrected),
+  `rawOffsetMs` and `senderCalibrationMs`; saved results keep `rawOffsetMs` and
+  `senderCalibrationMs`;
+- container: `/api/v1/measurement` `offset_ms` (corrected), `raw_offset_ms`,
+  `sender_calibration_ms`; each event has `raw_av_offset_ms` and
+  `sender_calibration_ms`; web UI Input card ("AV sync raw");
+- file analyzer: the same event fields, and in `summary`
+  `sender_calibration_ms` and `median_raw_av_offset_ms`.
+
+"Not calibrated" changes nothing. The subtraction is in core C++ (`Pairer`),
+so iOS, Android, container and file do it the same way. On the phone two
+calibrations are in play, each subtracted once: the sender calibration (the
+other phone's screen vs speaker, from the QR) in core, and this phone's own
+analyser calibration (camera vs microphone) in the app. Raw means neither is
+subtracted. Debug → Clear calibration clears both on this phone (after a
+confirm).
 
 **A TV or monitor.** The container generator can send the same pattern
 (`AVSYNC_PATTERN=calibration`, web UI → Signal → Picture). Lay the calibrator

@@ -1395,10 +1395,14 @@ Deviations and choices:
   point in `docs/calibrator.md`).
 - Constants still 0: buzzer delay, display path difference. Camera mode
   subtracts 1.5 cm sound travel.
-- The analysers report but do not subtract the sender calibration (not asked
-  for in this step).
+- Decided (Adrian, 2026-11-08): the analysers subtract the sender calibration
+  once in core (`Pairer::set_sender_calibration`), keep the raw value
+  (`raw_av_offset_ms` / `rawOffsetMs`) and the calibration next to it. The
+  phone's analyser calibration stays in the app (`liveView`), so nothing is
+  counted twice.
 - The wizard and the calibrator take are iOS only (`beginCalibrator` is not in
   the Android camera view yet); the Settings entry is hidden on Android.
-- Debug → Clear calibration clears the sender calibration too.
+- Debug → Clear calibration clears the sender calibration too (decided; with
+  a confirm that says both are cleared).
 - The iPhone pattern size assumes about 6 pt per mm (current iPhones); the
   outline is a placing guide, the pattern line itself is exact.

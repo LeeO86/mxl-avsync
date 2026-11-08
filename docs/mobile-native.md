@@ -33,7 +33,10 @@ Event `onReport` with one of:
   `inputGain, inputGainSettable`; Android adds `capturePath` `normal` or
   `high_speed`, and `captureStats.gpuReadMaxMs` on the high-speed path), `configuredFps`
   and `clockMapping {monotonicMs, deviceUnixMs, clockId, timebase}` for the
-  report's `timeMs`.
+  report's `timeMs`. `reading.offsetMs` has the sender calibration from the
+  AVS4 QR subtracted; `reading.rawOffsetMs` is as measured and
+  `reading.senderCalibrationMs` is present when the QR carries one. The
+  phone's own analyser calibration is not in the report (the app subtracts it).
 - **calibration** — `{frames:[{timeMs, uri}], spikeTimeMs, fps, uri (WAV),
   waveform (256 peaks), waveformStartMs, waveformBinDurationMs,
   waveformDurationMs, audioStartMs, captureContext}` from
