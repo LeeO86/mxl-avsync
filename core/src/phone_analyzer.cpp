@@ -315,13 +315,13 @@ std::string PhoneAnalyzer::poll()
     session_.trim_before(now - 12000);
 
     // The window: the newest valid pairs.
-    struct Pair { uint64_t seq; double offset; std::optional<double> video, audio; double time; };
+    struct Pair { uint64_t seq; double offset; std::optional<double> video, audio; double time; double raw; std::optional<double> sender; };
     std::vector<Pair> pairs;
     for (const auto& e : report.events) {
         if (!e.av_offset_ms || e.grade == "invalid" || !std::isfinite(*e.av_offset_ms)) continue;
         const double t = std::max(e.video_time_ms, e.audio_time_ms);
         if (t < now - kWindowMs) continue;
-        Pair p{e.seq, *e.av_offset_ms, std::nullopt, std::nullopt, t};
+        Pair p{e.seq, *e.av_offset_ms, std::nullopt, std::nullopt, t, e.raw_av_offset_ms.value_or(*e.av_offset_ms), e.sender_calibration_ms};
         // Latency vs device UTC: capture time on the device UTC clock minus the source time (TAI).
         if (have_wall_ && qr_ && qr_->mode == "LIVE") {
             if (e.have_set_time) p.video = e.video_time_ms + wall_offset_ + tai_utc_ * 1000 - double(e.set_video_ns) / 1e6;
@@ -358,14 +358,18 @@ std::string PhoneAnalyzer::poll()
                               .raw("senderCalibration", calibration.text()).text());
     }
     if (pairs.size() >= 3) {
-        std::vector<double> offsets, video, audio;
+        std::vector<double> offsets, raw, video, audio;
         for (const auto& p : pairs) {
             offsets.push_back(p.offset);
+            raw.push_back(p.raw);
             if (p.video) video.push_back(*p.video);
             if (p.audio) audio.push_back(*p.audio);
         }
         Json reading;
         reading.num("offsetMs", median(offsets)).num("spreadMs", spread(offsets)).integer("events", long(offsets.size()));
+        // offsetMs has the sender calibration (AVS4) subtracted; rawOffsetMs is as measured.
+        reading.num("rawOffsetMs", median(raw));
+        if (pairs.back().sender) reading.num("senderCalibrationMs", *pairs.back().sender);
         if (video.size() >= 3) reading.num("videoLatencyMs", median(video)).num("videoSpreadMs", spread(video));
         if (audio.size() >= 3) reading.num("audioLatencyMs", median(audio)).num("audioSpreadMs", spread(audio));
         out.raw("reading", reading.text());

@@ -716,6 +716,11 @@ void install_web(HttpServer& http, Runtime& rt)
             const double age_ms = now_ms - last->video_time_ms;
             body["age_ms"] = age_ms;
             body["offset_ms"] = *last->av_offset_ms;
+            if (last->sender_calibration_ms) {
+                // AVS4: offset_ms has the sender's own output offset subtracted; raw is as measured.
+                body["raw_offset_ms"] = *last->raw_av_offset_ms;
+                body["sender_calibration_ms"] = *last->sender_calibration_ms;
+            }
             if (grade == "invalid") {
                 std::ostringstream sentence;
                 sentence.setf(std::ios::fixed);

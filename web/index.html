@@ -132,7 +132,8 @@
           <dt>Format</dt><dd>{{ status.width ? status.width + '×' + status.height + (status.interlaced ? ' i' : ' p') : '–' }}</dd>
           <dt>Rate</dt><dd>{{ ratePerSecond }}</dd>
           <dt>Source (QR)</dt><dd>{{ status.signal ? (status.signal.name ? status.signal.name + ' · ' : '') + status.signal.test_id : '–' }}</dd>
-          <dt>Source calibration</dt><dd>{{ !status.signal ? '–' : status.signal.sender_calibration.method === 'none' ? 'not calibrated' : status.signal.sender_calibration.method + ' ' + ms1(status.signal.sender_calibration.offset_ms) + ' ± ' + ms1(status.signal.sender_calibration.uncertainty_ms) }}</dd>
+          <dt>Source calibration</dt><dd>{{ !status.signal ? '–' : status.signal.sender_calibration.method === 'none' ? 'not calibrated' : status.signal.sender_calibration.method + ' ' + ms1(status.signal.sender_calibration.offset_ms) + ' ± ' + ms1(status.signal.sender_calibration.uncertainty_ms) + ' · subtracted' }}</dd>
+          <dt v-if="measurement.raw_offset_ms != null">AV sync raw</dt><dd v-if="measurement.raw_offset_ms != null">{{ signedMs(measurement.raw_offset_ms) }} (before the source calibration {{ signedMs(measurement.sender_calibration_ms) }})</dd>
         </dl></div>
         <div class="card"><h3>Counters</h3><dl class="kv">
           <dt>Video drops</dt><dd>{{ metric('mxl_avsync_video_drops_total') }}</dd>

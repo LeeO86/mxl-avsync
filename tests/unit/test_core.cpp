@@ -426,6 +426,48 @@ TEST_CASE("pairing range, missing and grading of the median")
     CHECK(current_grade(series, 10, windows, 20000, 5) == "invalid");
 }
 
+TEST_CASE("the sender calibration from the QR is subtracted once, raw value kept")
+{
+    // Measured +35 ms; the sender's own output has sound 30 ms late (AVS4 calibration +30).
+    auto run = [](const SenderCalibration& calibration, double expected) {
+        Pairer pairer(500, GradeWindows{}, ReferenceInfo{}, "FILE", "TEST");
+        pairer.set_sender_calibration(calibration);
+        for (int i = 1; i <= 4; ++i) {
+            VideoObservation video;
+            video.event = true;
+            video.seq = static_cast<uint64_t>(i);
+            video.time_ms = 1000.0 * i;
+            video.quality = "good";
+            pairer.observe_video(video, expected);
+            AudioObservation audio;
+            audio.chirp_id = i % 4;
+            audio.time_ms = video.time_ms + 35.0;
+            audio.correlation = 0.97;
+            audio.quality = "good";
+            pairer.observe_audio(audio);
+        }
+        pairer.finish();
+        return pairer.results();
+    };
+    const auto corrected = run({"transponder", 30.0, 0.5, 2500}, 0);
+    REQUIRE(corrected.size() == 4);
+    for (const auto& m : corrected) {
+        REQUIRE(m.av_offset_ms);
+        CHECK(*m.av_offset_ms == doctest::Approx(5.0));
+        CHECK(*m.raw_av_offset_ms == doctest::Approx(35.0));
+        CHECK(*m.sender_calibration_ms == doctest::Approx(30.0));
+        CHECK(m.grade == "pass");
+    }
+    // An intended offset is compared with the corrected value.
+    const auto offset = run({"transponder", 30.0, 0.5, 2500}, 5.0);
+    CHECK(*offset.front().deviation_ms == doctest::Approx(0.0));
+    // Not calibrated: no change, no raw field.
+    const auto plain = run({}, 0);
+    CHECK(*plain.front().av_offset_ms == doctest::Approx(35.0));
+    CHECK(!plain.front().raw_av_offset_ms);
+    CHECK(!plain.front().sender_calibration_ms);
+}
+
 TEST_CASE("locked ptp fills latency and an unknown clock does not")
 {
     GradeWindows windows;
