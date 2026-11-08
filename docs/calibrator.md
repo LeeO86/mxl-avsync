@@ -2,7 +2,7 @@
 
 **v1 proposal — app side not built yet. The board is not built or tested yet either.**
 
-The calibrator is a small board (56 × 22 mm) that the phone powers over a short USB-C cable.
+The calibrator is a small board (60 × 22 mm) that the phone powers over a short USB-C cable.
 It has a white LED, a buzzer and two light sensors. It picks its mode by itself from
 what the sensors see. There is no button and no battery.
 
@@ -16,7 +16,9 @@ All numbers below are defaults in `cal_default_cfg()` (`firmware/src/cal_logic.c
   The LED and both sensors look out through holes in the board on this side.
 - **Sensor A / B**: the two light sensors, 9 mm apart, marked `A` and `B` on both sides.
 - **Split line**: the line half-way between A and B. It runs along the board and ends in
-  the half-round notch at the LED end. It is printed on both sides.
+  the half-round notch at the LED end. It is printed on both sides; on the top it shows
+  next to the LED and again behind the buzzer, so it can be lined up while the board lies
+  face down.
 - **Click**: 3 cycles of a 2.7 kHz square wave on the buzzer (about 1.1 ms). The first
   cycle starts with the buzzer coil switched on.
 

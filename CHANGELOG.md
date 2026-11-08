@@ -5,6 +5,9 @@
 - Calibrator board v1 proposal under `hardware/calibrator/`: KiCad 9 project, JLCPCB
   files, PY32F002A firmware with host tests, and the signal contract in
   `docs/calibrator.md`. Not built or tested yet; the app side is not built.
+- Calibrator v0.2 look: AVsync logo on both sides (gold ENIG copper + white silk on a
+  black mask), QR code to the project site on the bottom, split line also on the top,
+  redrawn schematic. Board files are CERN-OHL-P-2.0; firmware stays MIT.
 
 ## Mobile (not released yet)
 

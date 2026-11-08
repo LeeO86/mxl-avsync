@@ -67,3 +67,8 @@ pyocd flash -t py32f002ax5 build/calibrator.hex
 ```
 
 The pack and target names above are a guess and the flow is not tested yet. For a batch, a pogo-pin jig on the bottom pads is the plan.
+
+## Licence
+
+MIT, like the rest of the repository (the board itself is CERN-OHL-P-2.0, see `../README.md`).
+Vendored headers: see `vendor/README.md`.

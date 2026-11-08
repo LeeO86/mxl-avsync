@@ -213,4 +213,6 @@ jobs:
         run: |
           docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" -w /work kicad/kicad:9.0.9 \
             sh -c 'kicad-cli sch erc --severity-error --exit-code-violations -o /tmp/erc.rpt calibrator.kicad_sch &&
+                   kicad-cli sch export netlist --format kicadsexpr -o /tmp/cal.net calibrator.kicad_sch &&
+                   python3 scripts/check_netlist.py /tmp/cal.net &&
                    kicad-cli pcb drc --severity-error --exit-code-violations -o /tmp/drc.rpt calibrator.kicad_pcb'

@@ -1,8 +1,10 @@
 # AV Sync calibrator board
 
+<!-- SPDX-License-Identifier: CERN-OHL-P-2.0 -->
+
 **Status: v1 proposal, in development. Not ordered, not built, not tested.**
 
-A small giveaway board (56 × 22 mm) for the AVsync app. The phone powers it over a short
+A small giveaway board (60 × 22 mm) for the AVsync app. The phone powers it over a short
 USB-C cable. It calibrates:
 
 - **camera mode**: a phone's camera against its microphone (LED flash + click together),
@@ -14,6 +16,10 @@ The board picks the mode from its two light sensors. What the app must do is in
 
 ![top](renders/calibrator-top.png)
 ![bottom](renders/calibrator-bottom.png)
+
+Black solder mask, ENIG finish: the orange parts of the AVsync logo (waveform and the
+ring in the middle) are bare gold copper; the rest of the logo is white silkscreen. The
+bottom has a QR code to <https://leeo86.github.io/mxl-avsync/>.
 
 Schematic: [`renders/calibrator-schematic.pdf`](renders/calibrator-schematic.pdf)
 (also [SVG](renders/calibrator.svg)). 3D view: [`renders/calibrator-3d.png`](renders/calibrator-3d.png).
@@ -57,13 +63,25 @@ Parts that make the hole idea work, all in JLC stock:
 
 Other notes:
 
+- **Look (it is merch)**: AVsync logo on both sides, from `assets/app-icon.svg`. Cyan and
+  white strokes are silkscreen. The orange parts are copper with a solder-mask opening and no
+  paste, so with ENIG they look gold. That copper has no net; keep-outs keep tracks and vias
+  away from it. On the bottom the logo and QR are mirrored so they read right from below.
+- **QR code** (bottom): `https://leeo86.github.io/mxl-avsync/` (the site has no calibrator
+  section yet, so the root URL). Version 3-M, 0.45 mm modules (3× JLC's 0.153 mm minimum
+  line), 4-module quiet zone, white silkscreen on black mask (light background, dark
+  modules = normal polarity). Checked: zxing-cpp decodes the bottom render, also at 1/3
+  size. The matrix is in `scripts/qr_matrix.txt` (made by `scripts/gen_qr.py`, needs `segno`).
+- **Text**: one font, three sizes: name 1.8–2.0 mm, sub-lines 1.0–1.2 mm, and JLC's minimum
+  1.0 mm / 0.153 mm stroke for "not a toy", the licence and the pad labels.
 - iPhone camera bumps: the lens rings stand higher than the bump plate. The board rests on
   the ring of the lens under the LED circle; hold it lightly or tape it. The buzzer sits
   next to the LED (5 mm), with its side sound port pointing at the LED, so it is close to the
   rear microphone, which sits on the bump on most phones.
-- Silkscreen on **both** sides: LED circle, split line, `A`/`B`, and a half-round notch in
-  the board edge on the split line for aligning with the pattern.
-- The top has a free area for a logo ("AVsync calibrator", no company name).
+- Alignment marks on **both** sides: LED circle, `A`/`B`, the split line (on the top it
+  runs from the notch past the LED and again behind the buzzer, so you can see the line
+  while the board lies face down) and a half-round notch in the board edge on the split line.
+- No company name on the board.
 - Ground copper on both layers stops light going sideways through the board. No vias at
   the optics end.
 - Programming pads (5V, GND, SWDIO, SWCLK, NRST) are bare copper on the flat bottom, for a
@@ -111,10 +129,15 @@ Fees from the JLC price page (updated 2026-10-22): setup $8.18, stencil $1.53,
 | Setup + stencil | $9.71 | $9.71 |
 | Extended feeders (5 × $3.07) | $15.35 | $15.35 |
 | SMT joints | $11.36 | $56.80 |
-| PCB 2-layer 56 × 22 mm, 1.2 mm, lead-free HASL [estimate] | ~$20 | ~$60 |
-| **Total ex. shipping, VAT, programming** | **≈ $150 → $1.50/board** | **≈ $524 → $1.05/board** |
+| PCB 2-layer 60 × 22 mm, 1.2 mm, green, lead-free HASL [estimate] | ~$20 | ~$60 |
+| ENIG instead of HASL (gold logo) [estimate] | ~+$20 | ~+$55 |
+| Black mask instead of green [not verified] | $0 expected | $0 expected |
+| **Total ex. shipping, VAT, programming** | **≈ $170 → $1.70/board** | **≈ $580 → $1.15/board** |
 
-Add "Confirm Parts Placement" ($0.45, recommended: the custom footprints are new) and
+The JLC PCB price (with ENIG and mask colour) comes from their JavaScript calculator; I could
+not get a live quote, so the PCB lines are estimates. JLC usually charges the same for black
+as for green on 2-layer boards, but check it in the quote. Run the real quote with
+`fab/calibrator-gerbers.zip` (1.2 mm, ENIG, black). Add "Confirm Parts Placement" ($0.45, recommended: the custom footprints are new) and
 shipping/import to CH (see the earlier BOM research: about CHF 25–40 at 100 pcs).
 
 **USB-C to USB-C cable, bought separately** (short, USB 2.0, no e-marker needed):
@@ -129,10 +152,11 @@ The cable often costs more than the board.
 | `calibrator.kicad_pro/.kicad_sch/.kicad_pcb` | KiCad 9 project |
 | `calibrator.pretty/` | custom footprints (buzzer, reverse LED, reverse-gullwing sensor, USB-C 6P) |
 | `3d/` | simple box 3D models for the renders |
-| `fab/calibrator-gerbers.zip` | gerbers + drill for JLCPCB (order **1.2 mm** thickness, lead-free HASL) |
+| `fab/calibrator-gerbers.zip` | gerbers + drill for JLCPCB (order **1.2 mm**, **ENIG**, **black** mask, white silk) |
 | `fab/calibrator-bom-jlc.csv`, `fab/calibrator-cpl-jlc.csv` | JLC BOM and pick-and-place files |
 | `renders/` | PNG renders, schematic PDF/SVG |
-| `scripts/` | generators: `design.py` (parts, nets, placement) → schematic, board, fab files |
+| `calibrator.kicad_sym` | custom PY32F002A symbol with pins grouped by use |
+| `scripts/` | generators: `design.py` (parts, nets, placement) → schematic (`gen_sch.py`, drawn by hand in code), board (`gen_pcb.py`), fab files; `check_netlist.py` checks the drawn schematic against `design.py` |
 | `firmware/` | PY32 firmware + host tests ([README](firmware/README.md)) |
 
 ### Rebuild
@@ -149,8 +173,7 @@ checked one.
 
 ### Checks
 
-- ERC: 1 warning, waived: `PB6/BOOT0` (a bidirectional pin) is tied to GND, which has a
-  power flag. That is on purpose (boot from flash).
+- ERC: 0 violations. Netlist check: the schematic wires give exactly the nets in `design.py`.
 - DRC: 0 violations, 0 unconnected (rules for JLC: 0.15 mm track/space, 0.3/0.6 mm vias,
   0.3 mm copper to board edge).
 - CPL rotations are KiCad's. Check every part in JLC's placement preview (especially the
@@ -182,8 +205,10 @@ About 10 s per board, so ~1.5 h for 500 boards. See the [firmware README](firmwa
 
 ## Licence
 
-Everything here is under the repository's MIT licence. For hardware, CERN-OHL-P (permissive)
-or CERN-OHL-S (share-alike) would describe hardware rights better (documentation, making
-and selling boards); MIT is fine for a free giveaway, so it is not changed here. The vendored
-firmware headers are BSD-3-Clause (Puya/ST) and Apache-2.0 (Arm); see
-[`firmware/vendor/README.md`](firmware/vendor/README.md).
+- **Board** (KiCad project, footprints, 3D models, scripts, fab files, renders and the logo
+  artwork on the board): **CERN-OHL-P-2.0**, see
+  [`LICENSE-CERN-OHL-P-2.0.txt`](LICENSE-CERN-OHL-P-2.0.txt).
+  `SPDX-License-Identifier: CERN-OHL-P-2.0`. It is printed small on the top silkscreen.
+  CERN-OHL-S-2.0 (share-alike: changed boards must stay open) would be the alternative.
+- **Firmware** (`firmware/`): MIT, like the rest of the repository. The vendored headers are
+  BSD-3-Clause (Puya/ST) and Apache-2.0 (Arm); see [`firmware/vendor/README.md`](firmware/vendor/README.md).

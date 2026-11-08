@@ -297,7 +297,7 @@
       },
       {
         "netclass": "Power",
-        "pattern": "VMCU"
+        "pattern": "VDD"
       },
       {
         "netclass": "Power",
