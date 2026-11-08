@@ -8,6 +8,10 @@
 - Calibrator v0.2 look: AVsync logo on both sides (gold ENIG copper + white silk on a
   black mask), QR code to the project site on the bottom, split line also on the top,
   redrawn schematic. Board files are CERN-OHL-P-2.0; firmware stays MIT.
+- Calibrator v0.3: CH32X035G8R6 instead of PY32F002A, 16-pin USB-C and an update
+  button, so the firmware can be updated over USB-C with open tools (wchisp, chprog); the
+  firmware never enables USB, so phones only supply power. Comparator 3 with hysteresis
+  for the sensor pair. No cables are supplied.
 
 ## Mobile (not released yet)
 

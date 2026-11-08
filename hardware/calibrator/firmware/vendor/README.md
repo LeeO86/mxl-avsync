@@ -1,13 +1,9 @@
-# Vendored headers
+# Vendored files
 
-Copied unchanged from [IOsetting/py32f0-template](https://github.com/IOsetting/py32f0-template),
-branch `main`, commit `009bdec7ed77c9b782a258c064c227e15ec19498` (2026-02-08), path `Libraries/CMSIS/`.
-Downloaded 2026-11-08. Only headers are used; no scripts or libraries from that tree.
+| File | What | Source | Licence |
+| --- | --- | --- | --- |
+| `ch32x035_regs.h` | Minimal CH32X035 register map (only the registers this firmware uses) | Structs, base addresses and bit values taken from `ch32fun/ch32x03xhw.h` of [cnlohr/ch32fun](https://github.com/cnlohr/ch32fun), commit `b28d285460ce052a179dba8f4a22c6f73ff8e328` (2026-10-31), downloaded 2026-11-08. The comparator bit positions in `OPA->CTLR2` follow `OPA_CMP_Init()` in WCH's [openwch/ch32x035](https://github.com/openwch/ch32x035) EVT (`ch32x035_opa.c` V1.0.1); no WCH code is copied. | MIT, see `LICENSE-MIT-ch32fun.txt` |
+| `LICENSE-MIT-ch32fun.txt` | Licence text of ch32fun | same repository | MIT |
 
-| File | From | Licence |
-| --- | --- | --- |
-| `py32f002ax5.h` | `Device/PY32F0xx/Include/` | BSD-3-Clause (Puya Semiconductor, STMicroelectronics), see `LICENSE-BSD-3-Clause.txt` |
-| `system_py32f0xx.h` | `Device/PY32F0xx/Include/` | BSD-3-Clause, same as above |
-| `core_cm0plus.h`, `cmsis_compiler.h`, `cmsis_gcc.h`, `cmsis_version.h` | `Core/Include/` (Arm CMSIS 5) | Apache-2.0 (Arm Limited), see `LICENSE-Apache-2.0.txt` |
-
-Both licences allow use in this MIT project. Keep the licence headers in the files.
+The MIT licence fits this MIT firmware. Keep the licence notice with the header.
+No scripts or build files from those repositories are used.

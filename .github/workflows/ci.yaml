@@ -202,12 +202,12 @@ jobs:
       - name: packages
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-arm-none-eabi make
-      - name: firmware
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf make
+      - name: firmware (CH32X035, RISC-V)
         working-directory: hardware/calibrator/firmware
         run: |
           make test
-          make
+          make CROSS=riscv64-unknown-elf- EXTRA_CFLAGS="-isystem /usr/lib/picolibc/riscv64-unknown-elf/include"
       - name: ERC and DRC (KiCad 9.0.9)
         working-directory: hardware/calibrator
         run: |

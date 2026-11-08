@@ -7,7 +7,10 @@ Steps (all inside the KiCad image, see scripts/build.sh):
 import os
 import sys
 
+import faulthandler
 import pcbnew
+
+faulthandler.enable()
 
 import design as D
 
@@ -100,7 +103,7 @@ def zone(board, net, layer):
     board.Add(z)
 
 
-def keepout(board, x1, y1, x2, y2, layer=None):
+def keepout(board, x1, y1, x2, y2, layer=None, tracks=True):
     """No tracks or vias here (optical holes, gold logo copper)."""
     z = pcbnew.ZONE(board)
     z.SetIsRuleArea(True)
@@ -108,7 +111,7 @@ def keepout(board, x1, y1, x2, y2, layer=None):
         z.SetLayerSet(pcbnew.LSET.AllCuMask())
     else:
         z.SetLayer(layer)
-    z.SetDoNotAllowTracks(True)
+    z.SetDoNotAllowTracks(tracks)
     z.SetDoNotAllowVias(True)
     z.SetDoNotAllowPads(False)
     z.SetDoNotAllowFootprints(False)
@@ -323,27 +326,29 @@ def silk(board):
     text(board, F, "AVsync", cx, 13.3, 2.0, bold=True)
     text(board, F, "calibrator", cx, 15.7, 1.2)
     text(board, F, "CERN-OHL-P-2.0", cx, 18.6, JLC_TEXT)
+    # update button hint (top, under the button)
+    sx, sy_ = D.PARTS["SW1"][5][:2]
+    text(board, F, "hold to", sx, sy_ + 4.4, JLC_TEXT)
+    text(board, F, "update", sx, sy_ + 5.9, JLC_TEXT)
 
     # Bottom (this side touches the phone or the screen).
     bx = BOT_LOGO[0]
     logo(board, bx, BOT_LOGO[1], BOT_LOGO[2], "B")
     text(board, B, "AVsync", bx, 12.9, 1.8, bold=True)
-    text(board, B, "calibrator v0.2", bx, 15.0, JLC_TEXT)
+    text(board, B, "calibrator v0.3", bx, 15.0, JLC_TEXT)
     text(board, B, "not a toy", bx, 17.0, JLC_TEXT)
     ix = 28.6
     text(board, B, "CAMERA", ix, 3.0, JLC_TEXT, bold=True)
     text(board, B, "LED on lens", ix, 4.6, JLC_TEXT)
     text(board, B, "SCREEN", ix, 7.2, JLC_TEXT, bold=True)
     text(board, B, "A|B on line", ix, 8.8, JLC_TEXT)
-    for i, lab in enumerate(["5V", "GND", "DIO", "CLK", "RST"]):
-        text(board, B, lab, 24.0 + 2.54 * i, 15.9, JLC_TEXT, angle=90)
     qr(board, QR[0], QR[1], QR[2])
 
 
 # Artwork places (board mm): logo (centre x, centre y, size), QR (left x, top y, module)
-TOP_LOGO = (43.25, 6.0, 9.0)
+TOP_LOGO = (50.0, 6.0, 9.0)
 BOT_LOGO = (16.5, 6.4, 8.0)
-QR = (35.9, 2.675, 0.45)
+QR = (40.0, 2.675, 0.45)
 QR_SIZE = (29 + 8) * QR[2]
 
 
@@ -406,11 +411,26 @@ def place():
                 pad.SetNet(nets[netmap[num]])
         # small reference text, kept on the fab layer so the top stays clean for the logo
         fp.Reference().SetLayer(pcbnew.F_Fab if side == "F" else pcbnew.B_Fab)
+        # The KiCad image ships no 3D model for these three; use stand-ins for the renders.
+        stand_in = {"J1": "${KICAD9_3DMODEL_DIR}/Connector_USB.3dshapes/"
+                          "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal.step",
+                    "U1": "${KIPRJMOD}/3d/QSOP-28.wrl", "SW1": "${KIPRJMOD}/3d/TS-1187A.wrl"}
+        if ref in stand_in:
+            fp.Models().clear()
+            m = pcbnew.FP_3DMODEL()
+            m.m_Filename = stand_in[ref]
+            fp.Models().push_back(m)
+        if ref == "J1":  # the stock USB-C footprint's silkscreen runs past the board edge
+            for item in list(fp.GraphicalItems()):
+                if item.GetLayer() == pcbnew.F_SilkS:
+                    fp.Remove(item)
 
     outline(board)
     # keep tracks and vias off the optical holes (LED cut-out and sensor holes)
     lx, ly = D.PARTS["D1"][5][:2]
     keepout(board, lx - 1.35, ly - 1.15, lx + 1.35, ly + 1.15)
+    keepout(board, 0.0, D.SPLIT_Y - 1.9, 2.3, D.SPLIT_Y + 1.9)  # alignment notch
+    keepout(board, QR[0], QR[1], QR[0] + QR_SIZE, QR[1] + QR_SIZE, tracks=False)  # no via holes in the QR code
     for q in ("Q2", "Q3"):
         qx, qy = D.PARTS[q][5][:2]
         keepout(board, qx - 1.45, qy - 1.45, qx + 1.45, qy + 1.45)
@@ -442,8 +462,8 @@ def add_via(board, net, x, y):
 
 
 # Areas kept free of stitching vias so the silkscreen text stays whole (x1, y1, x2, y2).
-NO_STITCH = [(37.0, 0.0, 49.5, 22.0), (11.5, 1.6, 21.5, 18.0), (23.0, 1.6, 34.5, 10.0), (22.5, 14.0, 35.5, 20.0),
-             (35.6, 2.4, 52.9, 19.6), (0.0, 9.8, 23.0, 12.2)]
+NO_STITCH = [(43.0, 0.0, 56.0, 22.0), (36.5, 2.5, 44.5, 13.5), (11.5, 1.6, 21.5, 18.0), (23.0, 1.6, 35.5, 10.0),
+             (39.7, 2.4, 56.9, 19.6), (0.0, 9.8, 23.0, 12.2)]
 
 
 def stitch(board, net, step=2.5, margin=0.7):
@@ -471,7 +491,7 @@ def stitch(board, net, step=2.5, margin=0.7):
 
 
 # Silkscreen art on the bottom: no vias at all here.
-ART = [(35.6, 2.4, 52.9, 19.6), (11.5, 1.6, 21.5, 18.0), (37.0, 0.0, 49.5, 22.0)]
+ART = [(39.7, 2.4, 56.9, 19.6), (11.5, 1.6, 21.5, 18.0), (43.0, 0.0, 56.0, 22.0)]
 
 
 def fix_islands(board, net, margin=0.31):
@@ -510,29 +530,41 @@ def fix_islands(board, net, margin=0.31):
 
 
 def remove_stubs(board):
-    """Delete short dead-end track pieces the router sometimes leaves behind."""
-    removed = 0
+    """Delete duplicate segments and short dead-end pieces the router sometimes leaves behind."""
+    items = list(board.GetTracks())  # one snapshot; the board's list proxy breaks after Remove()
+    tracks = [t for t in items if t.GetClass() == "PCB_TRACK"]
+    vias = {(v.GetPosition().x, v.GetPosition().y) for v in items if v.GetClass() == "PCB_VIA"}
+    pads = list(board.GetPads())
+    dead = []
+    seen = set()  # the same segment written twice (once each way)
+    for t in tracks:
+        a_, b_ = (t.GetStart().x, t.GetStart().y), (t.GetEnd().x, t.GetEnd().y)
+        key = (int(t.GetLayer()), int(t.GetNetCode())) + tuple(sorted([a_, b_]))
+        if key in seen:
+            dead.append(t)
+        seen.add(key)
+    tracks = [t for t in tracks if t not in dead]
     while True:
-        tracks = [t for t in board.GetTracks() if t.GetClass() == "PCB_TRACK"]
         ends = {}
         for t in tracks:
             for p in (t.GetStart(), t.GetEnd()):
-                ends.setdefault((p.x, p.y, t.GetLayer()), []).append(t)
-        vias = {(v.GetPosition().x, v.GetPosition().y) for v in board.GetTracks() if v.GetClass() == "PCB_VIA"}
-        dead = []
+                ends.setdefault((p.x, p.y, int(t.GetLayer())), []).append(t)
+        new = []
         for t in tracks:
             for p in (t.GetStart(), t.GetEnd()):
-                if len(ends[(p.x, p.y, t.GetLayer())]) > 1 or (p.x, p.y) in vias:
+                if len(ends[(p.x, p.y, int(t.GetLayer()))]) > 1 or (p.x, p.y) in vias:
                     continue
-                if any(pad.HitTest(p) and pad.IsOnLayer(t.GetLayer()) for pad in board.GetPads()):
+                if any(pad.HitTest(p) and pad.IsOnLayer(t.GetLayer()) for pad in pads):
                     continue
-                dead.append(t)
+                new.append(t)
                 break
-        if not dead:
-            return removed
-        for t in dead:
-            board.Remove(t)
-        removed += len(dead)
+        if not new:
+            break
+        dead += new
+        tracks = [t for t in tracks if t not in new]
+    for t in dead:
+        board.Remove(t)
+    return len(dead)
 
 
 def unconnected(board):
@@ -540,11 +572,17 @@ def unconnected(board):
     return board.GetConnectivity().GetUnconnectedCount(False)
 
 
-def finish():
+def import_routes():
+    """Separate step (own process): the Python board object is unsafe after Remove()."""
     board = pcbnew.LoadBoard(PCB)
     ok = pcbnew.ImportSpecctraSES(board, SES)
     print("SES import:", ok)
     print("removed stubs:", remove_stubs(board))
+    pcbnew.SaveBoard(PCB, board)
+
+
+def finish():
+    board = pcbnew.LoadBoard(PCB)
     gnd = board.FindNet("GND")
     board.BuildConnectivity()
     filler = pcbnew.ZONE_FILLER(board)
@@ -561,4 +599,4 @@ def finish():
 
 
 if __name__ == "__main__":
-    {"place": place, "finish": finish}[sys.argv[1]]()
+    {"place": place, "import": import_routes, "finish": finish}[sys.argv[1]]()

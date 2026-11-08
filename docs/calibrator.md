@@ -2,7 +2,8 @@
 
 **v1 proposal — app side not built yet. The board is not built or tested yet either.**
 
-The calibrator is a small board (60 × 22 mm) that the phone powers over a short USB-C cable.
+The calibrator is a small board (66 × 22 mm) that the phone powers over a USB-C to USB-C cable.
+The cable is not included: the user brings their own.
 It has a white LED, a buzzer and two light sensors. It picks its mode by itself from
 what the sensors see. There is no button and no battery.
 
@@ -24,9 +25,11 @@ All numbers below are defaults in `cal_default_cfg()` (`firmware/src/cal_logic.c
 
 ## Power
 
-- Only USB-C phones. The board is a USB-C *sink*: 5.1 kΩ on CC1 and CC2. D+ and D− are
-  not connected, so the phone does not see an audio or data device and keeps its own
-  speaker and microphone.
+- Only USB-C phones. The board is a USB-C *sink*: 5.1 kΩ on CC1 and CC2. D+ and D− go to
+  the MCU but are only used for firmware updates: the firmware never turns USB on, so the
+  phone does not see an audio or data device and keeps its own speaker and microphone.
+- Firmware update (not with a phone): hold the board's update button while plugging it into
+  a PC; see `hardware/calibrator/README.md`.
 - The phone must supply 5 V on USB-C (iPhone 15 and later, most Android phones with OTG).
 - The board needs about 10 mA, plus short peaks of about 100 mA during a click.
 - It starts in **Idle** about 1 ms after power-up.
@@ -122,7 +125,7 @@ cancel. A flip counts as a **valid swap** only if, in the 100 ms before, the ADC
 two sensors clearly different (at least 80 mV and 25 % apart, not dark) the *other* way
 round. Noise around zero therefore never clicks.
 
-**Click**: at a valid swap the board clicks **at once** (about 5 µs after the comparator
+**Click**: at a valid swap the board clicks **at once** (a few µs after the comparator
 flips, no timed delay). Then it ignores the sensors for **200 ms** (lock-out).
 
 **What the app must do**
@@ -157,7 +160,7 @@ flips, no timed delay). Then it ignores the sensors for **200 ms** (lock-out).
 | LED to click start | < 1 µs (same register write) |
 | Camera train | 3 start pulses (0/125/250 ms), 20 pulses every 500 ms from 1000 ms, 2 s pause |
 | Swap period (app) | 500 ms (300–1000 ms) |
-| Comparator flip to click | ≈ 5 µs |
+| Comparator flip to click | a few µs (estimate) |
 | Lock-out after click | 200 ms |
 | Valid swap needs | ADC difference ≥ 80 mV and ≥ 25 %, opposite sign, within 100 ms |
 | Dark | both sensors < 150 mV |
