@@ -1058,7 +1058,7 @@ less with a long id or a calibration block). Stable phone and container ids
 (§10.2) always fit. A parser rejects unknown formats or methods, a phone clock in
 FILE mode, a negative T_k, bad padding bits, invalid UTF-8 or control
 characters in the name, and leftover bytes. The container's name is
-the Signal form Title (`AVSYNC_SOURCE`), the phone's its Name field. Generators send method none until the
+the Signal form Title (`AVSYNC_SOURCE`), the phone's Title field (stored as `generatorName`). Generators send method none until the
 source-output calibration exists. `AVS2:` and `AVS3:` payloads are no longer
 read (all generators and readers change together).
 

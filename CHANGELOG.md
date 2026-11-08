@@ -8,7 +8,7 @@
   (`docs/phone-generator.md`).
 - New picture QR **AVS4** (replaces AVS2/AVS3; update all phones and containers
   together, old ones cannot read it). It also carries the real test ID, the
-  generator Name (at most 24 bytes, cut at a whole character) and the sender
+  generator Title (at most 24 bytes, cut at a whole character) and the sender
   calibration (sent as "not calibrated" for now). Same QR size (version 4,
   33 × 33 modules), error correction M instead of Q. The phone report's `signal`
   has the new `name` and `senderCalibration` and the real `testId` (was

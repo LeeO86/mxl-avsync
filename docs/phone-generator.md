@@ -1,7 +1,7 @@
 # iPhone test-signal source
 
 Use the current native iOS/TestFlight build, open **Generate**, choose **1 or 2 chirps/s**,
-set **Name**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
+set **Title**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
 inside the fullscreen screen; Measure/Results keep their portrait layout.
 Film the entire test picture, including all four corner fiducials, with an
 external camera. Keep only that phone's speaker audible. Send the camera's
@@ -76,7 +76,7 @@ Besides event and time it carries:
 
 - the **test id** itself, so the analyzer shows `phone-985274814721` and not
   `source-<hex>`;
-- the **Name** field, at most 24 bytes (about 24 Latin letters, fewer with
+- the **Title** field, at most 24 bytes (about 24 Latin letters, fewer with
   umlauts or emoji), cut at a whole character. It is only a label: it does not
   change the ID;
 - the **sender calibration** of the phone's own screen-vs-speaker offset
