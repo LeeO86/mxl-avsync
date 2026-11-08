@@ -43,7 +43,8 @@ final class AvsyncGeneratorController: UIViewController {
   private var sourceID = ""
   private var lastStatus = 0.0
   private var utcMinusHost = 0.0
-  private let clockReference: [String:String]
+  private var planUtcMinusHost = 0.0 // the mapping the plan's stamps started from
+  private var clockReference: [String:String] // the newest accepted clock check (updateClock)
   private var usingReference = false
   private let senderCalibration: [String:String]
   private var senderCalibrationNote = ""
@@ -176,13 +177,11 @@ final class AvsyncGeneratorController: UIViewController {
       utcMinusHost = utc - (before + after)/2
       var referenceUtcMinusHost = utcMinusHost
       usingReference = false
-      if clockReference["clockId"] == PhoneClock.identifier,
-         let unixMs = Double(clockReference["clockUnixMs"] ?? ""), (1e12...4e12).contains(unixMs),
-         let hostMs = Double(clockReference["clockMonotonicMs"] ?? ""), unixMs.isFinite, hostMs.isFinite,
-         (before*1000-hostMs) >= 0, before*1000-hostMs < 300_000 {
-        referenceUtcMinusHost = (unixMs-hostMs)/1000
+      if let mapping = referenceMapping(clockReference, now: before) {
+        referenceUtcMinusHost = mapping
         usingReference = true
       }
+      planUtcMinusHost = referenceUtcMinusHost
       let epochTai = Int64((referenceUtcMinusHost + taiUtc + epochHost) * 1e9)
       plan = AVSyncGenerator(testID: sourceID, rate: rate, epochTaiNs: epochTai, epochHost: epochHost)
       guard let plan else { return }
@@ -200,6 +199,32 @@ final class AvsyncGeneratorController: UIViewController {
       let first = plan.image(sequence: 1); images[1] = first
       canvas.layer.contents = first.cgImage
       try fillAhead(now: after)
+  }
+  // UTC minus host seconds of a clock check on this phone's clock; nil for another clock or when not 0–300 s old.
+  private func referenceMapping(_ r: [String:String], now: Double) -> Double? {
+    guard r["clockId"] == PhoneClock.identifier,
+          let unixMs = Double(r["clockUnixMs"] ?? ""), (1e12...4e12).contains(unixMs),
+          let hostMs = Double(r["clockMonotonicMs"] ?? ""), hostMs.isFinite,
+          now*1000-hostMs >= 0, now*1000-hostMs < 300_000 else { return nil }
+    return (unixMs-hostMs)/1000
+  }
+  // A newer clock check from the app (docs/phone-clock.md). Before the plan starts (or while stopped)
+  // it replaces the reference for the next start. While the signal runs on NTP UTC, the stamps of the
+  // events not scheduled yet slew to it (core retime, 100 ppm); host times and the Test ID stay.
+  // A check further from the current stamps than the limit stops the signal instead.
+  func updateClock(_ reference: [String:String]) {
+    let now = CACurrentMediaTime()
+    guard !calibrate, let mapping = referenceMapping(reference, now: now),
+          let anchor = Double(reference["clockMonotonicMs"] ?? ""), let radius = Double(reference["clockUncertaintyMs"] ?? ""),
+          let limit = Double(reference["clockLimitMs"] ?? ""),
+          !AVSyncGenerator.clockReferenceExpired(ageMs: now*1000-anchor, radiusMs: radius, limitMs: limit) else { return }
+    guard let plan else { clockReference = reference; return }
+    guard usingReference else { return } // started on device UTC: stays on it until the next start
+    let offset = mapping - planUtcMinusHost
+    clockReference = reference
+    if plan.retime(offsetNs: Int64((offset*1e9).rounded()), fromSequence: nextAudio, maxStepNs: Int64((limit*1e6).rounded())) { return }
+    let change = offset*1000 - plan.clockOffsetMs(sequence: nextAudio)
+    stop(String(format: "New clock check is %+.1f ms off (more than the %.0f ms limit). Tap Start for a fresh clock mapping.", change, limit))
   }
   // Same install, app version (with build number) and timing settings give the same ID, so a restart keeps it.
   // The install ID is random, kept in UserDefaults and gone after a reinstall.
@@ -279,15 +304,20 @@ final class AvsyncGeneratorController: UIViewController {
     CATransaction.commit()
     if now - lastStatus > 0.5 {
       lastStatus = now
+      // Expires when no newer clock check arrived in time (updateClock), by the rule of the app.
+      var clockNote = ""
       if usingReference, let anchor = Double(clockReference["clockMonotonicMs"] ?? ""),
-         let radius = Double(clockReference["clockUncertaintyMs"] ?? ""), let limit = Double(clockReference["clockLimitMs"] ?? ""),
-         (now*1000-anchor > 300_000 || radius+(now*1000-anchor)*50/1e6 > limit) {
-        stop("Clock reference expired. Close and synchronize again."); return
+         let radius = Double(clockReference["clockUncertaintyMs"] ?? ""), let limit = Double(clockReference["clockLimitMs"] ?? "") {
+        if AVSyncGenerator.clockReferenceExpired(ageMs: now*1000-anchor, radiusMs: radius, limitMs: limit) {
+          stop("Clock reference expired. Close and synchronize again."); return
+        }
+        let adjusted = plan.clockOffsetMs(sequence: sequence)
+        clockNote = " (check \(Int(now - anchor/1000)) s ago" + (abs(adjusted) >= 0.05 ? String(format: ", %+.1f ms", adjusted) : "") + ")"
       }
       if abs(Date().timeIntervalSince1970 - now - utcMinusHost) > 0.1 {
         stop("Phone clock changed. Tap Start to create a fresh clock mapping."); return
       }
-      status.text = "TEST SIGNAL ACTIVE · 1200 baud · \(rate)/s · frame skips \(lateFrames)\nEstimated output timing · \(usingReference ? "NTP UTC" : "device UTC") · audio lead \(Int((outputLatency*1000).rounded())) ms\(senderCalibrationNote)"
+      status.text = "TEST SIGNAL ACTIVE · 1200 baud · \(rate)/s · frame skips \(lateFrames)\nEstimated output timing · \(usingReference ? "NTP UTC\(clockNote)" : "device UTC") · audio lead \(Int((outputLatency*1000).rounded())) ms\(senderCalibrationNote)"
     }
   }
   private func stop(_ message: String) {

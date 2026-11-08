@@ -166,5 +166,15 @@ int main(int argc, char **argv) { @autoreleasepool {
         assert(beep.length==192*sizeof(float));
         assert(![[AVSyncGenerator displayCalibrationForSamples:[NSMutableData dataWithLength:48000*sizeof(float)] sampleRate:48000 minimumPairs:8][@"ok"] boolValue]);
     }
-    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR geometry/flash onset and 1/2-Hz independent audio.\n";
+    {
+        // Clock refresh (core retime): stamps of events not scheduled yet slew, host times stay.
+        AVSyncGenerator *source=[[AVSyncGenerator alloc] initWithTestID:@"phone-native-slew" rate:2 epochTaiNs:1700000037000000000LL epochHost:100];
+        assert([source retimeOffsetNs:2000000 fromSequence:5 maxStepNs:20000000]);
+        assert(![source retimeOffsetNs:50000000 fromSequence:5 maxStepNs:20000000]);
+        assert([source clockOffsetMsForSequence:4]==0 && std::abs([source clockOffsetMsForSequence:100]-2)<1e-9);
+        assert(std::abs([source hostTimeForSequence:100]-(100+99/2.0))<1e-9);
+        assert([AVSyncGenerator clockReferenceExpiredAgeMs:300001 radiusMs:0 limitMs:20]);
+        assert(![AVSyncGenerator clockReferenceExpiredAgeMs:1000 radiusMs:5 limitMs:20]);
+    }
+    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR geometry/flash onset, 1/2-Hz independent audio and clock refresh slew.\n";
 } }

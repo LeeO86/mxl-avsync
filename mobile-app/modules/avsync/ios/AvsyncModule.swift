@@ -39,6 +39,11 @@ public class AvsyncModule: Module {
     AsyncFunction("generateStyled") { (rate: Int, taiUtc: Double, options: [String: String], promise: Promise) in
       self.presentGenerator(rate: rate, taiUtc: taiUtc, options: options, promise: promise)
     }.runOnQueue(.main)
+    // A newer clock check for the running test signal (docs/phone-clock.md); ignored when none runs.
+    AsyncFunction("updateGeneratorClock") { (options: [String: String]) in
+      guard let generator = self.generator else { return }
+      generator.updateClock(options.filter { $0.key.hasPrefix("clock") })
+    }.runOnQueue(.main)
     Function("generatorImageInfo") { (id: String) -> [String: Any]? in GeneratorImageStore.info(id: id) }
     AsyncFunction("pickGeneratorImage") { (promise: Promise) in
       guard self.imagePicker == nil, let parent = self.appContext?.utilities?.currentViewController(), parent.presentedViewController == nil else {

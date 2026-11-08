@@ -14,6 +14,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSData *)audioForSequence:(uint64_t)sequence NS_SWIFT_NAME(audio(sequence:));
 - (UIImage *)imageForSequence:(uint64_t)sequence NS_SWIFT_NAME(image(sequence:));
 // AVS4 sender calibration (this phone's screen vs speaker); method none until set.
+// Clock refresh (core PhoneGeneratorPlan::retime): stamps of events from `sequence` on slew to offsetNs;
+// NO (nothing changes) when that is more than maxStepNs away from the current stamps.
+- (BOOL)retimeOffsetNs:(int64_t)offsetNs fromSequence:(uint64_t)sequence maxStepNs:(int64_t)maxStepNs NS_SWIFT_NAME(retime(offsetNs:fromSequence:maxStepNs:));
+- (double)clockOffsetMsForSequence:(uint64_t)sequence NS_SWIFT_NAME(clockOffsetMs(sequence:));
+// The clock reference rule (core clock_reference_expired): older than 300 s or radius + 50 ppm holdover above the limit.
++ (BOOL)clockReferenceExpiredAgeMs:(double)ageMs radiusMs:(double)radiusMs limitMs:(double)limitMs NS_SWIFT_NAME(clockReferenceExpired(ageMs:radiusMs:limitMs:));
 - (void)setSenderCalibrationMethod:(NSString *)method offsetMs:(double)offsetMs uncertaintyMs:(double)uncertaintyMs day:(NSInteger)day NS_SWIFT_NAME(setSenderCalibration(method:offsetMs:uncertaintyMs:day:));
 
 // Calibration pattern (docs/calibrator.md display mode; core/include/avsync/calibrator.hpp).

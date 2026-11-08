@@ -27,6 +27,10 @@ class PhoneGenerator(testId: String, rate: Int, epochTaiNs: Long, epochHostSecon
   }
   fun hostTime(sequence: Long): Double = hostTime(live(), sequence)
   fun audio(sequence: Long): FloatArray = audio(live(), sequence)
+  // Clock refresh (core PhoneGeneratorPlan::retime): stamps of events from fromSequence on slew to offsetNs;
+  // false (nothing changes) when that is more than maxStepNs away from the current stamps.
+  fun retime(offsetNs: Long, fromSequence: Long, maxStepNs: Long): Boolean = retime(live(), offsetNs, fromSequence, maxStepNs)
+  fun clockOffsetMs(sequence: Long): Double = clockOffsetMs(live(), sequence)
   fun image(sequence: Long): Bitmap = bitmap(image(live(), sequence) ?: throw IllegalStateException("Session exceeds one day."))
 
   override fun close() { if (handle != 0L) { destroy(handle); handle = 0 } }
@@ -45,6 +49,8 @@ class PhoneGenerator(testId: String, rate: Int, epochTaiNs: Long, epochHostSecon
     }
     private fun bitmap(argb: IntArray) = Bitmap.createBitmap(argb, WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
 
+    // The clock reference rule (core clock_reference_expired): older than 300 s or radius + 50 ppm holdover above the limit.
+    @JvmStatic external fun clockReferenceExpired(ageMs: Double, radiusMs: Double, limitMs: Double): Boolean
     @JvmStatic external fun testId(prefix: String, installId: String, version: String, settings: Array<String>): String
     // Calibration pattern (docs/calibrator.md display mode), the same core functions as every generator.
     @JvmStatic external fun calibrationLeftWhite(frame: Long, fps: Int): Boolean
@@ -64,5 +70,7 @@ class PhoneGenerator(testId: String, rate: Int, epochTaiNs: Long, epochHostSecon
     @JvmStatic private external fun hostTime(h: Long, seq: Long): Double
     @JvmStatic private external fun audio(h: Long, seq: Long): FloatArray
     @JvmStatic private external fun image(h: Long, seq: Long): IntArray?
+    @JvmStatic private external fun retime(h: Long, offsetNs: Long, fromSeq: Long, maxStepNs: Long): Boolean
+    @JvmStatic private external fun clockOffsetMs(h: Long, seq: Long): Double
   }
 }

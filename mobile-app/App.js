@@ -13,7 +13,7 @@ import Results from './components/Results';
 import { Debug, Settings, Sheet } from './components/Settings';
 import { Button, colors, small, text } from './components/ui';
 import { liveView, offsetText, savedResult, formatWhen, clockText } from './src/live.mjs';
-import { clockCheckDetails, clockSettings, generatorClockOptions, referenceAt, synchronizeClock, CLOCK_MAX_AGE_MS } from './src/time-reference.mjs';
+import { clockCheckDetails, clockCheckDue, clockSettings, generatorClockOptions, referenceAt, synchronizeClock } from './src/time-reference.mjs';
 import { calibrationSummary, makeCalibration, validCalibration } from './src/workflow.mjs';
 import { generatorOptions } from './src/generator.mjs';
 import { makePulseCalibration, makeSenderCalibration, senderCalibrationLabel, senderCalibrationOptions } from './src/calibrator.mjs';
@@ -21,8 +21,6 @@ import { screenAwakeEnabled } from './src/screen-awake.mjs';
 import { addResult, liveDelta, loadSessionState, setNickname, toggleReference } from './src/results.mjs';
 
 const NativeCamera = native?.supportsLiveCapture?.() ? requireNativeViewManager('Avsync') : null;
-const RESYNC_MS = CLOCK_MAX_AGE_MS - 60000; // renew the clock reference a minute before it expires
-const UNCERTAIN_RESYNC_MS = 30000; // or sooner, at most every 30 s, once the holdover passes the limit
 const TABS = [['measure', 'Measure', 'speedometer-outline'], ['generate', 'Signal', 'tv-outline'], ['results', 'Results', 'list-outline']];
 
 function loadSession() {
@@ -50,7 +48,7 @@ export default function App() {
  const [tick, setTick] = useState(0);
  useEffect(() => { const t = setInterval(() => setTick(value => value + 1), 500); return () => clearInterval(t); }, []);
 
- // Clock: synchronize automatically while the app is in front, and renew before expiry.
+ // Clock: synchronize automatically while the app is in front, and renew before expiry (clockCheckDue).
  const [reference, setReference] = useState(null), [syncing, setSyncing] = useState(false), [clockError, setClockError] = useState(null);
  const syncBusy = useRef(false);
  const syncClock = async () => {
@@ -62,9 +60,7 @@ export default function App() {
  };
  useEffect(() => { if (!foreground) setReference(null); else syncClock(); }, [foreground, session.ntpServer]);
  useEffect(() => {
-  if (!foreground) return;
-  const age = reference ? performance.now() - reference.receivedJsMonoMs + reference.ageAtReceiptMs : Infinity;
-  if ((age > RESYNC_MS || (clockNow.state === 'uncertain' && age > UNCERTAIN_RESYNC_MS)) && !syncBusy.current) syncClock();
+  if (foreground && clockCheckDue(reference, performance.now(), limits.maxUncertaintyMs) && !syncBusy.current) syncClock();
  }, [tick]);
  const limits = useMemo(() => { try { return clockSettings(session); } catch { return clockSettings({}); } }, [session.ntpServer, session.clockMaxUncertaintyMs]);
  const clockNow = referenceAt(reference, native?.clockNow?.(), limits.maxUncertaintyMs);
@@ -146,6 +142,12 @@ export default function App() {
   } catch (error) { setNotice(error.message); }
   finally { setGenerating(false); }
  };
+ // A running test signal takes each new clock check and slews to it (docs/phone-clock.md).
+ useEffect(() => {
+  if (!generating) return;
+  const clock = generatorClockOptions(reference, native?.clockNow?.(), limits.maxUncertaintyMs);
+  if (clock.clockUnixMs) native?.updateGeneratorClock?.(clock)?.catch?.(() => {});
+ }, [reference]);
  const pickImage = async () => {
   setPicking(true);
   try { const picked = await native.pickGeneratorImage(); if (picked) update({ generatorImageId: picked.id }); }

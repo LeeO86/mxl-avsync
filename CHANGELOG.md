@@ -2,6 +2,17 @@
 
 ## Mobile (not released yet)
 
+- Test signal (iPhone and Android) no longer stops by itself about 5 minutes
+  after the last clock check ("Clock reference expired"). The app keeps
+  checking the clock while the signal runs and hands each new check to it; the
+  source timestamps slew to it at most 100 ppm (0.1 ms per second), never
+  jumping, and only for events not queued yet (core
+  `PhoneGeneratorPlan::retime`). It still stops when no check gets through for
+  too long (no network), or when a new check is further off than the
+  uncertainty limit. The status line shows "NTP UTC (check … s ago, ±… ms)".
+  The app now also checks a minute before the holdover would pass the limit,
+  not only after. New native call `updateGeneratorClock(options)`
+  (`docs/phone-clock.md`).
 - Android test signal: Signal → Start test signal now works on Android, with
   the same picture, options (1 or 2 events/s, title, subtitle, image), AVS4 QR
   (test ID, title, sender calibration), stable sender ID and "Stopped" screen

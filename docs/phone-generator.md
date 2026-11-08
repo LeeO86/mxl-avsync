@@ -75,7 +75,10 @@ It prevents automatic screen lock and raises brightness while active, restoring
 both when stopped. Stop/Close cancel queued sound and clear the whole timing picture; a large "Stopped" shows instead.
 App inactivity, audio interruptions, output/configuration changes, a wall-clock
 jump over 100 ms, missed scheduling deadlines and the 23-hour session limit stop
-the source. Restart creates a fresh clock mapping. Bluetooth and other external
+the source. Restart creates a fresh clock mapping. With NTP UTC, new clock checks
+reach the running signal and its timestamps slew to them (at most 100 ppm); it
+only stops when no check got through for too long or a check is further off than
+the limit ([phone-clock.md](phone-clock.md#clock-refresh-while-the-test-signal-runs)). Bluetooth and other external
 output paths have unverified delays; use the built-in speaker.
 
 ## Calibration mode

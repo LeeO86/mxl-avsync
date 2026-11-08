@@ -184,6 +184,18 @@ JNIEXPORT jfloatArray JNICALL GENERATOR(audio)(JNIEnv* env, jclass, jlong h, jlo
     env->SetFloatArrayRegion(out, 0, jsize(samples.size()), samples.data());
     return out;
 }
+JNIEXPORT jboolean JNICALL GENERATOR(retime)(JNIEnv*, jclass, jlong h, jlong offsetNs, jlong fromSeq, jlong maxStepNs)
+{
+    return fromSeq > 0 && self(h)->plan->retime(int64_t(offsetNs), uint64_t(fromSeq), int64_t(maxStepNs));
+}
+JNIEXPORT jdouble JNICALL GENERATOR(clockOffsetMs)(JNIEnv*, jclass, jlong h, jlong seq)
+{
+    return seq > 0 ? double(self(h)->plan->clock_offset_ns(uint64_t(seq))) / 1e6 : 0.0;
+}
+JNIEXPORT jboolean JNICALL GENERATOR(clockReferenceExpired)(JNIEnv*, jclass, jdouble ageMs, jdouble radiusMs, jdouble limitMs)
+{
+    return avsync::clock_reference_expired(ageMs, radiusMs, limitMs);
+}
 // The test picture for this event: AVS4 QR with the shown name and the sender calibration.
 JNIEXPORT jintArray JNICALL GENERATOR(image)(JNIEnv* env, jclass, jlong h, jlong seq)
 {

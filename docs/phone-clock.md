@@ -10,8 +10,10 @@ mapping from the capture clock to UTC.
 Settings → Debug → NTP server selects a hostname/IP (UDP port 123), default
 `time.cloudflare.com`. The app checks the clock on its own when it starts or
 comes to the front, and again every 4 minutes (a check is valid for 5 minutes).
-When the holdover allowance (below) pushes the uncertainty past the limit, it
-checks again sooner, at most every 30 s.
+When the holdover allowance (below) would push the uncertainty past the limit
+within a minute, it checks again sooner, at most every 30 s (`clockCheckDue`
+in `src/time-reference.mjs`). So a new check normally arrives before the old
+one runs out, also while the test signal runs.
 Settings → Sync clock now repeats it at once. The iOS client makes up to four
 requests, one second apart, on a worker; Android (`Sntp.kt`) makes eight,
 250 ms apart, with the same checks.
@@ -65,9 +67,51 @@ once, independently of AV offset/calibration. A wall-clock step cannot silently
 shift a qualified monotonic reference. Every saved reading retains the exact
 clock source, mapping, age, correction, uncertainty, RTT (NTP), server and raw
 latency diagnostics **at acquisition**; saving/rechecking never updates an
-old reading. A synchronized iOS generator uses the same mapping for scheduled
-source timestamps and stops at expiry; physical speaker/display output stays
+old reading. A synchronized generator (iOS and Android) uses the same mapping
+for scheduled source timestamps; physical speaker/display output stays
 estimated and encoded as such.
+
+## Clock refresh while the test signal runs
+
+The app keeps checking the clock while the test signal runs, by the same rule
+as for measuring, and hands every new check to the running signal
+(`updateGeneratorClock`, same JS call on iOS and Android). The signal then
+moves to the new check gently instead of jumping (core
+`PhoneGeneratorPlan::retime`, the same code on both phones):
+
+- **What moves.** Only the source timestamps (the time in the QR and in the
+  audio packet) of the events that are not queued yet. When the picture and
+  the sound of an event play does not change: frames stay on the display's
+  frame grid, and the sound and picture of one event always carry the same
+  timestamp. Events already queued (up to 2.5 s ahead) keep theirs.
+- **How fast.** At most 100 ppm: each event's timestamp moves by at most
+  0.05 ms (2 events/s) or 0.1 ms (1 event/s) from the one before, that is
+  0.1 ms per second. A typical difference of 1–5 ms between two checks is
+  taken up in 10–50 s; the largest allowed (the limit, 20 ms by default) in
+  200 s, before the next check is due. For an analyser this looks like a
+  source clock 100 ppm off for that time: far below anything it reacts to, and
+  the phone's own 50 ppm holdover allowance is of the same order. When the
+  QR is missed and an analyser counts on from an older event, the error stays
+  below 100 ppm × the gap (2 ms at the longest 20 s gap).
+- **Too big a difference.** When a new check is further from the current
+  timestamps than the uncertainty limit (default 20 ms), something is wrong
+  with one of the two checks (network path, server). The signal does not
+  slew then; it stops with "New clock check is … ms off (more than the … ms
+  limit). Tap Start for a fresh clock mapping." Start uses the new check.
+- **When it stops.** Only when no new check got through in time: the newest
+  check is more than 5 minutes old, or its estimate plus the 50 ppm holdover
+  passes the limit (no network, for example). Then it stops with "Clock
+  reference expired. Close and synchronize again." as before.
+- **What stays.** The test ID and source ID, the "Phone clock changed" check
+  (it watches the phone's own wall clock against the host clock and does not
+  use the check), and the other stop reasons.
+- **Status line.** "NTP UTC" stays, now with the age of the newest check and
+  the total timestamp change since Start: "NTP UTC (check 42 s ago, +1.2 ms)"
+  (no change shown while it is 0).
+- A signal started without a valid check (device UTC) stays on device UTC
+  until the next Start. The calibration pattern uses no clock reference; it is
+  not affected. The container generator uses the host/PTP clock and has no
+  such refresh.
 
 ## Timestamp-relative versus emission-to-capture latency
 
@@ -106,7 +150,12 @@ cannot identify all of them. See [device-to-device](device-to-device.md).
 ## Checks
 
 - `npm test` from `mobile-app`: clock/schema/expiry/correction/source-change,
-  raw diagnostics and immutable saved results; calibration context mismatch.
+  raw diagnostics and immutable saved results; calibration context mismatch;
+  the check cadence, with a 15-minute test signal run that never expires while
+  checks arrive and stops after the rule when they do not.
+- Core `ctest` (`test_timecode.cpp`): the clock refresh slew (rate, refused
+  big changes, queued events unchanged, same stamp for sound and picture) and
+  the same 15-minute run on the generator plan.
 - `python3 mobile-app/tests/native/clock.py` (macOS): actual Swift packet codec
   and Network.framework UDP client against a fake server with known offset;
   rejection of unsynchronized, wrong-origin and kiss-of-death replies.

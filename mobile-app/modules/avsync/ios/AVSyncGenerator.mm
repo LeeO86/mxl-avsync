@@ -108,6 +108,9 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     if((m!="clap"&&m!="transponder"&&m!="pulse-train")||!std::isfinite(offset)||std::abs(offset)>3276||!std::isfinite(uncertainty)||uncertainty<0||uncertainty>127||day<0||day>0xFFFF)return;
     _calibration.method=m;_calibration.offset_ms=offset;_calibration.uncertainty_ms=uncertainty;_calibration.day=int(day);
 }
+- (BOOL)retimeOffsetNs:(int64_t)offset fromSequence:(uint64_t)seq maxStepNs:(int64_t)maxStep { return _plan->retime(offset,seq,maxStep); }
+- (double)clockOffsetMsForSequence:(uint64_t)seq { return double(_plan->clock_offset_ns(seq))/1e6; }
++ (BOOL)clockReferenceExpiredAgeMs:(double)age radiusMs:(double)radius limitMs:(double)limit { return avsync::clock_reference_expired(age,radius,limit); }
 + (BOOL)calibrationLeftWhiteAtFrame:(uint64_t)frame fps:(NSInteger)fps { return avsync::calibration_left_white(frame,fps,1); }
 + (uint64_t)calibrationSwapFrame:(uint64_t)swap fps:(NSInteger)fps { return avsync::calibration_swap_frame(swap,fps,1); }
 + (NSData *)calibrationBeepWithSampleRate:(double)rate {
