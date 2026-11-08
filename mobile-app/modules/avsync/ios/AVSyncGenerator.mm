@@ -45,6 +45,11 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     avsync::SourceStill _sourceImage;
     avsync::SourceStill _appIcon;
 }
++ (NSString *)testIDWithPrefix:(NSString *)prefix installID:(NSString *)installID version:(NSString *)version settings:(NSArray<NSString *> *)settings {
+    std::vector<std::string> values;
+    for(NSString *setting in settings)values.emplace_back(setting.UTF8String);
+    return @(avsync::generator_test_id(prefix.UTF8String,installID.UTF8String,version.UTF8String,values).c_str());
+}
 - (instancetype)initWithTestID:(NSString *)testID rate:(NSInteger)rate epochTaiNs:(int64_t)epoch epochHost:(double)host {
     if ((self = [super init])) {
         _plan=std::make_unique<avsync::PhoneGeneratorPlan>(testID.UTF8String,int(rate),epoch,host);
@@ -86,7 +91,9 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }
 - (NSData *)audioForSequence:(uint64_t)seq { const auto samples=_plan->audio(seq);return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)]; }
 - (UIImage *)imageForSequence:(uint64_t)seq {
-    _info.qr_json=avsync::qr_payload_text(_plan->qr(seq));_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
+    // AVS4 carries the shown name; the output offset is not calibrated yet (method none).
+    auto qr=_plan->qr(seq);qr.name=_info.source;
+    _info.qr_json=avsync::qr_payload_text(qr);_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
     avsync::Yuv422p10 frame;frame.resize(1280,720);
     avsync::render_picture(frame,_info,seq,0,_plan->period_frames(),false);
     return image_from_frame(frame);

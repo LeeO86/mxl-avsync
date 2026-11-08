@@ -2,6 +2,17 @@
 
 ## Mobile (not released yet)
 
+- iPhone generator: the source ID stays the same when the generator is stopped
+  and started again. It changes only after a reinstall, a new app version or
+  build, or another event rate; name, subtitle and image do not change it
+  (`docs/phone-generator.md`).
+- New picture QR **AVS4** (replaces AVS2/AVS3; update all phones and containers
+  together, old ones cannot read it). It also carries the real test ID, the
+  generator Title (at most 24 bytes, cut at a whole character) and the sender
+  calibration (sent as "not calibrated" for now). Same QR size (version 4,
+  33 × 33 modules), error correction M instead of Q. The phone report's `signal`
+  has the new `name` and `senderCalibration` and the real `testId` (was
+  `source-<hex>`). The Android reader takes `AVS4:` (`docs/phone-generator.md`).
 - Results are grouped by sender, with a nickname per sender (pencil) and one
   reference result per sender (★). The other results of that sender show Δ AV
   offset and, when both have a latency, Δ video/audio latency; Measure shows the
@@ -33,6 +44,22 @@
   dark with light icons instead of white. Found on the Android emulator.
 - Android: the instrumented test (`connectedDebugAndroidTest`) builds; React
   Native's `libc++_shared.so` and the module's no longer collide.
+
+## Container (not released yet)
+
+- Generator: the default `AVSYNC_TEST_ID` is now `<NMOS seed>-` plus a short
+  hash of the seed, the app version and the timing settings (event rate, audio
+  timecode, video format, AV offset, audio/video lead, source emit offsets),
+  the same rule as the iPhone generator. It
+  stays the same over restarts. A set `AVSYNC_TEST_ID` is used as before.
+  `GET /api/v1/generator` shows the `test_id` in use; the settings page shows
+  it greyed in the empty `AVSYNC_TEST_ID` field.
+- Picture QR **AVS4** (replaces AVS2/AVS3, no backwards compatibility): carries
+  the real test ID, the Signal form Title (`AVSYNC_SOURCE`) as the generator name and the sender
+  calibration (not calibrated for now). Same QR size, error correction M. The
+  analyzer's `/api/v1/status` has a new `signal` object (`test_id`, `name`,
+  `sender_calibration`, …) and the web UI shows it in the Input card. File
+  generator and analyzer use AVS4 too (SPECIFICATION "QR + optical code").
 
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 

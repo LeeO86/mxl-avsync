@@ -273,9 +273,19 @@ std::string PhoneAnalyzer::poll()
 
     Json out;
     out.str("kind", "status").num("timeMs", now).str("stage", stage);
-    if (qr_)
-        out.raw("signal", Json().integer("sourceId", qr_->source_id).str("testId", qr_->test_id).integer("rate", qr_->rate)
-                              .str("format", qr_->format).boolean("live", qr_->mode == "LIVE").boolean("estimatedSource", qr_->estimated_source).text());
+    if (qr_) {
+        // AVS4: the sender's own output calibration; only "method" while it is not calibrated.
+        const auto& c = qr_->calibration;
+        Json calibration;
+        calibration.str("method", c.method);
+        if (c.calibrated()) {
+            calibration.num("offsetMs", c.offset_ms).num("uncertaintyMs", c.uncertainty_ms);
+            if (c.day > 0) calibration.str("date", calibration_date(c.day));
+        }
+        out.raw("signal", Json().integer("sourceId", qr_->source_id).str("testId", qr_->test_id).str("name", qr_->name).integer("rate", qr_->rate)
+                              .str("format", qr_->format).boolean("live", qr_->mode == "LIVE").boolean("estimatedSource", qr_->estimated_source)
+                              .raw("senderCalibration", calibration.text()).text());
+    }
     if (pairs.size() >= 3) {
         std::vector<double> offsets, video, audio;
         for (const auto& p : pairs) {

@@ -10,8 +10,9 @@ phone's camera and microphone (calibrate once per phone).
 
 Get `ghcr.io/leeo86/mxl-avsync:2.1.0` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
 for iOS TestFlight information. Upgrade compact-signal generator and receivers
-together: AVS3 receivers ignore AVS2 sources, and older receivers do not
-understand AVS3. Legacy signals remain supported.
+together: the picture QR is now AVS4 (it also carries the test ID, the
+generator name and the sender calibration); AVS2/AVS3 generators and receivers
+cannot read it, and AVS4 receivers ignore them. Legacy signals remain supported.
 [Signal and validation details](docs/qr-flash.md) · [Release notes](docs/release-notes-2.1.0.md).
 
 

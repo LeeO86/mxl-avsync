@@ -19,7 +19,7 @@ Use the custom development build, not Expo Go. The local Avsync Expo module cont
 
 ## Measure
 
-Point the camera at an AVS3 test signal (QR and the two-field panel visible)
+Point the camera at an AVS4 test signal (QR and the two-field panel visible)
 with its sound audible. After a few events the screen shows:
 
 - the **AV offset**: positive means audio after video; calibrated when a
@@ -63,7 +63,7 @@ only, for this OS version and camera mode, for 90 days.
 
 ## Signal
 
-Signal → Start test signal shows the fullscreen AVS3 source with its sound
+Signal → Start test signal shows the fullscreen AVS4 source with its sound
 (2 events/s; 1/s under Options, with title, subtitle and image).
 
 ## Settings and Debug

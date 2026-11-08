@@ -30,7 +30,7 @@ struct Config {
     std::string source_emit_video_ms;
     std::string source_emit_audio_ms;
     int qr_period_ms = 1000;
-    std::string test_id;
+    std::string test_id; // empty: the stable default from effective_test_id()
     std::string title;
     std::string source;
     std::string subtitle;
@@ -81,6 +81,7 @@ struct Config {
     std::map<std::string, std::string> from_env;
 
     std::string seed() const;
+    std::string effective_test_id() const;
     std::string label() const;
 };
 
