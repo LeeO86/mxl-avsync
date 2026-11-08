@@ -488,8 +488,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     analyzer.setTaiUtcSeconds(taiUtcSeconds)
     val corners = analyzer.picture()
     main.post { outline.show(corners) }
-    if (analyzer.calibratorActive()) {
-      val text = analyzer.pollCalibrator() ?: return
+    // A calibrator take reports about once a second (as iOS: otherwise the live poll goes on).
+    analyzer.pollCalibrator()?.let { text ->
       val report = toMap(JSONObject(text))
       if (report["kind"] != "calibrator-progress") analyzer.reset() // done: live analysis resumes
       emit(report)
