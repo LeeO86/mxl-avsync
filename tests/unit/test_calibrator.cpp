@@ -247,3 +247,47 @@ TEST_CASE("display mode: an external screen with picture later than sound, and f
     for (int k = 0; k < 8; ++k) add_click(only_clicks, 200 + 500 * k);
     CHECK(display_calibration(find_sound_onsets(only_clicks.data(), only_clicks.size(), kRate, 0)).error.find("No test sound") == 0);
 }
+
+#include "avsync/phone_analyzer.hpp"
+#include <string>
+
+TEST_CASE("phone analyzer: calibrator camera take reports progress, then the result")
+{
+    Noise noise;
+    const auto flashes = train(300);
+    auto audio = noise_track(14, .003, noise);
+    for (double t : flashes) add_click(audio, t + 20 + 1.5 * CalibratorContract::sound_ms_per_cm);
+    // 128 x 128 luma at 240 fps, readout 3 ms, exposure 1 ms; 10 ms audio blocks.
+    const int w = 128, h = 128;
+    const double fps = 240, exposure = 1, readout = 3, led = CalibratorContract::led_pulse_ms;
+    PhoneAnalyzer analyzer;
+    analyzer.begin_calibrator(PhoneAnalyzer::CalibratorMode::Camera);
+    CHECK(analyzer.calibrator_active());
+    std::vector<uint8_t> luma(size_t(w) * h);
+    std::string last;
+    int progress = 0;
+    size_t sample = 0;
+    for (double t = 1; t < 14000 && last.find("\"kind\":\"calibrator\"") == std::string::npos; t += 1000 / fps) {
+        for (int y = 0; y < h; ++y) {
+            const double start = t + readout * (y + .5) / h;
+            double light = 0;
+            for (double f : flashes) light += std::max(0.0, std::min(start + exposure, f + led) - std::max(start, f));
+            std::fill_n(luma.begin() + long(y) * w, w, uint8_t(std::lround(16 + 239 * std::pow(std::min(1.0, light / std::min(exposure, led)), 1 / 2.2))));
+        }
+        analyzer.push_video(luma.data(), w, h, w, t, exposure, readout);
+        while (sample * 1000.0 / kRate < t && sample + 480 <= audio.size()) {
+            analyzer.push_audio(audio.data() + sample, 480, sample * 1000.0 / kRate, kRate);
+            sample += 480;
+        }
+        const auto report = analyzer.poll_calibrator();
+        if (report.find("calibrator-progress") != std::string::npos) ++progress;
+        if (!report.empty()) last = report;
+    }
+    CHECK(progress >= 5);
+    REQUIRE(last.find("\"kind\":\"calibrator\"") != std::string::npos);
+    CHECK(last.find("\"method\":\"calibrator-pulse\"") != std::string::npos);
+    const auto at = last.find("\"offsetMs\":");
+    REQUIRE(at != std::string::npos);
+    CHECK(std::abs(std::stod(last.substr(at + 11)) - 20) < .4);
+    CHECK(analyzer.poll().empty()); // no live report while calibrating
+}

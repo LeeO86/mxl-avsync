@@ -93,7 +93,7 @@ void PhoneAnalyzer::set_device_utc_offset(double offset)
 void PhoneAnalyzer::observe_qr(const std::string& text, const std::array<double, 4>& x, const std::array<double, 4>& y, double capture_ms)
 {
     auto payload = parse_qr_payload(text);
-    if (!payload || !payload->optical_code || !std::isfinite(capture_ms) || calibration_) return;
+    if (!payload || !payload->optical_code || !std::isfinite(capture_ms) || calibration_ || calibrator_) return;
     qr_ = payload;
     qr_ms_ = capture_ms;
     QrDetection q;
@@ -102,7 +102,7 @@ void PhoneAnalyzer::observe_qr(const std::string& text, const std::array<double,
     session_.observe_qr(q, capture_ms);
 }
 
-bool PhoneAnalyzer::qr_scan_suggested(double t) const { return !calibration_ && session_.qr_scan_suggested(t); }
+bool PhoneAnalyzer::qr_scan_suggested(double t) const { return !calibration_ && !calibrator_ && session_.qr_scan_suggested(t); }
 
 void PhoneAnalyzer::push_video(const uint8_t* luma, int w, int h, int stride, double pts, double exposure, double readout)
 {
@@ -112,6 +112,21 @@ void PhoneAnalyzer::push_video(const uint8_t* luma, int w, int h, int stride, do
     ++frames_;
     frame_times_.push_back(pts);
     while (frame_times_.size() > 2 && frame_times_.front() < pts - 3000) frame_times_.pop_front();
+    if (calibrator_) {
+        if (*calibrator_ != CalibratorMode::Camera || calibrator_done_ || flash_frames_.size() > 12000) return;
+        // Mean luma of 32 row bands (every 8th pixel of every 4th row).
+        constexpr int kBands = 32;
+        FlashFrame f{pts, exposure, readout, std::vector<float>(kBands)};
+        for (int b = 0; b < kBands; ++b) {
+            double sum = 0;
+            int count = 0;
+            for (int yy = b * h / kBands; yy < (b + 1) * h / kBands; yy += 4)
+                for (int xx = 0; xx < w; xx += 8) sum += luma[size_t(yy) * stride + size_t(xx)], ++count;
+            f.rows[size_t(b)] = count ? float(sum / count) : 0;
+        }
+        flash_frames_.push_back(std::move(f));
+        return;
+    }
     if (calibration_) {
         if (calibration_done_) return;
         // Keep a small grey copy (at most 640 px) for the review.
@@ -135,14 +150,18 @@ void PhoneAnalyzer::push_audio(const float* mono, size_t n, double pts, int rate
     if (origin_ < 0) origin_ = pts;
     rate_ = rate;
     last_audio_ = pts + n * 1000.0 / rate;
-    if (!calibration_) {
+    if (!calibration_ && !calibrator_) {
         session_.push_audio(mono, n, pts, rate, true);
         return;
     }
-    if (calibration_done_) return;
+    if (calibration_done_ || calibrator_done_) return;
     if (cal_audio_origin_ < 0) cal_audio_origin_ = pts;
     const size_t at = size_t(std::max(0.0, std::round((pts - cal_audio_origin_) * rate / 1000)));
-    if (at > cal_audio_.size() && at < size_t(18 * rate)) cal_audio_.resize(at, 0);
+    if (at > cal_audio_.size() && at < size_t(40 * rate)) cal_audio_.resize(at, 0);
+    if (calibrator_) {
+        if (cal_audio_.size() < size_t(40 * rate)) cal_audio_.insert(cal_audio_.end(), mono, mono + n);
+        return;
+    }
     cal_audio_.insert(cal_audio_.end(), mono, mono + n);
     // A sharp sound: a peak well above the running floor, after a quiet start.
     float peak = 0;
@@ -198,6 +217,58 @@ void PhoneAnalyzer::finish_calibration(double now)
     take_ = std::move(take);
 }
 
+void PhoneAnalyzer::begin_calibrator(CalibratorMode mode)
+{
+    reset();
+    calibrator_ = mode;
+}
+
+std::string PhoneAnalyzer::poll_calibrator()
+{
+    constexpr int kWanted = 20;            // pulses (camera) or swaps (display) for a result
+    constexpr double kLimitMs = 30000;     // then the result with what there is, or an error
+    if (!calibrator_ || calibrator_done_ || cal_audio_origin_ < 0) return {};
+    const double now = std::max(last_video_, last_audio_);
+    if (calibrator_poll_ >= 0 && now - calibrator_poll_ < 1000) return {};
+    calibrator_poll_ = now;
+    const bool camera = *calibrator_ == CalibratorMode::Camera;
+    const auto sounds = find_sound_onsets(cal_audio_.data(), cal_audio_.size(), rate_, cal_audio_origin_);
+    double readout = 0;
+    std::vector<FlashOnset> flashes;
+    if (camera) flashes = find_flash_onsets(flash_frames_, CalibratorContract::led_pulse_ms, &readout);
+    auto run = [&](int min_pairs) {
+        if (camera) {
+            CameraCalibrationOptions o;
+            o.min_pairs = min_pairs;
+            return camera_calibration(flashes, sounds, o);
+        }
+        DisplayCalibrationOptions o;
+        o.min_pairs = min_pairs;
+        return display_calibration(sounds, o);
+    };
+    const auto progress = run(1);
+    const double elapsed = now - origin_;
+    Json out;
+    out.str("mode", camera ? "camera" : "display");
+    if (progress.pairs < kWanted && elapsed < kLimitMs) {
+        size_t clicks = 0;
+        for (const auto& s : sounds) clicks += s.click();
+        out.str("kind", "calibrator-progress").integer("pairs", progress.pairs).integer("wanted", kWanted)
+            .integer("flashes", long(flashes.size())).integer("clicks", long(clicks)).num("elapsedMs", elapsed);
+        return out.text();
+    }
+    calibrator_done_ = true;
+    const auto r = run(8);
+    if (!r.ok) return Json().str("kind", "error").str("message", r.error).text();
+    const double fps = frames_ * 1000.0 / std::max(1.0, last_video_ - origin_);
+    out.str("kind", "calibrator").str("method", camera ? "calibrator-pulse" : "calibrator-display")
+        .num("offsetMs", r.offset_ms).num("uncertaintyMs", r.uncertainty_ms).num("spreadMs", r.spread_ms)
+        .integer("pairs", r.pairs).integer("rejected", r.rejected).num("directionMs", r.direction_ms)
+        .num("readoutMs", readout > 0 ? readout : r.readout_ms);
+    if (camera) out.num("fps", fps);
+    return out.text();
+}
+
 std::optional<PhoneAnalyzer::CalibrationTake> PhoneAnalyzer::take_calibration()
 {
     auto out = std::move(take_);
@@ -208,7 +279,7 @@ std::optional<PhoneAnalyzer::CalibrationTake> PhoneAnalyzer::take_calibration()
 bool PhoneAnalyzer::picture(std::array<double, 4>& x, std::array<double, 4>& y) const
 {
     const auto& pose = session_.current_picture();
-    if (calibration_ || !pose.found || video_width_ <= 0 || last_audio_ - last_video_ > 300) return false;
+    if (calibration_ || calibrator_ || !pose.found || video_width_ <= 0 || last_audio_ - last_video_ > 300) return false;
     for (int i = 0; i < 4; ++i) x[i] = pose.corner_x[i] / video_width_, y[i] = pose.corner_y[i] / video_height_;
     return true;
 }
@@ -216,7 +287,7 @@ bool PhoneAnalyzer::picture(std::array<double, 4>& x, std::array<double, 4>& y) 
 bool PhoneAnalyzer::report_due() const
 {
     const double now = std::max(last_video_, last_audio_);
-    return !calibration_ && origin_ >= 0 && now - origin_ >= 1500 && now - last_report_ >= 1000;
+    return !calibration_ && !calibrator_ && origin_ >= 0 && now - origin_ >= 1500 && now - last_report_ >= 1000;
 }
 
 PhoneAnalyzer PhoneAnalyzer::snapshot_for_poll()
@@ -237,7 +308,7 @@ void PhoneAnalyzer::merge_audio(const PhoneAnalyzer& analyzed)
 
 std::string PhoneAnalyzer::poll()
 {
-    if (calibration_ || origin_ < 0) return {};
+    if (calibration_ || calibrator_ || origin_ < 0) return {};
     const double now = std::max(last_video_, last_audio_);
     last_report_ = now;
     const auto report = session_.finish("PHONE");

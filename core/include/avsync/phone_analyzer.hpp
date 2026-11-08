@@ -6,6 +6,7 @@
 // the device UTC clock; the app adds its NTP/GNSS correction.
 
 #include "avsync/avsync.hpp"
+#include "avsync/calibrator.hpp"
 
 #include <array>
 #include <deque>
@@ -55,6 +56,15 @@ public:
     std::optional<std::string> calibration_error() const { return calibration_error_; }
     std::optional<CalibrationTake> take_calibration();
 
+    // Calibrator board (docs/calibrator.md). Camera: LED flash + click on the rear camera,
+    // this phone's camera against its microphone. Display: an external screen shows the
+    // calibration pattern (container generator); only the microphone counts.
+    enum class CalibratorMode { Camera, Display };
+    void begin_calibrator(CalibratorMode mode);
+    bool calibrator_active() const { return calibrator_.has_value(); }
+    // About once a second a progress report (JSON), then once the result or an error; else empty.
+    std::string poll_calibrator();
+
     // The detected picture (for the preview outline), normalized corners.
     bool picture(std::array<double, 4>& x, std::array<double, 4>& y) const;
 
@@ -76,6 +86,11 @@ private:
     double cal_audio_origin_ = -1, spike_ = -1, floor_ = .002;
     int rate_ = 48000;
     void finish_calibration(double now);
+    // Calibrator take.
+    std::optional<CalibratorMode> calibrator_;
+    std::vector<FlashFrame> flash_frames_;
+    double calibrator_poll_ = -1;
+    bool calibrator_done_ = false;
 };
 
 } // namespace avsync
