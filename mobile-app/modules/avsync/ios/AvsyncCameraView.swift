@@ -109,7 +109,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   // Re-aim: drop the history and lock exposure again for the new view.
   func resumeAnalysis() {
     DispatchQueue.main.async { [weak self] in self?.clearOutline() }
-    samples.async { [weak self] in self?.restart() }
+    samples.async { [weak self] in self?.pendingCalibrator = nil; self?.restart() } // also cancels a calibrator take waiting for its lock
     control.async { [weak self] in self?.scheduleExposureLock() }
   }
 

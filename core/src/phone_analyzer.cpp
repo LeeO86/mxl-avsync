@@ -157,7 +157,7 @@ void PhoneAnalyzer::push_audio(const float* mono, size_t n, double pts, int rate
     if (calibration_done_ || calibrator_done_) return;
     if (cal_audio_origin_ < 0) cal_audio_origin_ = pts;
     const size_t at = size_t(std::max(0.0, std::round((pts - cal_audio_origin_) * rate / 1000)));
-    if (at > cal_audio_.size() && at < size_t(40 * rate)) cal_audio_.resize(at, 0);
+    if (at > cal_audio_.size() && at < size_t((calibrator_ ? 40 : 18) * rate)) cal_audio_.resize(at, 0);
     if (calibrator_) {
         if (cal_audio_.size() < size_t(40 * rate)) cal_audio_.insert(cal_audio_.end(), mono, mono + n);
         return;
