@@ -327,10 +327,9 @@ def silk(board):
     text(board, F, "AVsync", cx, ty + 2.8, 2.0, bold=True)
     text(board, F, "calibrator", cx, ty + 5.2, 1.2)
     text(board, F, "CERN-OHL-P-2.0", 32.8, 20.7, JLC_TEXT)  # small, below the MCU
-    # update button hint (top, under the button)
+    # BOOT button label (top, centred under the button)
     sx, sy_ = D.PARTS["SW1"][5][:2]
-    text(board, F, "hold to", sx, sy_ + 4.4, JLC_TEXT)
-    text(board, F, "update", sx, sy_ + 5.9, JLC_TEXT)
+    text(board, F, "BOOT", sx, sy_ + 4.5, 1.2, bold=True)
 
     # Bottom (this side touches the phone or the screen).
     # logo in the middle of the board, right beside the QR code

@@ -35,7 +35,7 @@ Schematic: [`renders/calibrator-schematic.pdf`](renders/calibrator-schematic.pdf
   (PC17/PC16) **only for firmware updates**. The firmware never turns the USB block or its
   D+ pull-up on, so a phone sees no USB device: no "accessory not supported" message and
   no audio route change.
-- **Update button** SW1: connects D+ (PC17) to VDD through 4.7 kΩ (R9). The ROM bootloader
+- **BOOT button** SW1 (update mode): connects D+ (PC17) to VDD through 4.7 kΩ (R9). The ROM bootloader
   starts only at power-on and only if PC17 is high then (CH32X035 datasheet, pin note 8).
 - **Flash and click**: white LED (PA4, ~12 mA) and buzzer transistor (PA5) are on the same
   port, so one register write starts both.
@@ -84,7 +84,7 @@ Parts that make the hole idea work, all in JLC stock:
 Look and markings:
 
 - **Logo** on both sides, from `assets/app-icon.svg`: on the top centred in the free area
-  between the update button and the USB-C, on the bottom in the middle of the board, 11 mm,
+  between the BOOT button and the USB-C, on the bottom in the middle of the board, 11 mm,
   beside the QR code; the short instructions sit at the LED/sensor end. Cyan and white strokes are silkscreen.
   The orange parts are copper with a solder-mask opening and no paste, so with ENIG they look
   gold. That copper has no net; keep-outs keep tracks and vias away from it. Like in the
@@ -96,7 +96,7 @@ Look and markings:
   (normal polarity), no via holes inside. Checked: zxing-cpp decodes the bottom render, also
   at 1/3 size. Matrix: `scripts/qr_matrix.txt` (from `scripts/gen_qr.py`, needs `segno`).
 - **Text**: one font; name 1.8–2.0 mm, sub-lines 1.0–1.2 mm, and JLC's minimum
-  (1.0 mm / 0.153 mm stroke) for "not a toy", the licence (small, below the MCU) and "hold to update" under SW1.
+  (1.0 mm / 0.153 mm stroke) for "not a toy", the licence (small, below the MCU); "BOOT" under SW1 (1.2 mm bold).
 - **Alignment**: LED circle, `A`/`B`, the split line (on the top next to the LED and again
   behind the buzzer, so it is visible while the board lies face down) and a half-round notch
   in the board edge on the split line. Marks on both sides.
@@ -164,7 +164,7 @@ under the VAT limit). Run the real JLC quote with `fab/calibrator-gerbers.zip` b
 The CH32X035 has a USB bootloader in ROM, so the board cannot be bricked and needs no
 programmer.
 
-1. Unplug the board. Hold the **update** button (SW1, "hold to update").
+1. Unplug the board. Hold the **BOOT** button (SW1).
 2. Plug the board into a PC (USB-C to USB-C, or USB-A to C). Release after about a second.
 3. The board shows up as a WCH ISP device. Flash with an open tool:
    - [`wchisp`](https://github.com/ch32-rs/wchisp) (Rust, GPL-2.0): `wchisp flash firmware/build/calibrator.bin`

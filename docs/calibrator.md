@@ -28,7 +28,7 @@ All numbers below are defaults in `cal_default_cfg()` (`firmware/src/cal_logic.c
 - Only USB-C phones. The board is a USB-C *sink*: 5.1 kΩ on CC1 and CC2. D+ and D− go to
   the MCU but are only used for firmware updates: the firmware never turns USB on, so the
   phone does not see an audio or data device and keeps its own speaker and microphone.
-- Firmware update (not with a phone): hold the board's update button while plugging it into
+- Firmware update (not with a phone): hold the board's BOOT button while plugging it into
   a PC; see `hardware/calibrator/README.md`.
 - The phone must supply 5 V on USB-C (iPhone 15 and later, most Android phones with OTG).
 - The board needs about 10 mA, plus short peaks of about 100 mA during a click.

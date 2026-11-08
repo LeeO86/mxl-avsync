@@ -38,7 +38,7 @@ PARTS = {
             "B12": "GND", "S1": "GND", "A5": "CC1", "B5": "CC2", "A6": "DP", "B6": "DP", "A7": "DM", "B7": "DM",
             "A8": None, "B8": None},
            (BOARD_W - 3.35, SPLIT_Y, 90, "F")),
-    "SW1": ("Switch:SW_Push", "TS-1187A (update)", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", "C318884",
+    "SW1": ("Switch:SW_Push", "TS-1187A (BOOT)", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", "C318884",
             {"1": "BOOT", "2": "VDD"}, (40.5, 6.0, 0, "F")),
     "R9": ("Device:R", "4.7k", FP_R0402, "C25900", {"1": "DP", "2": "BOOT"}, (40.5, 16.6, 90, "F")),
     "R1": ("Device:R", "5.1k", FP_R0402, "C25905", {"1": "CC1", "2": "GND"}, (56.6, 7.0, 90, "F")),

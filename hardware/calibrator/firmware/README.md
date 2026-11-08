@@ -75,7 +75,7 @@ Output: `build/calibrator.bin` (flash this), `.hex`, `.elf`.
 ## Update over USB (update mode)
 
 1. Unplug the board.
-2. Hold the button ("hold to update") and plug the board into a PC with a USB-C to USB-C
+2. Hold the BOOT button and plug the board into a PC with a USB-C to USB-C
    or USB-A to USB-C cable.
 3. Release the button after about 1 s. The chip's ROM bootloader starts and shows up as a
    WCH ISP device (USB ID `4348:55e0`, on some chips `1a86:55e0`).
