@@ -1,0 +1,9 @@
+*.rpt
+*.dsn
+*.ses
+*-backups/
+fp-info-cache
+*.kicad_prl
+fab/gerbers/
+fab/calibrator-pos.csv
+__pycache__/

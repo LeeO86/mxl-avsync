@@ -1,5 +1,11 @@
 # Changelog
 
+## Hardware (in development)
+
+- Calibrator board v1 proposal under `hardware/calibrator/`: KiCad 9 project, JLCPCB
+  files, PY32F002A firmware with host tests, and the signal contract in
+  `docs/calibrator.md`. Not built or tested yet; the app side is not built.
+
 ## Mobile (not released yet)
 
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
