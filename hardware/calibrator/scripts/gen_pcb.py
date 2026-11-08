@@ -326,7 +326,7 @@ def silk(board):
     ty = TOP_LOGO[1] + TOP_LOGO[2] / 2
     text(board, F, "AVsync", cx, ty + 2.8, 2.0, bold=True)
     text(board, F, "calibrator", cx, ty + 5.2, 1.2)
-    text(board, F, "CERN-OHL-P-2.0", 31.5, 20.7, JLC_TEXT)  # small, below the MCU
+    text(board, F, "CERN-OHL-P-2.0", 32.8, 20.7, JLC_TEXT)  # small, below the MCU
     # update button hint (top, under the button)
     sx, sy_ = D.PARTS["SW1"][5][:2]
     text(board, F, "hold to", sx, sy_ + 4.4, JLC_TEXT)
@@ -339,18 +339,18 @@ def silk(board):
     text(board, B, "AVsync", bx, by + bs / 2 + 2.2, 1.8, bold=True)
     text(board, B, "calibrator v0.3", bx, by + bs / 2 + 4.3, JLC_TEXT)
     # how to use it, next to the LED / sensor end
-    ix = 18.0
+    ix = 16.8
     text(board, B, "CAMERA", ix, 4.0, 1.2, bold=True)
     text(board, B, "LED on lens", ix, 5.8, JLC_TEXT)
     text(board, B, "SCREEN", ix, 14.0, 1.2, bold=True)
     text(board, B, "A|B on line", ix, 15.8, JLC_TEXT)
-    text(board, B, "not a toy", ix, 20.3, JLC_TEXT)
+    text(board, B, "not a toy", ix, 18.8, JLC_TEXT)
     qr(board, QR[0], QR[1], QR[2])
 
 
 # Artwork places (board mm): logo (centre x, centre y, size), QR (left x, top y, module)
-TOP_LOGO = (50.3, 7.6, 9.0)
-BOT_LOGO = (33.0, 9.0, 11.0)
+TOP_LOGO = (50.3, 8.8, 9.0)
+BOT_LOGO = (31.8, 9.0, 11.0)
 QR = (40.0, 2.675, 0.45)
 QR_SIZE = (29 + 8) * QR[2]
 
@@ -439,8 +439,10 @@ def place():
         keepout(board, qx - 1.45, qy - 1.45, qx + 1.45, qy + 1.45)
     tx, ty, ts = TOP_LOGO
     keepout(board, tx - ts / 2 - 0.5, ty - ts / 2 - 0.5, tx + ts / 2 + 0.5, ty + ts / 2 + 0.5, pcbnew.F_Cu)
+    keepout(board, tx - ts / 2 - 1.0, ty - ts / 2 - 1.0, tx + ts / 2 + 1.0, ty + ts / 2 + 6.0, tracks=False)  # no via holes in the top logo or its text
     bx, by, bs = BOT_LOGO
     keepout(board, bx - bs / 2 - 0.5, by - bs / 2 - 0.5, bx + bs / 2 + 0.5, by + bs / 2 + 0.5, pcbnew.B_Cu)
+    keepout(board, bx - bs / 2 - 1.0, by - bs / 2 - 1.0, bx + bs / 2 + 1.0, by + bs / 2 + 5.5, tracks=False)  # no via holes in the bottom logo or its text
     silk(board)
     pcbnew.SaveBoard(PCB, board)
     stackup(PCB)
@@ -465,7 +467,7 @@ def add_via(board, net, x, y):
 
 
 # Areas kept free of stitching vias so the silkscreen text stays whole (x1, y1, x2, y2).
-NO_STITCH = [(43.5, 0.0, 57.0, 22.0), (36.5, 2.5, 44.5, 13.5), (26.5, 2.5, 39.6, 20.5), (11.0, 2.5, 25.0, 21.5),
+NO_STITCH = [(43.5, 0.0, 57.0, 22.0), (36.5, 2.5, 44.5, 13.5), (25.0, 2.0, 39.6, 20.5), (11.0, 2.5, 25.0, 21.5),
              (39.7, 2.4, 56.9, 19.6), (0.0, 9.8, 23.0, 12.2), (24.0, 19.6, 39.0, 21.9)]
 
 
@@ -494,7 +496,7 @@ def stitch(board, net, step=2.5, margin=0.7):
 
 
 # Silkscreen art on the bottom: no vias at all here.
-ART = [(39.7, 2.4, 56.9, 19.6), (26.5, 2.5, 39.6, 20.5), (43.5, 0.0, 57.0, 22.0), (11.0, 2.5, 25.0, 21.5)]
+ART = [(39.7, 2.4, 56.9, 19.6), (25.0, 2.0, 39.6, 20.5), (43.5, 0.0, 57.0, 22.0), (11.0, 2.5, 25.0, 21.5)]
 
 
 def fix_islands(board, net, margin=0.31):
