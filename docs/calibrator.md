@@ -1,6 +1,6 @@
 # AV Sync calibrator: signal contract
 
-**v1 proposal — app side not built yet. The board is not built or tested yet either.**
+**v1 proposal. The app side is built (iOS app and container generator, see [App side](#app-side-built)), but only tested on synthetic signals. The board is not built or tested yet.**
 
 The calibrator is a small board (66 × 22 mm) that the phone powers over a USB-C to USB-C cable.
 The cable is not included: the user brings their own.
@@ -170,6 +170,65 @@ flips, no timed delay). Then it ignores the sensors for **200 ms** (lock-out).
 | Leave display | no valid swap for 1500 ms |
 | Ignore sensors after a camera pulse | 5 ms |
 
+## App side (built)
+
+Code: `core/include/avsync/calibrator.hpp` (all analysis, shared by every app),
+`PhoneAnalyzer::begin_calibrator` (camera take), the iPhone generator's
+calibration mode and the container's `AVSYNC_PATTERN=calibration`. User guide:
+[calibration.md](calibration.md#with-the-calibrator).
+
+**Finding the sounds.** High-pass at 300 Hz, then the RMS over the last 0.25 ms.
+A sound starts where this envelope first reaches 25 % of its peak. The same
+detector times the board's click and the generator's beep, so in display mode
+its small delay cancels.
+
+**Click or beep?** First by time order (click, then the beep about D later),
+then by sound: the energy at 2.7 kHz (click) against 1.5 kHz (beep) in the
+3 ms after the onset. The generator's beep is 6 cycles of 1.5 kHz (4 ms), with a
+sharp start and a soft end, peak at the chirp level.
+
+**Camera mode.** The analyser keeps the mean brightness of 32 row bands per
+frame. The flash start is where a band reaches half its flash level, on the
+row time the analyser already uses (`frame start + readout × row`): that row's
+exposure ended half an LED pulse after the flash started. iOS gives no readout
+time and the analyser exposes for the whole frame interval; then the readout
+is fitted over the pulses: the board's clock drifts against the camera, so the
+flash lands on different rows, and click − flash grows with the row by exactly
+the readout time. Flashes and clicks are paired by the most common difference
+(±12 ms around it). Offset = median of the pairs after dropping outliers
+(beyond 3 σ, at least 0.5 ms); uncertainty = standard error of the median.
+For the camera take the iPhone locks the exposure at the lowest ISO.
+
+**Display mode.** Every click is paired with the next beep less than 450 ms
+later. Offset = beep − click − D, the median per swap direction (every other
+swap), and the mean of the two directions. The app does not need the swap
+times, so the same analysis works for a TV fed by the container generator.
+
+**Pattern.** Every generator uses the same core functions: period k lasts
+500 ms on its frame grid (for 59.94 fps the swap is the first frame at or
+after k × 500 ms), left half white in even periods, the beep D after each
+swap. The iPhone draws the halves in portrait near the bottom microphone,
+about 62 mm tall, with a red outline of the board (sensor end down, notch
+tick). The container fills the whole picture and draws a grey tick at both
+ends of the pattern line.
+
+### Changes from the v1 proposal
+
+None needs a firmware change.
+
+- The generator's sound is fixed: a 4 ms beep at 1.5 kHz (the proposal only
+  said "a short sound"). Click and beep are told apart by frequency and order.
+- Camera mode uses every paired pulse, the 3 start pulses too; it does not need
+  the start pattern (pairing works on the click − flash difference). The
+  firmware may keep it.
+- Display mode does not need the swap times. The rule "D longer than the
+  display delay" becomes: the beep must come 0–450 ms after the click, so
+  sound minus picture must be between −100 ms and +350 ms. That also covers a
+  TV chain behind the container generator.
+- Constants still 0 until measured: buzzer delay (both modes) and, in display
+  mode, the path difference board→microphone vs speaker→microphone. Camera
+  mode subtracts 1.5 cm of sound travel.
+
 ## Open points
 
 - The buzzer's delay from coil-on to sound must be measured once (lab: reference
@@ -178,3 +237,11 @@ flips, no timed delay). Then it ignores the sensors for **200 ms** (lock-out).
   for iPhone 15 and later and most Android phones; to check on real phones.
 - Sensor signal on dim screens and room light leaking into the clear sensor bodies from
   above: to check on the first boards.
+- App: the screen calibration runs the generator with the audio session in
+  play-and-record (to hear the microphone), the test signal in playback. Both use
+  the built-in speaker and subtract the reported output latency; whether the
+  real output delay differs between the two must be checked once on an iPhone
+  (calibrate, then measure the test signal with a second calibrated phone).
+- App: in camera mode a flash that saturates the camera makes the half-level
+  edge a little early (up to half an LED pulse, 0.75 ms). The lowest ISO should
+  avoid it; to check on the first boards.
