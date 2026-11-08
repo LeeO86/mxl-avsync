@@ -184,20 +184,96 @@ def logo(board, cx, cy, size, side):
                                          ((x1 + r, y2), (x1 + r - c, y2 - r + c), (x1, y2 - r)),
                                          ((x1, y1 + r), (x1 + r - c, y1 + r - c), (x1 + r, y1))]:
         arc(board, silk, P(ax, ay), P(mx, my), P(bx, by), W(3))
-    # dashed centre line (dashes near the gold parts are left out)
-    v = 74
+    # Dashed centre line like the original (y 74..181, dasharray 4 7). In the SVG the
+    # centre dot is drawn on top, so dash parts under the dot/ring are hidden there too.
+    dashes = []
+    v = 74.0
     while v < 181:
-        if not 95 <= v <= 152:
-            shape_poly(board, silk, [P(128, v), P(128, min(v + 4, 181))], W(2.5))
+        lo, hi = v, min(v + 4, 181)
+        if hi <= 128 - 9 - 1.5 or lo >= 128 + 9 + 1.5:   # outside the ring (+ room for the round ends)
+            dashes.append((lo, hi))
         v += 11
+    dw = W(2.5)
+    for lo, hi in dashes:
+        # dash drawn without its round caps going past lo/hi (SVG dashes are butt-ended)
+        cap = dw / 2 / k
+        shape_poly(board, silk, [P(128, lo + cap), P(128, max(lo + cap, hi - cap))], dw)
     shape_poly(board, silk, [P(94, 199), P(162, 199)], W(4))
-    # (the white centre dot is left out: at this size it would sit on the gold waveform)
-    # gold: waveform and the ring of the centre dot
-    wave = [P(*q) for q in [(91, 128), (102, 128), (108, 113), (118, 145), (128, 102),
-                            (139, 148), (149, 117), (155, 128), (165, 128)]]
-    for layer, extra in ((cu, 0.0), (mask, 0.1)):
-        shape_poly(board, layer, wave, 5 * k + extra)
-        circle(board, layer, *P(128, 128), 7 * k, 4 * k + extra)
+
+    # Gold copper: waveform + ring as one polygon. White silkscreen (dashes, centre dot)
+    # sits on top in the original; JLC removes silk from bare copper, so the copper (and
+    # its mask opening) is cut away under every dash and inside the ring.
+    err = pcbnew.FromMM(0.005)
+    gold = pcbnew.SHAPE_POLY_SET()
+    pts = [(91, 128), (102, 128), (108, 113), (118, 145), (128, 102),
+           (139, 148), (149, 117), (155, 128), (165, 128)]
+    tmp = []
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        s = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_SEGMENT)
+        s.SetStart(mm(*P(x1, y1)))
+        s.SetEnd(mm(*P(x2, y2)))
+        s.SetWidth(pcbnew.FromMM(5 * k))
+        tmp.append(s)
+    ring = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_CIRCLE)
+    ring.SetCenter(mm(*P(128, 128)))
+    ring.SetEnd(mm(*P(128 + 7, 128)))
+    ring.SetWidth(pcbnew.FromMM(4 * k))
+    ring.SetFilled(False)
+    tmp.append(ring)
+    for s in tmp:
+        s.TransformShapeToPolygon(gold, cu, 0, err, pcbnew.ERROR_INSIDE)
+    gold.Simplify()
+    cut = pcbnew.SHAPE_POLY_SET()
+    clear = 0.1  # copper stays 0.1 mm from white silk (mask opening then 0.05 mm)
+    for lo, hi in dashes:
+        xa, ya = P(128, lo)
+        xb, yb = P(128, hi)
+        hw = dw / 2 + clear
+        o = cut.NewOutline()
+        for cx_, cy_ in ((xa - hw, ya - clear), (xa + hw, ya - clear), (xb + hw, yb + clear), (xb - hw, yb + clear)):
+            cut.Append(pcbnew.FromMM(OX + cx_), pcbnew.FromMM(OY + cy_), o)
+    inner = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_CIRCLE)  # inside of the ring stays white
+    inner.SetCenter(mm(*P(128, 128)))
+    inner.SetEnd(mm(*P(128 + 5, 128)))
+    inner.SetFilled(True)
+    inner.SetWidth(0)
+    inner.TransformShapeToPolygon(cut, cu, 0, err, pcbnew.ERROR_OUTSIDE)
+    cut.Simplify()
+    gold.BooleanSubtract(cut)
+    gold.Fracture()
+    mask_poly = pcbnew.SHAPE_POLY_SET(gold)
+    mask_poly.Inflate(pcbnew.FromMM(0.05), pcbnew.CORNER_STRATEGY_ROUND_ALL_CORNERS, err)
+    mask_poly.Fracture()
+    for layer, poly in ((cu, gold), (mask, mask_poly)):
+        s = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_POLY)
+        s.SetLayer(layer)
+        s.SetPolyShape(poly)
+        s.SetFilled(True)
+        s.SetWidth(0)
+        board.Add(s)
+    # white centre dot: fills the inside of the gold ring, clear of the mask opening
+    disc(board, silk, *P(128, 128), 5 * k - 0.05 - 0.05)
+
+
+def clip_outside(x1, y1, x2, y2, r):
+    """Parts of the segment (x1,y1)-(x2,y2) that lie outside the circle of radius r at 0,0."""
+    dx, dy = x2 - x1, y2 - y1
+    a = dx * dx + dy * dy
+    b = 2 * (x1 * dx + y1 * dy)
+    c = x1 * x1 + y1 * y1 - r * r
+    disc_ = b * b - 4 * a * c
+    if disc_ <= 0:
+        return [(x1, y1, x2, y2)]
+    s = disc_ ** 0.5
+    t1, t2 = (-b - s) / (2 * a), (-b + s) / (2 * a)
+    out = []
+    if t1 > 0:
+        e = min(t1, 1)
+        out.append((x1, y1, x1 + dx * e, y1 + dy * e))
+    if t2 < 1:
+        st = max(t2, 0)
+        out.append((x1 + dx * st, y1 + dy * st, x2, y2))
+    return [o for o in out if (o[2] - o[0]) ** 2 + (o[3] - o[1]) ** 2 > 1e-6]
 
 
 def qr(board, x0, y0, module):

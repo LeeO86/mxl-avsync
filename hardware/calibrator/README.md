@@ -66,7 +66,9 @@ Other notes:
 - **Look (it is merch)**: AVsync logo on both sides, from `assets/app-icon.svg`. Cyan and
   white strokes are silkscreen. The orange parts are copper with a solder-mask opening and no
   paste, so with ENIG they look gold. That copper has no net; keep-outs keep tracks and vias
-  away from it. On the bottom the logo and QR are mirrored so they read right from below.
+  away from it. Like in the icon, the white dashed centre line and the white centre dot lie
+  on top of the gold: the copper and its mask opening are cut away under them, because JLC
+  removes silkscreen from bare copper. On the bottom the logo and QR are mirrored so they read right from below.
 - **QR code** (bottom): `https://leeo86.github.io/mxl-avsync/` (the site has no calibrator
   section yet, so the root URL). Version 3-M, 0.45 mm modules (3× JLC's 0.153 mm minimum
   line), 4-module quiet zone, white silkscreen on black mask (light background, dark
