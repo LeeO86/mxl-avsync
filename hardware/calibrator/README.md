@@ -83,7 +83,9 @@ Parts that make the hole idea work, all in JLC stock:
 
 Look and markings:
 
-- **Logo** on both sides, from `assets/app-icon.svg`. Cyan and white strokes are silkscreen.
+- **Logo** on both sides, from `assets/app-icon.svg`: on the top centred in the free area
+  between the update button and the USB-C, on the bottom in the middle of the board, 11 mm,
+  beside the QR code; the short instructions sit at the LED/sensor end. Cyan and white strokes are silkscreen.
   The orange parts are copper with a solder-mask opening and no paste, so with ENIG they look
   gold. That copper has no net; keep-outs keep tracks and vias away from it. Like in the
   icon, the white dashed centre line and the white centre dot lie on top of the gold: the
@@ -94,7 +96,7 @@ Look and markings:
   (normal polarity), no via holes inside. Checked: zxing-cpp decodes the bottom render, also
   at 1/3 size. Matrix: `scripts/qr_matrix.txt` (from `scripts/gen_qr.py`, needs `segno`).
 - **Text**: one font; name 1.8–2.0 mm, sub-lines 1.0–1.2 mm, and JLC's minimum
-  (1.0 mm / 0.153 mm stroke) for "not a toy", the licence and "hold to update" under SW1.
+  (1.0 mm / 0.153 mm stroke) for "not a toy", the licence (small, below the MCU) and "hold to update" under SW1.
 - **Alignment**: LED circle, `A`/`B`, the split line (on the top next to the LED and again
   behind the buzzer, so it is visible while the board lies face down) and a half-round notch
   in the board edge on the split line. Marks on both sides.
@@ -181,7 +183,7 @@ USB device.
 | `calibrator.kicad_pro/.kicad_sch/.kicad_pcb` | KiCad 9 project |
 | `calibrator.kicad_sym` | custom CH32X035G8R6 symbol with pins grouped by use |
 | `calibrator.pretty/` | custom footprints (buzzer, reverse LED, reverse-gullwing sensor) |
-| `3d/` | simple box 3D models for the renders (KiCad 9 has none for some parts) |
+| `3d/` | simple box 3D models for the renders (KiCad 9's image has none for some parts; renders only, not used for assembly) |
 | `fab/calibrator-gerbers.zip` | gerbers + drill for JLCPCB (order **1.2 mm**, **ENIG**, **black** mask, white silk) |
 | `fab/calibrator-bom-jlc.csv`, `fab/calibrator-cpl-jlc.csv` | JLC BOM and pick-and-place files |
 | `renders/` | PNG renders, schematic PDF/SVG |
@@ -205,9 +207,16 @@ checked one.
 - ERC: 0 violations. Netlist check: the schematic wires give exactly the nets in `design.py`.
 - DRC: 0 violations, 0 unconnected (JLC rules: 0.15 mm track/space, 0.3/0.6 mm vias,
   0.3 mm copper to board edge).
-- CPL rotations are KiCad's. Check every part in JLC's placement preview (especially the
-  reverse LED, the sensors, U1 and the USB-C) before ordering. The USB-C uses KiCad's
-  HRO TYPE-C-31-M-12 footprint; the SHOU HAN C393939 drawing has the same pad layout.
+- Footprints match the datasheets (U1: QSOP-28 3.9 × 9.9 mm, 0.635 mm pitch, pin 1 top left;
+  the USB-C uses KiCad's HRO TYPE-C-31-M-12 footprint, same pad layout as the SHOU HAN
+  C393939 drawing).
+- CPL rotations: JLC's 0° is the orientation of its own footprint for each part, which is
+  not always KiCad's. `scripts/jlc_files.py` adds the known offsets for the stock footprints
+  (QSOP-28 +270°, SOT-23 −90°, HRO USB-C +180°; values from the community list of JLC
+  corrections, e.g. matthewlai/JLCKicadTools). Custom footprints (buzzer, reverse LED,
+  sensors) and the button keep KiCad's rotation. Still check every part in JLC's placement
+  preview before ordering (or use "Confirm Parts Placement"); JLC also places by the pin-1
+  and polarity marks in the silkscreen.
 
 ## Risks and open points
 
