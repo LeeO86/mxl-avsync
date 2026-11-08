@@ -87,6 +87,7 @@ def run_rate(binary, fixture, output, rate):
                 raise RuntimeError('fixture exceeded 30 seconds')
             events = get('/api/v1/events?limit=100')['events']
             spec = json.loads(manifest.read_text())
+            calibration = spec['sender_calibration_ms']
             (folder / 'events.json').write_text(json.dumps(events, indent=2))
             (folder / 'statuses.json').write_text(json.dumps(statuses, indent=2))
             good = [event for event in events
@@ -107,15 +108,29 @@ def run_rate(binary, fixture, output, rate):
                 assert event.get('latency_uncertainty_status') == 'unknown', event
                 assert 'optical_capture' in event['flags'] and event.get('uncertainty_ms') is None, event
                 assert event.get('audio_latency_ms') is not None and event.get('video_latency_ms') is not None, event
-                # One received 50-Hz camera frame plus sub-sample modem tolerance.
-                assert abs(event['av_offset_ms'] - 35) <= 20.5, (rate, event)
-            # AVS4: the status names the real test ID, the generator name and "not calibrated".
+                # One received 50-Hz camera frame plus sub-sample modem tolerance. The sender
+                # calibration (2 Hz run) is subtracted; the raw value stays next to it.
+                assert abs(event['av_offset_ms'] - (35 - (calibration or 0))) <= 20.5, (rate, event)
+                if calibration is None:
+                    assert 'raw_av_offset_ms' not in event and 'sender_calibration_ms' not in event, event
+                else:
+                    assert event['sender_calibration_ms'] == calibration, event
+                    assert abs(event['raw_av_offset_ms'] - calibration - event['av_offset_ms']) < 1e-6, event
+            measurement = get('/api/v1/measurement')
+            if calibration is not None:
+                assert measurement['sender_calibration_ms'] == calibration, measurement
+                assert abs(measurement['raw_offset_ms'] - calibration - measurement['offset_ms']) < 1e-6, measurement
+            # AVS4: the status names the real test ID, the generator name and its sender calibration.
             signals = [s['status'].get('signal') for s in statuses if s['status'].get('signal')]
             assert signals, (rate, 'no QR source in /api/v1/status')
             assert signals[-1]['test_id'] == f'phone-fixture-{rate}', signals[-1]
             assert signals[-1]['source_id'] == spec['source_id'], signals[-1]
             assert signals[-1]['name'] == 'Fixture phone', signals[-1]
-            assert signals[-1]['sender_calibration'] == {'method': 'none'}, signals[-1]
+            if calibration is None:
+                assert signals[-1]['sender_calibration'] == {'method': 'none'}, signals[-1]
+            else:
+                assert signals[-1]['sender_calibration']['method'] == 'transponder', signals[-1]
+                assert signals[-1]['sender_calibration']['offset_ms'] == calibration, signals[-1]
             values = [event['av_offset_ms'] for event in good]
             result = {'rate': rate, 'valid_pairs': len(good), 'before_loss': len(before),
                       'after_recovery': len(after), 'video_events_inside_blank': len(blank),

@@ -1189,6 +1189,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (pairer) {
             pairer->set_reference(current_reference(video.domain_id));
             pairer->set_live_stream(true);
+            pairer->set_sender_calibration(signal_qr ? signal_qr->calibration : SenderCalibration{});
             for (const auto& event : pairer->poll(static_cast<double>(tai_now()) / 1e6)) {
                 {
                     std::lock_guard lock(caption.mu);

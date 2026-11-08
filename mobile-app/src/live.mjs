@@ -32,9 +32,12 @@ export function liveView(report, { reference = null, maxUncertaintyMs = 20, cali
  if (report.reading && Number.isFinite(report.reading.offsetMs)) {
   const r = report.reading;
   const latency = value => clock.correctionMs === null || !Number.isFinite(value) ? null : value + clock.correctionMs;
+  // Native offsetMs has the sender calibration (AVS4 QR) subtracted, rawOffsetMs is as measured;
+  // this phone's analyser calibration is subtracted here (the native session does not apply it).
   reading = {
    offsetMs: r.offsetMs - calibrationMs,
-   rawOffsetMs: r.offsetMs,
+   rawOffsetMs: Number.isFinite(r.rawOffsetMs) ? r.rawOffsetMs : r.offsetMs,
+   senderCalibrationMs: Number.isFinite(r.senderCalibrationMs) ? r.senderCalibrationMs : null,
    spreadMs: r.spreadMs,
    events: r.events,
    videoLatencyMs: latency(r.videoLatencyMs),
@@ -45,6 +48,7 @@ export function liveView(report, { reference = null, maxUncertaintyMs = 20, cali
    live: Boolean(report.signal?.live),
    sourceId: report.signal?.sourceId ?? null,
    testId: report.signal?.testId ?? null,
+   title: report.signal?.name || null,
    atMs: Date.now(),
    fresh: true,
   };
@@ -72,6 +76,12 @@ export function offsetSentence(ms) {
  return ms > 0 ? `Audio ${Math.abs(ms).toFixed(1)} ms after video` : `Audio ${Math.abs(ms).toFixed(1)} ms before video`;
 }
 
+// Raw value and sender calibration next to a corrected result; '' without a sender calibration.
+export function senderCalibrationText(result) {
+ if (!Number.isFinite(result?.senderCalibrationMs)) return '';
+ return `raw ${offsetText(result.rawOffsetMs)} · sender calibration ${offsetText(result.senderCalibrationMs)}`;
+}
+
 export function latencyText(ms) {
  return Number.isFinite(ms) ? `${ms.toFixed(1)} ms` : '—';
 }
@@ -88,8 +98,8 @@ export function savedResult(reading, { calibration = null, captureContext = null
   id: String(now), at: now,
   offsetMs: reading.offsetMs, rawOffsetMs: reading.rawOffsetMs, spreadMs: reading.spreadMs, events: reading.events,
   videoLatencyMs: reading.videoLatencyMs, audioLatencyMs: reading.audioLatencyMs, clockUncertaintyMs: reading.clockUncertaintyMs,
-  calibrationMs: calibration?.offset_ms ?? null, held: !reading.fresh, sourceId: reading.sourceId,
-  testId: reading.testId ?? null, captureContext,
+  calibrationMs: calibration?.offset_ms ?? null, senderCalibrationMs: reading.senderCalibrationMs ?? null,
+  held: !reading.fresh, sourceId: reading.sourceId, testId: reading.testId ?? null, title: reading.title ?? null, captureContext,
  };
 }
 

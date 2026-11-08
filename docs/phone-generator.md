@@ -124,13 +124,17 @@ Besides event and time it carries:
   `transponder`; [calibration.md](calibration.md#with-the-calibrator)). Without a
   valid one (none saved, another OS version, older than 90 days) the phone sends
   "not calibrated" (method `none`). It is not sent when the audio output differs
-  from the one it was measured on; the status line then says so.
+  from the one it was measured on; the status line then says so. Analysers
+  subtract it from the measured AV offset and show the raw value next to the
+  result ([calibration.md](calibration.md#with-the-calibrator)).
 
 The QR keeps its size (version 4, 33 × 33 modules); it now uses error
 correction M instead of Q to make room. The phone analyzer report shows these
 fields in `signal`: `testId`, `name` and `senderCalibration` (`method`, and when
 calibrated `offsetMs`, `uncertaintyMs`, `date`). The container analyzer shows
-them in `/api/v1/status` `signal` and in the web UI's Input card. Old AVS2/AVS3
+them in `/api/v1/status` `signal` and in the web UI's Input card. In the app's
+Results the Title is the default name of a sender until you set a nickname
+(pencil); a nickname you set always wins. Old AVS2/AVS3
 phones and analyzers cannot read AVS4: update all of them together.
 
 The live reader first tries the inexpensive full-raster marker path, then a

@@ -773,6 +773,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
         reference.sync_state = "unknown";
         const std::string test_id = have_manifest ? manifest.value("test_id", qr ? qr->test_id : "TEST") : (qr ? qr->test_id : "TEST");
         Pairer pairer(detect.period_ms, GradeWindows{}, reference, "FILE", test_id);
+        if (qr) pairer.set_sender_calibration(qr->calibration);
         for (const auto& video : videos) {
             double expected = 0;
             if (have_manifest) {
