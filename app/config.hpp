@@ -13,6 +13,7 @@ struct Config {
     std::string role;
     int event_rate = 2;
     std::string audio_timecode = "1200"; // legacy, 600, 1200
+    std::string pattern = "test";         // generator output: test (the AV sync test signal) or calibration (calibrator board)
     int chirp_ms = 30;
     double chirp_low_hz = 700;
     double chirp_high_hz = 2500;
