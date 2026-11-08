@@ -20,6 +20,18 @@
   or calibration differs from the reference. Saved results now also keep
   `testId` and `captureContext`; older saved state loads unchanged
   (`mobile-app/src/results.mjs`, `mobile-app/README.md`).
+- Tap to focus (iOS and Android): a quick tap on the camera picture in Measure
+  runs the 1.5 s automatic focus and exposure again, metered on the tapped
+  spot, then locks as before. A yellow square marks the spot and fades after
+  the lock. Frames from those 1.5 s are dropped and the measurement starts
+  fresh after the lock; the last reading stays greyed meanwhile. Taps are
+  ignored during calibration. New camera view method `focusAt(x, y)`.
+- Restart and camera start: frames and audio of the 1.5 s automatic step are no
+  longer measured; the measurement starts fresh after the lock. Restart meters
+  focus and exposure at the centre again (forgets a tapped spot). On Android,
+  Restart now re-runs the 1.5 s step and lock as on iOS. If the lock cannot
+  happen (no camera result within 3 s of retries on Android, or the camera
+  cannot be configured on iOS), the measurement starts anyway.
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
   release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
   that touch the app or the core (`mobile-app/README.md`).

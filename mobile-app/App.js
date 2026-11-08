@@ -88,6 +88,8 @@ export default function App() {
  const delta = liveDelta(view.reading, { senders: session.senders, results: session.results, captureContext: report?.captureContext ?? null, calibrationMs: calibration?.offset_ms ?? null });
 
  const restart = () => { setReport(null); setHeld(null); setNotice(null); camera.current?.resumeAnalysis?.(); };
+ // Tap to focus: like restart, but the last reading stays greyed (held) while the camera refocuses.
+ const refocus = (x, y) => { setReport(null); setNotice(null); camera.current?.focusAt?.(x, y); };
  const save = () => {
   const item = savedResult(view.reading, { calibration, captureContext: report?.captureContext ?? null });
   if (!item) return;
@@ -149,7 +151,7 @@ export default function App() {
   </View>
   <View style={{ flex: 1, display: tab === 'measure' ? 'flex' : 'none' }}>
    <Measure camera={cameraView} view={view} flow={flow} calibrated={Boolean(calibration)} delta={delta} notice={notice}
-    onSave={save} onRestart={restart}
+    onSave={save} onRestart={restart} onFocus={NativeCamera && granted ? refocus : null}
     onStartCalibration={() => { setFlow('listening'); setNotice(null); camera.current?.beginCalibration?.(); }}
     onCancelCalibration={() => { setFlow(null); restart(); }} />
   </View>

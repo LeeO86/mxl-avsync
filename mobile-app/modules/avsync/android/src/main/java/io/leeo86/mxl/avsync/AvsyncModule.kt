@@ -56,6 +56,7 @@ class AvsyncModule : Module() {
       Prop("taiUtcOffset") { view: AvsyncCameraView, seconds: Double -> view.setTaiUtcOffset(seconds) }
       AsyncFunction("beginCalibration") { view: AvsyncCameraView -> view.beginCalibration() }
       AsyncFunction("resumeAnalysis") { view: AvsyncCameraView -> view.resumeAnalysis() }
+      AsyncFunction("focusAt") { view: AvsyncCameraView, x: Double, y: Double -> view.focusAt(x, y) }
     }
     OnActivityEntersForeground { AvsyncCameraView.setForeground(true) }
     OnActivityEntersBackground { AvsyncCameraView.setForeground(false); handler.post { cancel?.invoke() } }

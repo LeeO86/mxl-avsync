@@ -1,22 +1,43 @@
-import { Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Animated, Pressable, Text, View } from 'react-native';
 import { Button, colors, small, text } from './ui';
 import { latencyText, offsetSentence, offsetText } from '../src/live.mjs';
+import { FADE_MS, REFOCUS_MS, tapPoint } from '../src/focus.mjs';
 import { deltaText } from '../src/results.mjs';
 
 // The camera fills the screen; below it one big number and the two latencies.
-export default function Measure({ camera, view, flow, calibrated, delta, onSave, onRestart, onStartCalibration, onCancelCalibration, notice }) {
+// A quick tap on the camera refocuses there (not during calibration, so the take stays whole).
+export default function Measure({ camera, view, flow, calibrated, delta, onSave, onRestart, onFocus, onStartCalibration, onCancelCalibration, notice }) {
  const reading = view.reading;
+ const size = useRef({ width: 0, height: 0 });
+ const [focus, setFocus] = useState(null); // the tap point in the camera box, while the square shows
+ const fade = useRef(new Animated.Value(0)).current;
+ const fadeOut = useRef(null);
+ const tap = event => {
+  const { locationX, locationY } = event.nativeEvent;
+  const point = tapPoint(locationX, locationY, size.current.width, size.current.height);
+  if (!point) return;
+  onFocus(point.x, point.y);
+  setFocus({ x: locationX, y: locationY });
+  fadeOut.current?.stop(); fade.setValue(1);
+  fadeOut.current = Animated.sequence([Animated.delay(REFOCUS_MS), Animated.timing(fade, { toValue: 0, duration: FADE_MS, useNativeDriver: true })]);
+  fadeOut.current.start(({ finished }) => { if (finished) setFocus(null); });
+ };
  const overlay = flow === 'aim' ? 'Point the camera at your hands, tap Start, then clap once.'
   : flow === 'listening' ? 'Clap once now. Keep the hands in view.'
+  : focus ? 'Focusing…'
   : reading?.fresh ? null : view.stage === 'starting' && notice ? notice : view.message;
  const noticeBelow = notice && overlay !== notice;
  return <View style={{ flex: 1 }}>
-  <View style={{ flex: 1, backgroundColor: '#000', marginHorizontal: 12, marginTop: 8, borderRadius: 14, overflow: 'hidden', justifyContent: 'center' }}>
+  <Pressable disabled={Boolean(flow) || !onFocus} onPress={tap} onLongPress={() => {}} accessibilityHint="Tap to focus here"
+   onLayout={event => { size.current = event.nativeEvent.layout; }}
+   style={{ flex: 1, backgroundColor: '#000', marginHorizontal: 12, marginTop: 8, borderRadius: 14, overflow: 'hidden', justifyContent: 'center' }}>
    {camera}
+   {focus ? <Animated.View pointerEvents="none" style={{ position: 'absolute', left: focus.x - 36, top: focus.y - 36, width: 72, height: 72, borderWidth: 2, borderColor: '#ffd60a', opacity: fade }} /> : null}
    {overlay ? <View pointerEvents="none" style={{ position: 'absolute', left: 12, right: 12, top: 12, padding: 12, borderRadius: 10, backgroundColor: '#121417d9' }}>
     <Text style={text}>{overlay}</Text>
    </View> : null}
-  </View>
+  </Pressable>
   {flow ? <View style={{ padding: 16 }}>
    {flow === 'aim' && <Button primary title="Start" onPress={onStartCalibration} />}
    <Button title="Cancel" onPress={onCancelCalibration} />

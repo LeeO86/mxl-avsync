@@ -60,6 +60,7 @@ public class AvsyncModule: Module {
       Prop("taiUtcOffset") { (view: AvsyncCameraView, seconds: Double) in view.setTaiUtcOffset(seconds) }
       AsyncFunction("beginCalibration") { (view: AvsyncCameraView) in view.beginCalibration() }
       AsyncFunction("resumeAnalysis") { (view: AvsyncCameraView) in view.resumeAnalysis() }
+      AsyncFunction("focusAt") { (view: AvsyncCameraView, x: Double, y: Double) in view.focus(atX: x, y: y) }
     }
     OnDestroy {
       let controller = self.generator, picker = self.imagePicker, awake = self.screenAwake

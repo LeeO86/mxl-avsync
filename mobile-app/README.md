@@ -31,12 +31,19 @@ with its sound audible. After a few events the screen shows:
 
 When the signal drops, the last reading stays greyed for 8 s. **Save** stores
 it in Results. **Restart** clears the history, for example after moving the
-phone. When the sender you hear has a reference (see Results), a line under the
-number shows the difference, e.g. "Δ +18.4 ms vs Studio iPhone".
+phone; the camera then adjusts focus and exposure at the centre for 1.5 s and
+locks again before measuring. When the sender you hear has a reference (see
+Results), a line under the number shows the difference, e.g. "Δ +18.4 ms vs
+Studio iPhone".
 
 The camera runs at its fastest mode up to 240 fps. After 1.5 s it locks focus
 and white balance and exposes for the full frame interval
 ([why](../docs/qr-flash.md)). A 30 fps camera needs a 1 event/s source.
+
+**Tap the camera picture** to focus on that spot: a yellow square shows where,
+the camera adjusts focus and exposure there for 1.5 s and locks again. The last
+reading stays greyed meanwhile; then the measurement starts fresh. Taps do
+nothing during calibration.
 
 ## Results
 
