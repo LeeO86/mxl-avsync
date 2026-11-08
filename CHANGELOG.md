@@ -2,6 +2,8 @@
 
 ## Mobile (not released yet)
 
+- iPhone test signal: Stop now clears the whole picture (the scale and the
+  marker stayed on screen before) and shows a large "Stopped".
 - Calibrator wizard (iPhone): Settings → With calibrator. Step 2 measures
   camera vs microphone with the calibrator board's flashes and clicks and saves
   it like a clap calibration (method `calibrator-pulse`). Step 3 shows the

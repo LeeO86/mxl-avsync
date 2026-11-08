@@ -49,7 +49,7 @@ photodiode measurement. All timing and synthesis run outside JavaScript.
 
 The screen reports skipped logical display frames and the reported audio lead.
 It prevents automatic screen lock and raises brightness while active, restoring
-both when stopped. Stop/Close cancel queued sound and remove the timing picture.
+both when stopped. Stop/Close cancel queued sound and clear the whole timing picture; a large "Stopped" shows instead.
 App inactivity, audio interruptions, output/configuration changes, a wall-clock
 jump over 100 ms, missed scheduling deadlines and the 23-hour session limit stop
 the source. Restart creates a fresh clock mapping. Bluetooth and other external

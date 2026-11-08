@@ -19,6 +19,7 @@ final class AvsyncGeneratorController: UIViewController {
   private let markerA = CALayer(), markerB = CALayer()
   private var cells: [CALayer] = []
   private let status = UILabel()
+  private let stoppedLabel = UILabel() // big "Stopped" over the picture while no signal runs
   private let toggle = UIButton(type: .system)
   private let close = UIButton(type: .system)
   private let engine = AVAudioEngine()
@@ -89,6 +90,9 @@ final class AvsyncGeneratorController: UIViewController {
     status.textColor = .lightGray; status.font = .systemFont(ofSize: 12); status.numberOfLines = 3
     status.textAlignment = .center; status.accessibilityIdentifier = "generatorStatus"
     view.addSubview(status)
+    stoppedLabel.text = "Stopped"; stoppedLabel.textColor = .white; stoppedLabel.font = .boldSystemFont(ofSize: 34)
+    stoppedLabel.textAlignment = .center; stoppedLabel.isHidden = true; stoppedLabel.layer.zPosition = 1
+    stoppedLabel.accessibilityIdentifier = "generatorStopped"; view.addSubview(stoppedLabel)
     toggle.setTitle("Stop signal", for: .normal); toggle.addTarget(self, action: #selector(toggleSignal), for: .touchUpInside)
     toggle.accessibilityIdentifier = "generatorToggle"; view.addSubview(toggle)
     close.setTitle("Close", for: .normal); close.addTarget(self, action: #selector(closeScreen), for: .touchUpInside)
@@ -120,6 +124,7 @@ final class AvsyncGeneratorController: UIViewController {
   override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); start() }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    stoppedLabel.frame = CGRect(x: 0, y: view.bounds.midY - 30, width: view.bounds.width, height: 60)
     if calibrate { layoutCalibration(); return }
     // Keep capture screens portrait. Only this test raster rotates; holding the
     // phone sideways gives a large landscape target without changing camera UI.
@@ -135,6 +140,7 @@ final class AvsyncGeneratorController: UIViewController {
   }
   private func start() {
     guard link == nil, !finishing else { return }
+    stoppedLabel.isHidden = true
     do {
       let session = AVAudioSession.sharedInstance()
       // Calibration also records: play-and-record, still on the built-in speaker (not the receiver).
@@ -289,7 +295,10 @@ final class AvsyncGeneratorController: UIViewController {
     if calibrate { engine.inputNode.removeTap(onBus: 0) }
     player.stop(); engine.stop(); plan = nil; images.removeAll()
     CATransaction.begin(); CATransaction.setDisableActions(true)
-    canvas.layer.contents = nil; syncDot.isHidden = true; markerA.backgroundColor = UIColor.black.cgColor; markerB.backgroundColor = UIColor.white.cgColor
+    // Clear the whole raster (scale and marker too), so no stale test picture stays on screen.
+    canvas.layer.contents = nil; syncForeground.contents = nil; syncDot.isHidden = true
+    markerA.backgroundColor = UIColor.black.cgColor; markerB.backgroundColor = UIColor.black.cgColor
+    stoppedLabel.isHidden = false
     for cell in cells { cell.backgroundColor = UIColor.black.cgColor }
     CATransaction.commit()
     screenAwake.setActive(false); UIScreen.main.brightness = oldBrightness
