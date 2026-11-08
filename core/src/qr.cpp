@@ -2,6 +2,8 @@
 #include "../../third_party/nayuki/qrcodegen.hpp"
 
 #include <cctype>
+#include <cstdio>
+#include <cstring>
 #include <charconv>
 #include <cstdlib>
 #include <sstream>
@@ -91,45 +93,175 @@ std::string qr_payload_json(const QrPayload& payload)
 }
 
 namespace {
+// AVS4 layout (all integers big-endian), sent as "AVS4:" + base45 (RFC 9285) of these bytes:
+//   0      flags: bit0 LIVE, bit1 phone clock (clk=phone-utc), bit2 rate 2 (else 1),
+//          bit3 calibration block follows, bits4-7 format index
+//   1..5   k, event sequence (40 bits)
+//   6..13  T_k, source time of event k in ns
+//   14..16 test A/V offset in 1/16 ms (signed 24 bits)
+//   [6 bytes, only with bit3] calibration method (1 clap, 2 transponder, 3 pulse-train),
+//          offset in 0.1 ms (signed 16 bits, sound minus picture, positive: sound later), uncertainty in 0.5 ms (8 bits), day since 2020-01-01 (16 bits, 0 unknown)
+//   1 byte n, then the test ID: n characters of 0-9a-zA-Z-_ at 6 bits each (source ID = CRC-32 of the ID),
+//          or for n = 0 the 4-byte source ID alone (the analyser shows "source-<hex>")
+//   rest   generator name, UTF-8, 0..24 bytes
 constexpr const char* formats[] = {"1080p50", "1080p25", "1080p59.94", "1080i25", "2160p50", "720p60", "720p50", "960x540p25", "540p25"};
+constexpr const char* methods[] = {"none", "clap", "transponder", "pulse-train"};
+constexpr char base45[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+constexpr char id_chars[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_";
 constexpr char hex[] = "0123456789ABCDEF";
-// AVS2 and AVS3 share the 27-byte layout; the prefix names the optical marker.
-std::optional<QrPayload> parse_avs2(std::string_view text) {
-    if (text.size() != 59 || (text.substr(0,5) != "AVS2:" && text.substr(0,5) != "AVS3:")) return std::nullopt;
-    std::array<uint8_t,27> b{};
-    for (size_t i=0;i<b.size();++i) {
-        auto digit=[](char c)->int { if(c>='0'&&c<='9')return c-'0';if(c>='A'&&c<='F')return c-'A'+10;return -1; };
-        int hi=digit(text[5+2*i]),lo=digit(text[6+2*i]);if(hi<0||lo<0)return std::nullopt;
-        b[i]=uint8_t(hi*16+lo);
+// Version 4 with ECC M holds 90 alphanumeric characters: 5 for the prefix, 85 base45 = 56 bytes.
+constexpr size_t kMaxBytes = 56;
+
+// Longest valid UTF-8 prefix of at most max bytes; stops at the first invalid sequence.
+size_t utf8_prefix(std::string_view s, size_t max) {
+    size_t i = 0, ok = 0;
+    while (i < s.size()) {
+        const auto c = uint8_t(s[i]);
+        const size_t n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 0;
+        if (!n || (n == 1 && c < 0x20) || i + n > s.size()) break; // control characters end the name too
+        uint32_t cp = n == 1 ? c : c & (0x7F >> n);
+        bool valid = true;
+        for (size_t j = 1; j < n; ++j) { const auto t = uint8_t(s[i + j]); valid &= (t >> 6) == 2; cp = cp << 6 | (t & 0x3F); }
+        if (!valid || (n == 2 && cp < 0x80) || (n == 3 && (cp < 0x800 || (cp >= 0xD800 && cp < 0xE000))) || (n == 4 && (cp < 0x10000 || cp > 0x10FFFF))) break;
+        if (i + n > max) break;
+        i += n; ok = i;
     }
-    if((b[0]&~3)||b[25]>=std::size(formats)||(b[26]!=1&&b[26]!=2))return std::nullopt;
-    auto read=[&](int start,int n){uint64_t v=0;for(int i=0;i<n;++i)v=(v<<8)|b[start+i];return v;};
-    if(read(13,8)>uint64_t(INT64_MAX))return std::nullopt;
-    QrPayload p;p.qr_flash=p.timecode=true;p.optical_code=text[3]=='3';p.mode=(b[0]&1)?"LIVE":"FILE";p.estimated_source=b[0]&2;
-    if(p.estimated_source&&p.mode!="LIVE")return std::nullopt;
-    p.source_id=uint32_t(read(1,4));p.k=read(5,8);p.tk=int64_t(read(13,8));
-    const uint32_t oq=uint32_t(read(21,4));
-    p.offset_ms=(oq<=INT32_MAX?int64_t(oq):int64_t(oq)-0x100000000LL)/16.0;
-    p.format=formats[b[25]];p.rate=b[26];p.test_id="source-"+std::string(text.substr(7,8));
+    return ok;
+}
+
+std::optional<QrPayload> parse_avs4(std::string_view text) {
+    text.remove_prefix(5);
+    if (text.size() % 3 == 1) return std::nullopt;
+    std::vector<uint8_t> b;
+    for (size_t i = 0; i < text.size(); i += 3) {
+        uint32_t n = 0, scale = 1;
+        const size_t len = std::min<size_t>(3, text.size() - i);
+        for (size_t j = 0; j < len; ++j) {
+            const char* at = std::char_traits<char>::find(base45, 45, text[i + j]);
+            if (!at) return std::nullopt;
+            n += uint32_t(at - base45) * scale; scale *= 45;
+        }
+        if (n > (len == 3 ? 0xFFFFu : 0xFFu)) return std::nullopt;
+        if (len == 3) b.push_back(uint8_t(n >> 8));
+        b.push_back(uint8_t(n));
+    }
+    if (b.size() < 18 || b.size() > kMaxBytes) return std::nullopt;
+    size_t at = 0;
+    auto read = [&](int n) { uint64_t v = 0; for (int i = 0; i < n; ++i) v = (v << 8) | b[at++]; return v; };
+    const uint8_t flags = uint8_t(read(1));
+    if ((flags >> 4) >= std::size(formats)) return std::nullopt;
+    QrPayload p;
+    p.qr_flash = p.timecode = p.optical_code = true;
+    p.mode = (flags & 1) ? "LIVE" : "FILE";
+    p.estimated_source = flags & 2;
+    p.rate = (flags & 4) ? 2 : 1;
+    p.format = formats[flags >> 4];
+    if (p.estimated_source && p.mode != "LIVE") return std::nullopt;
+    p.k = read(5);
+    const uint64_t tk = read(8);
+    if (tk > uint64_t(INT64_MAX)) return std::nullopt;
+    p.tk = int64_t(tk);
+    const uint32_t oq = uint32_t(read(3));
+    p.offset_ms = (oq < 0x800000 ? int32_t(oq) : int32_t(oq) - 0x1000000) / 16.0;
+    if (flags & 8) {
+        if (b.size() - at < 7) return std::nullopt;
+        const auto method = read(1);
+        if (method == 0 || method >= std::size(methods)) return std::nullopt;
+        p.calibration.method = methods[method];
+        p.calibration.offset_ms = int16_t(uint16_t(read(2))) / 10.0;
+        p.calibration.uncertainty_ms = read(1) / 2.0;
+        p.calibration.day = int(read(2));
+    }
+    const size_t n = read(1);
+    if (n > 64) return std::nullopt;
+    if (n == 0) {
+        if (b.size() - at < 4) return std::nullopt;
+        p.source_id = uint32_t(read(4));
+        p.test_id = "source-";
+        for (int shift = 28; shift >= 0; shift -= 4) p.test_id += hex[(p.source_id >> shift) & 15];
+    } else {
+        const size_t bytes = (n * 6 + 7) / 8;
+        if (b.size() - at < bytes) return std::nullopt;
+        uint32_t acc = 0; int bits = 0;
+        for (size_t i = 0; i < bytes; ++i) {
+            acc = (acc << 8) | b[at++]; bits += 8;
+            while (bits >= 6 && p.test_id.size() < n) { bits -= 6; p.test_id += id_chars[(acc >> bits) & 63]; }
+        }
+        if (acc & ((1u << bits) - 1)) return std::nullopt; // padding bits must be zero
+        p.source_id = timecode_source_id(p.test_id.c_str());
+    }
+    p.name.assign(b.begin() + long(at), b.end());
+    if (p.name.size() > kQrNameMaxBytes || utf8_prefix(p.name, p.name.size()) != p.name.size()) return std::nullopt;
     return p;
 }
 }
+
+std::string calibration_date(int day) {
+    if (day <= 0) return {};
+    // Civil date from days since 1970-01-01 (H. Hinnant's algorithm); 2020-01-01 is day 18262.
+    const int z = day + 18262 + 719468, era = z / 146097, doe = z - era * 146097;
+    const int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const int mp = (5 * doy + 2) / 153, d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    char out[16];
+    std::snprintf(out, sizeof out, "%04d-%02d-%02d", yoe + era * 400 + (m <= 2), m, d);
+    return out;
+}
+
 std::string qr_payload_text(const QrPayload& p) {
-    if(!p.qr_flash)return qr_payload_json(p);
-    auto format=std::find(std::begin(formats),std::end(formats),p.format);
-    if(!p.timecode||format==std::end(formats)||(p.rate!=1&&p.rate!=2)||p.tk<0||
-       (p.mode!="LIVE"&&p.mode!="FILE")||!std::isfinite(p.offset_ms)||std::abs(p.offset_ms)>134217727||
-       (p.estimated_source&&p.mode!="LIVE"))throw std::invalid_argument("invalid AVS2 payload");
-    std::array<uint8_t,27>b{};b[0]=(p.mode=="LIVE"?1:0)|(p.estimated_source?2:0);
-    auto put=[&](int start,int n,uint64_t v){for(int i=n-1;i>=0;--i){b[start+i]=uint8_t(v);v>>=8;}};
-    put(1,4,p.source_id);put(5,8,p.k);put(13,8,uint64_t(p.tk));put(21,4,uint32_t(int32_t(std::llround(p.offset_ms*16))));
-    b[25]=uint8_t(format-std::begin(formats));b[26]=uint8_t(p.rate);
-    std::string out=p.optical_code?"AVS3:":"AVS2:";for(uint8_t byte:b){out+=hex[byte>>4];out+=hex[byte&15];}return out;
+    if (!p.qr_flash) return qr_payload_json(p);
+    const auto format = std::find(std::begin(formats), std::end(formats), p.format);
+    const auto method = std::find(std::begin(methods), std::end(methods), p.calibration.method);
+    const auto& cal = p.calibration;
+    if (!p.timecode || !p.optical_code || format == std::end(formats) || (p.rate != 1 && p.rate != 2) || p.tk < 0 || p.k >= (1ULL << 40) ||
+        (p.mode != "LIVE" && p.mode != "FILE") || !std::isfinite(p.offset_ms) || std::abs(std::llround(p.offset_ms * 16)) > 0x7FFFFF ||
+        (p.estimated_source && p.mode != "LIVE") || method == std::end(methods) ||
+        (cal.calibrated() && (!std::isfinite(cal.offset_ms) || std::abs(std::llround(cal.offset_ms * 10)) > 32767 ||
+                              !std::isfinite(cal.uncertainty_ms) || cal.uncertainty_ms < 0 || std::llround(cal.uncertainty_ms * 2) > 255 ||
+                              cal.day < 0 || cal.day > 0xFFFF)))
+        throw std::invalid_argument("invalid AVS4 payload");
+    std::vector<uint8_t> b;
+    auto put = [&](int n, uint64_t v) { for (int i = n - 1; i >= 0; --i) b.push_back(uint8_t(v >> (8 * i))); };
+    put(1, (p.mode == "LIVE" ? 1 : 0) | (p.estimated_source ? 2 : 0) | (p.rate == 2 ? 4 : 0) | (cal.calibrated() ? 8 : 0) |
+               (format - std::begin(formats)) << 4);
+    put(5, p.k);
+    put(8, uint64_t(p.tk));
+    put(3, uint32_t(int32_t(std::llround(p.offset_ms * 16))) & 0xFFFFFF);
+    if (cal.calibrated()) {
+        put(1, uint64_t(method - std::begin(methods)));
+        put(2, uint16_t(int16_t(std::llround(cal.offset_ms * 10))));
+        put(1, uint64_t(std::llround(cal.uncertainty_ms * 2)));
+        put(2, uint64_t(cal.day));
+    }
+    // The real test ID when it fits and gives the same source ID; else the source ID alone.
+    const size_t id_bytes = (p.test_id.size() * 6 + 7) / 8;
+    if (!p.test_id.empty() && p.test_id.size() <= 64 && p.test_id.find_first_not_of(id_chars) == std::string::npos &&
+        timecode_source_id(p.test_id.c_str()) == p.source_id && b.size() + 1 + id_bytes <= kMaxBytes) {
+        put(1, p.test_id.size());
+        uint32_t acc = 0; int bits = 0;
+        for (char c : p.test_id) {
+            acc = (acc << 6) | uint32_t(std::strchr(id_chars, c) - id_chars); bits += 6;
+            if (bits >= 8) { bits -= 8; b.push_back(uint8_t(acc >> bits)); }
+        }
+        if (bits) b.push_back(uint8_t(acc << (8 - bits)));
+    } else {
+        put(1, 0);
+        put(4, p.source_id);
+    }
+    // The name is cosmetic: cut at a character boundary to the room left.
+    const size_t room = std::min(kQrNameMaxBytes, kMaxBytes - b.size());
+    b.insert(b.end(), p.name.begin(), p.name.begin() + long(utf8_prefix(p.name, room)));
+    std::string out = kQrCompactPrefix;
+    for (size_t i = 0; i < b.size(); i += 2) {
+        const uint32_t n = i + 1 < b.size() ? b[i] * 256u + b[i + 1] : b[i];
+        out += base45[n % 45]; out += base45[n / 45 % 45];
+        if (i + 1 < b.size()) out += base45[n / 2025];
+    }
+    return out;
 }
 
 std::optional<QrPayload> parse_qr_payload(std::string_view json)
 {
-    if(json.starts_with("AVS2:")||json.starts_with("AVS3:"))return parse_avs2(json);
+    if(json.starts_with(kQrCompactPrefix))return parse_avs4(json);
     QrPayload payload;
     std::string_view in = json;
     if (!consume(in, '{')) {

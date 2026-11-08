@@ -30,7 +30,7 @@
         NSMutableArray *payloads=[NSMutableArray array],*detections=[NSMutableArray array];
         for(VNBarcodeObservation *code in request.results) {
             NSString *text=code.payloadStringValue;
-            if(![text containsString:@"mxl-avsync/1"]&&![text hasPrefix:@"AVS2:"]&&![text hasPrefix:@"AVS3:"])continue;
+            if(![text containsString:@"mxl-avsync/1"]&&![text hasPrefix:@"AVS4:"])continue;
             [payloads addObject:text];
             CGPoint p[]={code.topLeft,code.topRight,code.bottomRight,code.bottomLeft};
             NSMutableArray *points=[NSMutableArray array];

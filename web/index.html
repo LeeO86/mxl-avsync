@@ -131,6 +131,8 @@
           <dt>Audio flow</dt><dd>{{ status.audio_flow || '–' }}</dd>
           <dt>Format</dt><dd>{{ status.width ? status.width + '×' + status.height + (status.interlaced ? ' i' : ' p') : '–' }}</dd>
           <dt>Rate</dt><dd>{{ ratePerSecond }}</dd>
+          <dt>Source (QR)</dt><dd>{{ status.signal ? (status.signal.name ? status.signal.name + ' · ' : '') + status.signal.test_id : '–' }}</dd>
+          <dt>Source calibration</dt><dd>{{ !status.signal ? '–' : status.signal.sender_calibration.method === 'none' ? 'not calibrated' : status.signal.sender_calibration.method + ' ' + ms1(status.signal.sender_calibration.offset_ms) + ' ± ' + ms1(status.signal.sender_calibration.uncertainty_ms) }}</dd>
         </dl></div>
         <div class="card"><h3>Counters</h3><dl class="kv">
           <dt>Video drops</dt><dd>{{ metric('mxl_avsync_video_drops_total') }}</dd>
@@ -276,7 +278,7 @@
       <div v-for="group in settingGroups" :key="group.name">
         <h3>{{ group.name }}</h3>
         <label v-for="key in group.keys" :key="key">{{ key }}
-          <input v-model="draft[key]" :disabled="envLocked(key)"/>
+          <input v-model="draft[key]" :disabled="envLocked(key)" :placeholder="key === 'AVSYNC_TEST_ID' ? autoTestId : ''"/>
           <span v-if="envLocked(key)">env</span>
           <span v-else-if="envSet.includes(key)">env start value, live-changeable</span>
         </label>
@@ -292,7 +294,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], liveKeys:[], settingsError:'', restartRequired:[], skipped:[], generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], liveKeys:[], settingsError:'', restartRequired:[], skipped:[], autoTestId:'', generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
   computed: {
     role() { return this.info.role || ''; },
     previewSlots() {
@@ -381,7 +383,7 @@ createApp({
         if (!this.generatorBaseline) this.adoptGenerator(g);
         this.imageSet = !!g.source_image; this.imageFrames = g.source_image_frames || 0;
         if (this.imageSet && !this.imageUrl) this.imageUrl = '/api/v1/generator/source-image';
-        this.audioOn = !g.muted; this.stopped = !!g.stopped;
+        this.audioOn = !g.muted; this.stopped = !!g.stopped; this.autoTestId = g.test_id || '';
       } else {
         this.measurement = await (await fetch('/api/v1/measurement')).json();
         this.metrics = this.parseMetrics(await (await fetch('/metrics')).text());

@@ -1,7 +1,7 @@
 # iPhone test-signal source
 
 Use the current native iOS/TestFlight build, open **Generate**, choose **1 or 2 chirps/s**,
-set **Name**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
+set **Title**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
 inside the fullscreen screen; Measure/Results keep their portrait layout.
 Film the entire test picture, including all four corner fiducials, with an
 external camera. Keep only that phone's speaker audible. Send the camera's
@@ -34,7 +34,7 @@ identity/time and a 60-Hz source-frame strip (`720p60`). Source timestamps descr
   subtract phone output bias and isolate a downstream camera's contribution.
 
 A CRC-protected `estimated-source` flag (0x08) in the audio header and
-`clk: "phone-utc"` in the QR prevent a new analyzer from treating the phone as a
+the phone-clock flag in the QR prevent a new analyzer from treating the phone as a
 verified PTP generator. Old decoders reject these new audio flags; update both
 ends. Normal server and FILE packets retain their original bytes/semantics.
 
@@ -52,8 +52,44 @@ It prevents automatic screen lock and raises brightness while active, restoring
 both when stopped. Stop/Close cancel queued sound and remove the timing picture.
 App inactivity, audio interruptions, output/configuration changes, a wall-clock
 jump over 100 ms, missed scheduling deadlines and the 23-hour session limit stop
-the source. Restart creates a fresh source ID and clock mapping. Bluetooth and
-other external output paths have unverified delays; use the built-in speaker.
+the source. Restart creates a fresh clock mapping. Bluetooth and other external
+output paths have unverified delays; use the built-in speaker.
+
+## Source ID
+
+The source ID (the QR test id; the audio packet carries its CRC-32) stays the
+same when you stop and start the generator again. It is `phone-` plus 12 hex
+digits of a hash of a random install ID, the app version with its build
+number (for example `2.0.8 (12)`) and the timing settings (now only the event
+rate). So you get a new ID after a reinstall, a new app version or build (also a
+new TestFlight build) or another event rate. Name, subtitle and image do not change
+it. The install ID is random, not a hardware ID, and only lives in the app's
+settings. The container generator uses the same rule with its NMOS seed in
+place of the install ID (`AVSYNC_TEST_ID` in the specification, §10.2). Test
+vector: install ID `00000000-0000-4000-8000-000000000000`, version `2.0.8`,
+`rate=1` gives `phone-985274814721`.
+
+## What the QR carries (AVS4)
+
+The picture QR is the compact `AVS4:` text (specification, "QR + optical code").
+Besides event and time it carries:
+
+- the **test id** itself, so the analyzer shows `phone-985274814721` and not
+  `source-<hex>`;
+- the **Title** field, at most 24 bytes (about 24 Latin letters, fewer with
+  umlauts or emoji), cut at a whole character. It is only a label: it does not
+  change the ID;
+- the **sender calibration** of the phone's own screen-vs-speaker offset
+  (method, offset, uncertainty, date). The offset has the same sign as every
+  AV offset here: sound minus picture, positive = sound later. This calibration
+  is not built yet, so the phone sends "not calibrated" (method `none`).
+
+The QR keeps its size (version 4, 33 × 33 modules); it now uses error
+correction M instead of Q to make room. The phone analyzer report shows these
+fields in `signal`: `testId`, `name` and `senderCalibration` (`method`, and when
+calibrated `offsetMs`, `uncertaintyMs`, `date`). The container analyzer shows
+them in `/api/v1/status` `signal` and in the web UI's Input card. Old AVS2/AVS3
+phones and analyzers cannot read AVS4: update all of them together.
 
 The live reader first tries the inexpensive full-raster marker path, then a
 cached, validated fiducial pose. Searches are limited to a 960-pixel search raster;

@@ -3,10 +3,11 @@ import { Animated, Pressable, Text, View } from 'react-native';
 import { Button, colors, small, text } from './ui';
 import { latencyText, offsetSentence, offsetText } from '../src/live.mjs';
 import { FADE_MS, REFOCUS_MS, tapPoint } from '../src/focus.mjs';
+import { deltaText } from '../src/results.mjs';
 
 // The camera fills the screen; below it one big number and the two latencies.
 // A quick tap on the camera refocuses there (not during calibration, so the take stays whole).
-export default function Measure({ camera, view, flow, calibrated, onSave, onRestart, onFocus, onStartCalibration, onCancelCalibration, notice }) {
+export default function Measure({ camera, view, flow, calibrated, delta, onSave, onRestart, onFocus, onStartCalibration, onCancelCalibration, notice }) {
  const reading = view.reading;
  const size = useRef({ width: 0, height: 0 });
  const [focus, setFocus] = useState(null); // the tap point in the camera box, while the square shows
@@ -47,6 +48,7 @@ export default function Measure({ camera, view, flow, calibrated, onSave, onRest
     {reading ? offsetSentence(reading.offsetMs) : 'No reading yet'}
     {reading && !reading.fresh ? ` · ${Math.round(reading.heldForMs / 1000)} s ago` : ''}
    </Text>
+   {reading && delta && Number.isFinite(delta.offsetMs) ? <Text style={{ ...small, color: colors.accent, marginTop: 4 }}>{`${deltaText(delta.offsetMs)} vs ${delta.name}${delta.check ? ' · check' : ''}`}</Text> : null}
    {reading ? <Text style={{ ...small, marginTop: 4 }}>{`±${(reading.spreadMs / 2).toFixed(1)} ms · ${reading.events} events${calibrated ? '' : ' · not calibrated'}`}</Text> : null}
    <View style={{ flexDirection: 'row', marginTop: 12 }}>
     <View style={{ flex: 1 }}><Text style={small}>VIDEO LATENCY</Text><Text style={{ ...text, fontSize: 20 }}>{latencyText(reading?.videoLatencyMs)}</Text></View>

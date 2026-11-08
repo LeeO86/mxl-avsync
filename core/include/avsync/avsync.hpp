@@ -252,7 +252,7 @@ struct FrameGeometry {
 };
 
 FrameGeometry frame_geometry(int width, int height);
-// AVS2: version-4 QR (33 modules + 4 quiet modules per side), then a 4-module gap and equal flash panel.
+// AVS4: version-4 QR (33 modules + 4 quiet modules per side), then a 4-module gap and equal flash panel.
 FrameGeometry qr_flash_geometry(int width, int height);
 
 struct LumaView {
@@ -413,6 +413,21 @@ void unpack_v210_luma(const uint8_t* src, int width, int height, uint16_t* y, in
 
 // ---- QR payload (§5.6) ---------------------------------------------------
 
+// AVS4: compact picture QR text, "AVS4:" + base45 bytes (§5.6). Version 4 (33 modules), ECC M.
+inline constexpr char kQrCompactPrefix[] = "AVS4:";
+inline constexpr size_t kQrNameMaxBytes = 24; // UTF-8 bytes; less when a long ID or calibration needs the room
+
+// How the generator measured its own output offset (screen vs speaker). "none": not calibrated.
+struct SenderCalibration {
+    std::string method = "none"; // none, clap (second phone), transponder (calibrator), pulse-train
+    double offset_ms = 0;        // sound output minus picture output; positive: sound later (same sign as av_offset_ms). 0.1 ms steps, +/-3276.7
+    double uncertainty_ms = 0;   // 0.5 ms steps, 0..127.5
+    int day = 0;                 // date of the calibration, days since 2020-01-01; 0: unknown
+    bool calibrated() const { return method != "none"; }
+};
+// "YYYY-MM-DD" for SenderCalibration::day, empty for 0.
+std::string calibration_date(int day);
+
 struct QrPayload {
     std::string schema = kQrSchema;
     std::string test_id;
@@ -425,9 +440,11 @@ struct QrPayload {
     std::string format = "1080p50";
     bool estimated_source = false; // QR clk=phone-utc
     bool timecode = false;
-    bool qr_flash = false; // AVS2/AVS3: compact QR with a neighbouring optical marker.
-    bool optical_code = false; // AVS3: A/B burst marker; QR names event k from half a period before it to half after.
+    bool qr_flash = false; // AVS4: compact QR with a neighbouring optical marker.
+    bool optical_code = false; // AVS4: A/B burst marker; QR names event k from half a period before it to half after.
     uint32_t source_id = 0;
+    std::string name; // AVS4: generator name, cosmetic (not part of the ID); cut to fit, at most kQrNameMaxBytes
+    SenderCalibration calibration; // AVS4: the generator's own screen-vs-speaker output offset
 };
 
 bool identify_video(VideoObservation& video, const QrPayload& payload);
@@ -440,7 +457,7 @@ struct QrDetection {
     QrPayload payload;
     std::array<double, 4> x{}, y{};
 };
-// AVS3: slow QR geometry/identity, fast sparse field photometry on every frame.
+// AVS4: slow QR geometry/identity, fast sparse field photometry on every frame.
 // No raster rectification. The OpticalCodeDetector times each burst; the QR seen
 // around it (or the event grid) names it.
 class QrFlashTracker {

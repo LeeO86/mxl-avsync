@@ -79,7 +79,9 @@ reports the corresponding start, while historical centre packets retain their
 original reference. The receiver stores the arrival-clock mapping of the chirp's
 samples. FSK/FEC/CRC completion never becomes the measurement arrival time.
 
-QR extensions `tc:"v3"` and `sid` identify the flash format/source and true grain
+The compact picture QR (`AVS4:`, specification "QR + optical code") carries the
+test id; its CRC-32 is the source id in the audio packet. In the JSON QR (legacy
+and older files) the extensions `tc:"v3"` and `sid` identify the flash format/source and true grain
 period. New FILE QRs carry `tk` in media nanoseconds; historical FILE QRs retain
 their millisecond meaning. TAI values are parsed as exact integers. Picture
 observations get their common event identity from the QR and full strip sequence;
