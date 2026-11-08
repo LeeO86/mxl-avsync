@@ -80,8 +80,9 @@ Besides event and time it carries:
   umlauts or emoji), cut at a whole character. It is only a label: it does not
   change the ID;
 - the **sender calibration** of the phone's own screen-vs-speaker offset
-  (method, offset, uncertainty, date). This calibration is not built yet, so the
-  phone sends "not calibrated" (method `none`).
+  (method, offset, uncertainty, date). The offset has the same sign as every
+  AV offset here: sound minus picture, positive = sound later. This calibration
+  is not built yet, so the phone sends "not calibrated" (method `none`).
 
 The QR keeps its size (version 4, 33 × 33 modules); it now uses error
 correction M instead of Q to make room. The phone analyzer report shows these

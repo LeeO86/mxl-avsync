@@ -1288,7 +1288,8 @@ and answers the open "generator name in the QR" point above.
 - Carries everything AVS3 did, plus the real test id, the generator name
   (container: Signal form Title, `AVSYNC_SOURCE`; phone: Name field; at most 24 UTF-8 bytes, cut at a
   whole character) and the sender calibration (method none/clap/transponder/
-  pulse-train, offset, uncertainty, date). Generators send method none until the
+  pulse-train, offset, uncertainty, date; the offset has the `av_offset_ms` sign:
+  sound minus picture, positive = sound later). Generators send method none until the
   source-output calibration exists. Layout: SPECIFICATION "QR + optical code".
 - Size: before, 59 alphanumeric characters at version 4 (33 modules), ECC Q.
   After, at most 90 characters at version 4 (33 modules), ECC M. The module

@@ -420,7 +420,7 @@ inline constexpr size_t kQrNameMaxBytes = 24; // UTF-8 bytes; less when a long I
 // How the generator measured its own output offset (screen vs speaker). "none": not calibrated.
 struct SenderCalibration {
     std::string method = "none"; // none, clap (second phone), transponder (calibrator), pulse-train
-    double offset_ms = 0;        // picture output minus sound output; positive: picture later. 0.1 ms steps, +/-3276.7
+    double offset_ms = 0;        // sound output minus picture output; positive: sound later (same sign as av_offset_ms). 0.1 ms steps, +/-3276.7
     double uncertainty_ms = 0;   // 0.5 ms steps, 0..127.5
     int day = 0;                 // date of the calibration, days since 2020-01-01; 0: unknown
     bool calibrated() const { return method != "none"; }

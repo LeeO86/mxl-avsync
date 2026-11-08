@@ -1049,7 +1049,7 @@ integers big-endian:
 | 5 | event sequence k (40 bits) |
 | 8 | video send time T_k in ns (TAI for LIVE, media timeline for FILE) |
 | 3 | source AV offset in 1/16 ms, signed (±524 s) |
-| 6, only with bit 3 | sender calibration: method u8 (1 clap with a second phone, 2 transponder calibrator, 3 pulse-train), offset i16 in 0.1 ms (picture output minus sound output, positive: picture later), uncertainty u8 in 0.5 ms, day u16 since 2020-01-01 (0 unknown) |
+| 6, only with bit 3 | sender calibration: method u8 (1 clap with a second phone, 2 transponder calibrator, 3 pulse-train), offset i16 in 0.1 ms (sound output minus picture output, positive: sound later; same sign as `av_offset_ms`, §3.2), uncertainty u8 in 0.5 ms, day u16 since 2020-01-01 (0 unknown) |
 | 1 + n | test id: n characters (1–64) of `0-9a-zA-Z-_`, 6 bits each; the source id is CRC-32 of the id. n = 0: the 4-byte source id alone follows (the id did not fit or does not give that source id); the analyzer then shows `source-<8 hex>` |
 | rest | generator name, UTF-8, 0–24 bytes; cosmetic, not part of the id |
 

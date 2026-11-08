@@ -338,10 +338,10 @@ TEST_CASE("AVS4 round trip: real test ID, name, sender calibration") {
     // No name; FILE mode at 1 Hz.
     p.name.clear();p.mode="FILE";p.estimated_source=false;p.rate=1;p.format="2160p50";
     d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name.empty());CHECK(d->mode=="FILE");CHECK(d->rate==1);CHECK(d->format=="2160p50");
-    // Calibration set.
-    p=avs4_sample();p.name="Cam 2";p.calibration={"pulse-train",-41.3,2.5,2502};
+    // Calibration set. Sign as av_offset_ms: this sender's sound comes out 41.3 ms after its picture.
+    p=avs4_sample();p.name="Cam 2";p.calibration={"pulse-train",41.3,2.5,2502};
     text=qr_payload_text(p);check_fits(text);d=parse_qr_payload(text);REQUIRE(d);
-    CHECK(d->calibration.method=="pulse-train");CHECK(d->calibration.offset_ms==doctest::Approx(-41.3));CHECK(d->calibration.uncertainty_ms==2.5);
+    CHECK(d->calibration.method=="pulse-train");CHECK(d->calibration.offset_ms==doctest::Approx(41.3));CHECK(d->calibration.uncertainty_ms==2.5);
     CHECK(d->calibration.day==2502);CHECK(calibration_date(d->calibration.day)=="2026-11-07");CHECK(d->name=="Cam 2");
     for(const char* m:{"clap","transponder"}){p.calibration.method=m;d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->calibration.method==m);}
     CHECK(calibration_date(0).empty());CHECK(calibration_date(1)=="2020-01-02");CHECK(calibration_date(60)=="2020-03-01");

@@ -100,7 +100,7 @@ namespace {
 //   6..13  T_k, source time of event k in ns
 //   14..16 test A/V offset in 1/16 ms (signed 24 bits)
 //   [6 bytes, only with bit3] calibration method (1 clap, 2 transponder, 3 pulse-train),
-//          offset in 0.1 ms (signed 16 bits), uncertainty in 0.5 ms (8 bits), day since 2020-01-01 (16 bits, 0 unknown)
+//          offset in 0.1 ms (signed 16 bits, sound minus picture, positive: sound later), uncertainty in 0.5 ms (8 bits), day since 2020-01-01 (16 bits, 0 unknown)
 //   1 byte n, then the test ID: n characters of 0-9a-zA-Z-_ at 6 bits each (source ID = CRC-32 of the ID),
 //          or for n = 0 the 4-byte source ID alone (the analyser shows "source-<hex>")
 //   rest   generator name, UTF-8, 0..24 bytes

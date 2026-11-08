@@ -627,7 +627,7 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     const int frames=60*6;
     for(int n=0;n<frames;++n) {
         PictureInfo info;info.period_ms=500;auto qr=plan.qr(plan.named_seq(n));qr.estimated_source=phone_source;qr.name="Studio iPhone Ü";
-        qr.calibration={"clap",-12.5,1.5,2502};info.qr_json=qr_payload_text(qr);
+        qr.calibration={"clap",-12.5,1.5,2502};info.qr_json=qr_payload_text(qr); // calibration: sender sound 12.5 ms before its picture
         render_picture(frame,info,1+n/30,n%30,30,plan.a_white(n));
         std::vector<uint8_t> small(size_t(w)*h);
         for(int y=0;y<h;++y)for(int x=0;x<w;++x)small[size_t(y)*w+x]=uint8_t(frame.y[size_t(y*2)*1280+x*2]>>2);
