@@ -95,7 +95,9 @@ public class AvsyncModule: Module {
     }
     do {
       let image = try GeneratorImageStore.load(id: options["imageId"] ?? "")
-      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false")
+      // mode "calibration": the calibration pattern for the calibrator board instead of the test signal.
+      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false",
+                                                 senderCalibration: options.filter { $0.key.hasPrefix("senderCalibration") }, calibrate: options["mode"] == "calibration")
       generator = controller; controller.onClose = { result in promise.resolve(result) }
       parent.view.endEditing(true)
       parent.present(controller, animated: true)

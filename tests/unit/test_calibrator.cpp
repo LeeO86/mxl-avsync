@@ -103,13 +103,23 @@ TEST_CASE("calibrator sounds: clicks and beeps are found and told apart")
     CHECK(find_sound_onsets(audio.data(), 100, kRate, 0).empty());
 }
 
-TEST_CASE("calibration pattern: halves swap every 500 ms, the beep starts at once")
+TEST_CASE("calibration pattern: halves swap every 500 ms on the frame grid, the beep starts at once")
 {
-    CHECK(calibration_left_white(0));
-    CHECK(calibration_left_white(499.9));
-    CHECK(!calibration_left_white(500));
-    CHECK(calibration_left_white(1000));
-    CHECK(calibration_period(1250) == 2);
+    CHECK(calibration_left_white(0, 60, 1));
+    CHECK(calibration_left_white(29, 60, 1));
+    CHECK(!calibration_left_white(30, 60, 1));
+    CHECK(calibration_left_white(60, 60, 1));
+    CHECK(calibration_period(75, 60, 1) == 2);
+    CHECK(calibration_swap_frame(3, 60, 1) == 90);
+    CHECK(calibration_swap_frame(1, 25, 1) == 13); // 520 ms: the first frame at or after 500 ms
+    CHECK(calibration_period(12, 25, 1) == 0);
+    CHECK(calibration_period(13, 25, 1) == 1);
+    // 59.94 fps: every swap frame is the first of its period, and the period before it ends there.
+    for (uint64_t k = 1; k < 200; ++k) {
+        const auto f = calibration_swap_frame(k, 60000, 1001);
+        CHECK(calibration_period(f, 60000, 1001) == k);
+        CHECK(calibration_period(f - 1, 60000, 1001) == k - 1);
+    }
     const auto beep = calibration_beep(kRate);
     REQUIRE(beep.size() == 192);
     CHECK(beep[0] == 0);

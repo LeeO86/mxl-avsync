@@ -313,9 +313,19 @@ CalibratorResult display_calibration(const std::vector<SoundOnset>& sounds, cons
     return r;
 }
 
-uint64_t calibration_period(double ms) { return ms <= 0 ? 0 : uint64_t(std::floor(ms / CalibratorContract::swap_period_ms + 1e-9)); }
+uint64_t calibration_period(uint64_t frame, int64_t num, int64_t den)
+{
+    // t = frame * den / num seconds; period = floor(t / 0.5 s), in integers.
+    return num > 0 && den > 0 ? frame * 2 * uint64_t(den) / uint64_t(num) : 0;
+}
 
-bool calibration_left_white(double ms) { return calibration_period(ms) % 2 == 0; }
+bool calibration_left_white(uint64_t frame, int64_t num, int64_t den) { return calibration_period(frame, num, den) % 2 == 0; }
+
+uint64_t calibration_swap_frame(uint64_t k, int64_t num, int64_t den)
+{
+    // The first frame whose period is k: ceil(k * num / (2 * den)).
+    return num > 0 && den > 0 ? (k * uint64_t(num) + 2 * uint64_t(den) - 1) / (2 * uint64_t(den)) : 0;
+}
 
 std::vector<float> calibration_beep(int rate)
 {

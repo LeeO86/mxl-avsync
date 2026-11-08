@@ -86,10 +86,12 @@ struct DisplayCalibrationOptions {
 // microphone delay cancels. Both swap directions count equally.
 CalibratorResult display_calibration(const std::vector<SoundOnset>& sounds, const DisplayCalibrationOptions& options = {});
 
-// The calibration pattern, the same for all generators. Time is from the pattern start;
-// swap k happens at k * 500 ms. In even periods the left half is white.
-bool calibration_left_white(double ms_since_start);
-uint64_t calibration_period(double ms_since_start);
+// The calibration pattern, the same for all generators. Frames count from the pattern
+// start at num/den frames per second; period k (swap k at its first frame) lasts 500 ms
+// on the frame grid. In even periods the left half is white.
+uint64_t calibration_period(uint64_t frame, int64_t num, int64_t den);
+bool calibration_left_white(uint64_t frame, int64_t num, int64_t den);
+uint64_t calibration_swap_frame(uint64_t k, int64_t num, int64_t den);
 // The generator's beep (mono, starts at sample 0, peak 0.5), played D after each swap.
 std::vector<float> calibration_beep(int sample_rate);
 
