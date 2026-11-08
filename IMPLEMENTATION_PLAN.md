@@ -1247,3 +1247,34 @@ callers retain synchronous scanning by default. Snapshot cost and worker delay
 are reported, and reading freshness includes that delay. No pulse timestamp
 smoothing or display/transport compensation is introduced. Protocol and
 container release version stay 2.0.7; real iPhone improvement remains a field test.
+
+## Stable sender ID (2026-11-07)
+
+Maintainer request: the analyser will group saved results by sender ID, so the
+ID must survive a generator restart. Deviation: the iPhone generator no longer
+makes a random `phone-…` ID on every start. All generators use one core function,
+`generator_test_id(prefix, install_id, app_version, settings)`: prefix + 12 hex
+digits of FNV-1a 64 (top 48 bits) over the fields, each ended by a newline.
+Settings are `key=value` strings; a future timing setting (music, output offset,
+sender calibration) is one more entry. Name, subtitle and image are not inputs.
+- iPhone: prefix `phone-`, a random install ID kept in UserDefaults (new after a
+  reinstall), version `<CFBundleShortVersionString> (<CFBundleVersion>)` so each
+  TestFlight build gets a new ID, settings `rate=<1|2>`.
+- Container: an `AVSYNC_TEST_ID` that is set stays as it is. Its default changes
+  from the NMOS seed to `<seed>-` + hash of the seed, `kAppVersion` and the timing
+  settings (rate, audio timecode, video format, AV offset, audio/video lead,
+  source emit offsets; maintainer 2026-11-07: they shift picture or sound). The
+  binary has no build or commit id, so the version alone stands for the build.
+  The settings page shows the automatic id greyed in the empty field. The id is computed
+  when used, so a live rate change gives the new id at once, and config export
+  keeps the empty value instead of freezing an old id. `GET /api/v1/generator`
+  shows `test_id`. The analyzer's own fallback label stays the NMOS seed.
+- Android has no generator yet (`supportsGenerator` is false); it should call the
+  same core function when it gets one.
+The core test holds the shared test vector.
+
+Generator name in the QR: not done. The live QR of the phone and the container
+(timecode 600/1200) is the compact `AVS2:`/`AVS3:` text of exactly 59 characters;
+the core parser rejects any other length and Android reads only `AVS3:`. A name
+in it would make today's analysers lose the picture. Only the JSON QR (legacy
+timecode, FILE) ignores unknown keys. Open for a maintainer decision.

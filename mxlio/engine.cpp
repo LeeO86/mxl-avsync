@@ -32,7 +32,7 @@ PlanConfig plan_from(const Config& config, const VideoFormat& format)
     plan.offset_ms = config.offset_ms;
     plan.live = true;
     plan.timecode_baud = config.audio_timecode == "legacy" ? 0 : std::stoi(config.audio_timecode);
-    plan.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
+    plan.source_id = timecode_source_id(config.effective_test_id().c_str());
     plan.chirp_ms = config.chirp_ms;
     plan.chirp_low_hz = config.chirp_low_hz;
     plan.chirp_high_hz = config.chirp_high_hz;
@@ -299,8 +299,8 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 QrPayload payload;
                 payload.timecode = config.audio_timecode != "legacy";
                 payload.qr_flash = payload.optical_code = payload.timecode;
-                payload.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
-                payload.test_id = config.test_id.empty() ? config.seed() : config.test_id;
+                payload.test_id = config.effective_test_id();
+                payload.source_id = timecode_source_id(payload.test_id.c_str());
                 payload.mode = "LIVE";
                 payload.k = named_seq;
                 payload.tk = static_cast<int64_t>(time_of_index(pace, named));

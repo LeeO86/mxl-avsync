@@ -45,6 +45,11 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     avsync::SourceStill _sourceImage;
     avsync::SourceStill _appIcon;
 }
++ (NSString *)testIDWithPrefix:(NSString *)prefix installID:(NSString *)installID version:(NSString *)version settings:(NSArray<NSString *> *)settings {
+    std::vector<std::string> values;
+    for(NSString *setting in settings)values.emplace_back(setting.UTF8String);
+    return @(avsync::generator_test_id(prefix.UTF8String,installID.UTF8String,version.UTF8String,values).c_str());
+}
 - (instancetype)initWithTestID:(NSString *)testID rate:(NSInteger)rate epochTaiNs:(int64_t)epoch epochHost:(double)host {
     if ((self = [super init])) {
         _plan=std::make_unique<avsync::PhoneGeneratorPlan>(testID.UTF8String,int(rate),epoch,host);

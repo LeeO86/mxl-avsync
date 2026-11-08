@@ -4,6 +4,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @interface AVSyncGenerator : NSObject
++ (NSString *)testIDWithPrefix:(NSString *)prefix installID:(NSString *)installID version:(NSString *)version settings:(NSArray<NSString *> *)settings NS_SWIFT_NAME(testID(prefix:installID:version:settings:));
 - (instancetype)initWithTestID:(NSString *)testID rate:(NSInteger)rate epochTaiNs:(int64_t)epochTaiNs epochHost:(double)epochHost NS_SWIFT_NAME(init(testID:rate:epochTaiNs:epochHost:));
 - (void)setSourceName:(NSString *)name subtitle:(NSString *)subtitle image:(nullable UIImage *)image NS_SWIFT_NAME(setSource(name:subtitle:image:));
 - (NSDictionary *)geometry;

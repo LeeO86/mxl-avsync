@@ -568,7 +568,7 @@ void install_web(HttpServer& http, Runtime& rt)
         if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
         return json_response({{"offset_ms", rt.config.offset_ms}, {"level_dbfs", rt.config.chirp_level_dbfs}, {"muted", !rt.config.audio_enable},
             {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"subtitle", rt.config.subtitle},
-            {"notes", rt.config.notes},
+            {"notes", rt.config.notes}, {"test_id", rt.config.effective_test_id()},
             {"timing_reference", rt.config.audio_timecode == "legacy" ? "centre" : "start"}, {"marker", rt.config.audio_timecode == "legacy" ? "toggle" : "flash"}, {"audio_timecode", rt.config.audio_timecode}, {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
             {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
     });

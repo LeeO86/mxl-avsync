@@ -273,7 +273,7 @@ Compact JSON, versioned, at most 200 bytes:
 | Key | Meaning |
 | --- | --- |
 | `s` | schema, `mxl-avsync/1` |
-| `t` | test id (`AVSYNC_TEST_ID`, default the generator's NMOS seed) |
+| `t` | test id (`AVSYNC_TEST_ID`, default the stable generator id of §10.2) |
 | `m` | `FILE` or `LIVE` |
 | `k` | sequence number of the next event |
 | `tk` | that event's set video time: TAI ns (LIVE) or ms on the file timeline (FILE) |
@@ -520,7 +520,7 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_AUDIO_LEAD_MS` | 20 | restart | how far ahead of TAI audio is written |
 | `AVSYNC_VIDEO_LEAD_MS` | 20 | restart | 0–100; how far ahead of its timestamp each video grain is committed (§2.2) |
 | `AVSYNC_QR_PERIOD_MS` | 1000 | live | 500–5000 |
-| `AVSYNC_TEST_ID` | the NMOS seed | live | in the QR and the results |
+| `AVSYNC_TEST_ID` | empty: stable generator id | live | in the QR and the results. A set value is used as it is. Empty: `<NMOS seed>-` + 12 hex digits of a hash of the NMOS seed, the app version and the timing settings (event rate, audio timecode, video format, AV offset, audio/video lead, source emit offsets), so a restart keeps it and a new version or timing setting gives a new one. Title, source and subtitle do not change it. The phone generator uses the same rule (`generator_test_id` in the core); `GET /api/v1/generator` shows the id in use, and the settings page shows it greyed in the empty field |
 | `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES` | empty | live | free text on the picture (each ≤ 80 characters) |
 
 ### 10.3 Analyzer
@@ -778,7 +778,7 @@ Family look: header with label, role, state and registration pills, version; tab
 | --- | --- | --- | --- |
 | GET | `/api/v1/info` | both | version, core version, MXL revision, role, label |
 | GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary |
-| GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate |
+| GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate; GET also shows `test_id` |
 | POST | `/api/v1/generator/stop`, `/start` | gen | §11 |
 | GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics |
 | GET | `/api/v1/events?since=<seq>&limit=` | ana | the newest matching event records, newest first, plus `total` |

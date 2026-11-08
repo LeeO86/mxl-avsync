@@ -2,6 +2,10 @@
 
 ## Mobile (not released yet)
 
+- iPhone generator: the source ID stays the same when the generator is stopped
+  and started again. It changes only after a reinstall, a new app version or
+  build, or another event rate; name, subtitle and image do not change it
+  (`docs/phone-generator.md`).
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
   release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
   that touch the app or the core (`mobile-app/README.md`).
@@ -26,6 +30,16 @@
   dark with light icons instead of white. Found on the Android emulator.
 - Android: the instrumented test (`connectedDebugAndroidTest`) builds; React
   Native's `libc++_shared.so` and the module's no longer collide.
+
+## Container (not released yet)
+
+- Generator: the default `AVSYNC_TEST_ID` is now `<NMOS seed>-` plus a short
+  hash of the seed, the app version and the timing settings (event rate, audio
+  timecode, video format, AV offset, audio/video lead, source emit offsets),
+  the same rule as the iPhone generator. It
+  stays the same over restarts. A set `AVSYNC_TEST_ID` is used as before.
+  `GET /api/v1/generator` shows the `test_id` in use; the settings page shows
+  it greyed in the empty `AVSYNC_TEST_ID` field.
 
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 
