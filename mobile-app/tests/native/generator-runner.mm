@@ -129,9 +129,10 @@ int main(int argc, char **argv) { @autoreleasepool {
         for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
             const size_t at=(size_t(y)*width+x)*4;
             const bool differs=!std::equal(before.begin()+at,before.begin()+at+4,after.begin()+at);
-            if(differs) { ++changed;assert(y>g.marker_y+g.marker_side && y<height); }
+            const bool inQr=x>=g.qr_x && x<g.qr_x+g.qr_size && y>=g.qr_y && y<g.qr_y+g.qr_size;
+            if(differs && !inQr) { ++changed;assert(y>g.marker_y+g.marker_side && y<height); }
         }
-        assert(changed>500); // Labels/logo actually visible, never cover timing/QR.
+        assert(changed>500); // Labels/logo actually visible, never cover timing. The QR carries the name (AVS4), so it may change.
         [source setSourceName:@"" subtitle:@"" image:nil];
         const auto packets=decode_timecodes(signal.data(),signal.size(),48000);
         assert(packets.size()==3);
