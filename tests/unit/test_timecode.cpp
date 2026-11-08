@@ -2,6 +2,7 @@
 #include "doctest.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 using namespace avsync;
 
@@ -312,14 +313,107 @@ TEST_CASE("phone source latency stays explicitly estimated even with receiver cl
     }
 }
 
-TEST_CASE("AVS2 compact payload preserves full identities and source clock semantics") {
-    QrPayload p;p.timecode=p.qr_flash=true;p.source_id=0xFEDCBA98;p.test_id="presentation-name";
-    p.mode="LIVE";p.estimated_source=true;p.k=9007199254740993ULL;p.tk=1793300000000000001LL;p.offset_ms=-3217.0625;p.rate=2;p.format="720p60";
-    auto text=qr_payload_text(p);CHECK(text.size()==59);CHECK(text.starts_with("AVS2:"));
-    auto decoded=parse_qr_payload(text);REQUIRE(decoded);CHECK(decoded->qr_flash);CHECK(decoded->timecode);
-    CHECK(decoded->k==p.k);CHECK(decoded->tk==p.tk);CHECK(decoded->source_id==p.source_id);CHECK(decoded->offset_ms==p.offset_ms);
-    CHECK(decoded->estimated_source);CHECK(decoded->format=="720p60");CHECK(decoded->rate==2);
-    CHECK_FALSE(parse_qr_payload(text+"0"));text[5]='F';CHECK_FALSE(parse_qr_payload(text));
+namespace {
+QrPayload avs4_sample() {
+    QrPayload p;p.timecode=p.qr_flash=p.optical_code=true;p.test_id="phone-0123456789ab";p.source_id=timecode_source_id(p.test_id.c_str());
+    p.mode="LIVE";p.estimated_source=true;p.k=(1ULL<<40)-1;p.tk=1793300000000000001LL;p.offset_ms=-3217.0625;p.rate=2;p.format="720p60";
+    return p;
+}
+// The QR text must fit a version 4 symbol at ECC M: 90 alphanumeric characters.
+void check_fits(const std::string& text) {
+    CHECK(text.size()<=90);
+    CHECK(text.find_first_not_of("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:")==std::string::npos);
+    CHECK(text.back()!=' '); // readers may trim a trailing space; base45 never ends with one
+}
+}
+
+TEST_CASE("AVS4 round trip: real test ID, name, sender calibration") {
+    auto p=avs4_sample();p.name="Studio iPhone";
+    auto text=qr_payload_text(p);CHECK(text.starts_with("AVS4:"));check_fits(text);
+    auto d=parse_qr_payload(text);REQUIRE(d);CHECK(d->qr_flash);CHECK(d->timecode);CHECK(d->optical_code);
+    CHECK(d->k==p.k);CHECK(d->tk==p.tk);CHECK(d->source_id==p.source_id);CHECK(d->test_id=="phone-0123456789ab");
+    CHECK(d->offset_ms==p.offset_ms);CHECK(d->estimated_source);CHECK(d->mode=="LIVE");CHECK(d->format=="720p60");CHECK(d->rate==2);
+    CHECK(d->name=="Studio iPhone");CHECK(d->calibration.method=="none");CHECK_FALSE(d->calibration.calibrated());
+    CHECK(qr_payload_text(*d)==text);
+    // No name; FILE mode at 1 Hz.
+    p.name.clear();p.mode="FILE";p.estimated_source=false;p.rate=1;p.format="2160p50";
+    d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name.empty());CHECK(d->mode=="FILE");CHECK(d->rate==1);CHECK(d->format=="2160p50");
+    // Calibration set. Sign as av_offset_ms: this sender's sound comes out 41.3 ms after its picture.
+    p=avs4_sample();p.name="Cam 2";p.calibration={"pulse-train",41.3,2.5,2502};
+    text=qr_payload_text(p);check_fits(text);d=parse_qr_payload(text);REQUIRE(d);
+    CHECK(d->calibration.method=="pulse-train");CHECK(d->calibration.offset_ms==doctest::Approx(41.3));CHECK(d->calibration.uncertainty_ms==2.5);
+    CHECK(d->calibration.day==2502);CHECK(calibration_date(d->calibration.day)=="2026-11-07");CHECK(d->name=="Cam 2");
+    for(const char* m:{"clap","transponder"}){p.calibration.method=m;d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->calibration.method==m);}
+    CHECK(calibration_date(0).empty());CHECK(calibration_date(1)=="2020-01-02");CHECK(calibration_date(60)=="2020-03-01");
+}
+
+TEST_CASE("AVS4 cuts a long or unicode name at a character boundary") {
+    auto p=avs4_sample();
+    p.name="A very long generator name that does not fit";
+    auto d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name==p.name.substr(0,kQrNameMaxBytes));
+    // 2-byte letters: never half a character.
+    p.name="ÄÖÜäöüÄÖÜäöüÄÖÜäöü";
+    d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name=="ÄÖÜäöüÄÖÜäöü");
+    // A 4-byte emoji at the edge is dropped whole.
+    p.name="Kamera 12345678901234 \xF0\x9F\x93\xB7";
+    d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name=="Kamera 12345678901234 ");
+    // Calibration takes 6 bytes of the name's room; invalid UTF-8 or control characters end the name.
+    p.calibration={"clap",10,1,0};p.name="ÄÖÜäöüÄÖÜäöüÄÖÜäöü";
+    auto text=qr_payload_text(p);check_fits(text);d=parse_qr_payload(text);REQUIRE(d);CHECK(d->name=="ÄÖÜäöüÄÖÜ");
+    p.name="ok\xC3(bad";d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name=="ok");
+    p.name="line\nbreak";d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->name=="line");
+    // The name never changes the ID.
+    CHECK(d->source_id==avs4_sample().source_id);CHECK(d->test_id==avs4_sample().test_id);
+}
+
+TEST_CASE("AVS4 falls back to the source ID when the test ID cannot be carried") {
+    auto p=avs4_sample();p.name="Name";
+    // Longest container-style ID that still fits next to a calibration block.
+    p.test_id="studio-generator-01-avsync-0123456789ab";p.source_id=timecode_source_id(p.test_id.c_str());p.calibration={"clap",1,1,1};
+    auto text=qr_payload_text(p);check_fits(text);auto d=parse_qr_payload(text);REQUIRE(d);CHECK(d->test_id==p.test_id);CHECK(d->source_id==p.source_id);
+    for(const std::string id:{std::string(64,'x'),std::string("has space"),std::string("dots.not.allowed")}) {
+        p.test_id=id;p.source_id=timecode_source_id(id.c_str());
+        text=qr_payload_text(p);check_fits(text);d=parse_qr_payload(text);REQUIRE(d);
+        char want[20];std::snprintf(want,sizeof want,"source-%08X",p.source_id);CHECK(d->test_id==want);CHECK(d->source_id==p.source_id);
+        CHECK(d->name=="Name");
+    }
+    // A source ID that is not the CRC of the test ID is kept as it is.
+    p=avs4_sample();p.source_id=0xFEDCBA98;d=parse_qr_payload(qr_payload_text(p));REQUIRE(d);CHECK(d->source_id==0xFEDCBA98);CHECK(d->test_id=="source-FEDCBA98");
+}
+
+TEST_CASE("AVS4 rejects malformed text and out-of-range fields") {
+    const auto text=qr_payload_text(avs4_sample());
+    CHECK_FALSE(parse_qr_payload("AVS4:"));
+    CHECK_FALSE(parse_qr_payload(text.substr(0,text.size()-1)+"a")); // lowercase is not base45
+    CHECK_FALSE(parse_qr_payload(text+"0"));                          // a single trailing character is not base45
+    CHECK_FALSE(parse_qr_payload(text.substr(0,20)));                 // too short
+    CHECK_FALSE(parse_qr_payload("AVS4:::::::::::::::::::::::::::::::::")); // ":::" = 91124 > 65535
+    CHECK_FALSE(parse_qr_payload("AVS3:"+text.substr(5)));           // AVS2/AVS3 are gone
+    auto bytes_text=[](std::vector<uint8_t> b){
+        std::string out="AVS4:";const char* t="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+        for(size_t i=0;i<b.size();i+=2){unsigned n=i+1<b.size()?b[i]*256u+b[i+1]:b[i];out+=t[n%45];out+=t[n/45%45];if(i+1<b.size())out+=t[n/2025];}
+        return out;};
+    std::vector<uint8_t> ok={0x51,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,1,2,3,4};
+    REQUIRE(parse_qr_payload(bytes_text(ok)));
+    auto bad=ok;bad[0]=0xF1;CHECK_FALSE(parse_qr_payload(bytes_text(bad)));          // unknown format
+    bad=ok;bad[0]=0x52;CHECK_FALSE(parse_qr_payload(bytes_text(bad)));               // phone clock in FILE mode
+    bad=ok;bad[6]=0x80;CHECK_FALSE(parse_qr_payload(bytes_text(bad)));               // negative T_k
+    bad=ok;bad[0]|=8;CHECK_FALSE(parse_qr_payload(bytes_text(bad)));                 // calibration block missing
+    bad=ok;bad[0]|=8;bad.insert(bad.begin()+17,{0,0,0,0,0,0});CHECK_FALSE(parse_qr_payload(bytes_text(bad))); // method 0 in a block
+    bad=ok;bad[0]|=8;bad.insert(bad.begin()+17,{4,0,0,0,0,0});CHECK_FALSE(parse_qr_payload(bytes_text(bad))); // unknown method
+    bad=ok;bad[17]=65;CHECK_FALSE(parse_qr_payload(bytes_text(bad)));                // ID longer than 64
+    bad=ok;bad[17]=2;bad.resize(19);bad[18]=0;CHECK_FALSE(parse_qr_payload(bytes_text(bad))); // 2 chars need 2 bytes
+    bad=ok;bad[17]=1;bad.resize(19);bad[18]=0x01;CHECK_FALSE(parse_qr_payload(bytes_text(bad))); // padding bits not zero
+    bad=ok;bad.push_back(0xC3);CHECK_FALSE(parse_qr_payload(bytes_text(bad)));       // name: half a character
+    bad=ok;bad.push_back(0x07);CHECK_FALSE(parse_qr_payload(bytes_text(bad)));       // name: control character
+    bad=ok;bad.insert(bad.end(),25,'a');CHECK_FALSE(parse_qr_payload(bytes_text(bad))); // name over 24 bytes
+    // The encoder refuses what AVS4 cannot carry.
+    auto p=avs4_sample();p.k=1ULL<<40;CHECK_THROWS(qr_payload_text(p));
+    p=avs4_sample();p.offset_ms=600000;CHECK_THROWS(qr_payload_text(p));
+    p=avs4_sample();p.optical_code=false;CHECK_THROWS(qr_payload_text(p));
+    p=avs4_sample();p.calibration={"guess",0,0,0};CHECK_THROWS(qr_payload_text(p));
+    p=avs4_sample();p.calibration={"clap",4000,0,0};CHECK_THROWS(qr_payload_text(p));
+    p=avs4_sample();p.calibration={"clap",0,200,0};CHECK_THROWS(qr_payload_text(p));
 }
 
 TEST_CASE("AVS2 chirp correlation is the best sub-sample match: bit exact is 1, noise lowers it") {

@@ -102,6 +102,7 @@ struct Runtime {
     int frame_height = 0;
     bool interlaced_flow = false;
     double frame_rate_fps = 0;
+    std::optional<QrPayload> signal; // analyzer: the source named by the picture QR
     std::string source_image_path;
     int source_image_frames = 0;
     std::shared_ptr<const SourceClip> source_clip; // decoded once per upload, drawn by the live generator
@@ -242,6 +243,22 @@ nlohmann::json clock_brief_json(const Runtime& rt)
     const auto accuracy = clock_accuracy_ms(rt.clock_status);
     return {{"source", rt.clock_status.sync_source}, {"state", rt.clock_status.sync_state},
         {"accuracy_ms", accuracy ? nlohmann::json(*accuracy) : nlohmann::json(nullptr)}};
+}
+
+// Analyzer: the source the picture QR names (AVS4 carries the real test ID, a name and the
+// sender's own output calibration); null without a QR.
+nlohmann::json signal_json(const Runtime& rt)
+{
+    if (!rt.signal) return nullptr;
+    const auto& s = *rt.signal;
+    nlohmann::json calibration = {{"method", s.calibration.method}};
+    if (s.calibration.calibrated()) {
+        calibration["offset_ms"] = s.calibration.offset_ms;
+        calibration["uncertainty_ms"] = s.calibration.uncertainty_ms;
+        if (s.calibration.day > 0) calibration["date"] = calibration_date(s.calibration.day);
+    }
+    return {{"source_id", s.source_id}, {"test_id", s.test_id}, {"name", s.name}, {"live", s.mode == "LIVE"}, {"rate", s.rate},
+        {"format", s.format}, {"estimated_source", s.estimated_source}, {"sender_calibration", calibration}};
 }
 
 nlohmann::json clock_status_json(const Runtime& rt)
@@ -542,7 +559,7 @@ void install_web(HttpServer& http, Runtime& rt)
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
-            {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps},
+            {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps}, {"signal", signal_json(rt)},
             {"ptp", clock_status_json(rt)}, {rt.config.role == "generator" ? "emit_offsets" : "source_emit_offsets",
                 rt.config.role == "generator" ? emit_offsets_json(rt) : source_emit_json(rt)}});
     });
@@ -1242,6 +1259,10 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             rt.result_flow = flow;
             rt.result_domain = domain;
+        };
+        callbacks.set_signal = [&](const std::optional<QrPayload>& signal) {
+            std::lock_guard lock(rt.mu);
+            rt.signal = signal;
         };
         callbacks.set_status = [&](const MediaStatus& status) {
             std::lock_guard lock(rt.mu);

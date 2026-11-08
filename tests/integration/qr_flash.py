@@ -1,4 +1,4 @@
-"""Actual AVS2 generator/file-reader round trips, with crop/rotation/codec controls.
+"""Actual AVS4 generator/file-reader round trips, with crop/rotation/codec controls.
 
 Uses the portable testfile tool or the Linux CLI. No manifest is given to the
 analyzer: video identity must be decoded from pixels and audio independently.

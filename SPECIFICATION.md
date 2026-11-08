@@ -226,7 +226,7 @@ Events are paired by identity, not by nearest neighbour:
 1. **QR code** (top left, about 18 % of the height): changes once per second (`AVSYNC_QR_PERIOD_MS`, default 1000), error correction level M. Payload §5.6. It identifies the test and the event; it is not needed for timing.
 2. **Frame counter** (text): the grain index the generator wrote, and in LIVE mode the TAI time of the grain. The text says "frame as written by the generator"; the analyzer reports the frame it saw separately.
 3. **Free text**: `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES`, and the format, rate, audio format and set offset, drawn once per change.
-4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal (AVS3, 2.1.0) splits it into two always-opposite fields that swap in an 8-transition burst from each event (see QR + optical code below). Its first transition coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
+4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal (AVS3 optical code since 2.1.0, AVS4 QR) splits it into two always-opposite fields that swap in an 8-transition burst from each event (see QR + optical code below). Its first transition coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
 7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). The live analyzer retains a fast full-raster path and can also locate/rectify an optical or scaled test picture using these fiducials.
@@ -264,7 +264,7 @@ The detector works on 10-bit luma from v210; its cost is a few thousand samples 
 
 ### 5.6 QR payload
 
-Compact JSON, versioned, at most 200 bytes:
+The audio-timecode signal (default) uses the compact `AVS4:` text, see "QR + optical code" below. Legacy audio mode uses compact JSON, versioned, at most 200 bytes:
 
 ```json
 {"s":"mxl-avsync/1","t":"TEST-2026-0001","m":"LIVE","k":3459211852,"tk":1729673412000000000,"o":0,"r":2,"f":"1080p50"}
@@ -777,7 +777,7 @@ Family look: header with label, role, state and registration pills, version; tab
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/v1/info` | both | version, core version, MXL revision, role, label |
-| GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary |
+| GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary; analyzer: `signal`, the source the picture QR names (`source_id`, `test_id`, `name`, `live`, `rate`, `format`, `estimated_source`, `sender_calibration` {`method`, and when calibrated `offset_ms`, `uncertainty_ms`, `date`}), null without a QR |
 | GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate; GET also shows `test_id` |
 | POST | `/api/v1/generator/stop`, `/start` | gen | §11 |
 | GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics |
@@ -1028,22 +1028,39 @@ identity or imply source-output calibration. Text rasterization is CoreText
 on iOS with the same bundled DejaVu font, avoiding media/GUI dependencies in
 avsync-core and desktop rendering dependencies in the mobile binary.
 
-### QR + optical code (AVS3, 2.1.0)
+### QR + optical code (AVS3 optical code, AVS4 QR)
 
 The compact audio-timecode generator (file, MXL and phone sources) uses one
-large version-4 QR (33 modules, correction Q, four quiet modules per side)
+large version-4 QR (33 modules, correction M since AVS4, four quiet modules per side)
 beside a 41-module panel with a four-module gap, as in AVS2. The panel holds two
 fields: A is its left half, B its right half (both in the same rows). A and B
 are always opposite. Rest: A black (Y 64), B white (Y 940). Colour bars, source
 labels/image and the visual sync scale remain. Legacy audio mode retains its
 original video layout. See [docs/qr-flash.md](docs/qr-flash.md).
 
-The payload is `AVS3:` followed by the 54 hexadecimal characters of the AVS2
-layout: flags u8 (bit 0 LIVE, bit 1 estimated phone source), source id u32,
-full event sequence u64, video send time i64 (TAI for LIVE, media timeline for
-FILE), source AV offset i32 in 1/16 ms, format u8 (0–8: 1080p50, 1080p25,
-1080p59.94, 1080i25, 2160p50, 720p60, 720p50, 960x540p25, 540p25) and event
-rate u8 (1 or 2). `AVS2:` payloads still parse but no longer create events.
+**AVS4 payload.** `AVS4:` followed by base45 text (RFC 9285) of up to 56
+bytes, at most 90 characters, so it always fits version 4 at correction M. All
+characters are QR alphanumeric, and base45 never ends in a space. Bytes, all
+integers big-endian:
+
+| Bytes | Field |
+| --- | --- |
+| 1 | flags: bit 0 LIVE, bit 1 estimated phone source, bit 2 rate 2 (else 1), bit 3 calibration block follows, bits 4–7 format (0–8: 1080p50, 1080p25, 1080p59.94, 1080i25, 2160p50, 720p60, 720p50, 960x540p25, 540p25) |
+| 5 | event sequence k (40 bits) |
+| 8 | video send time T_k in ns (TAI for LIVE, media timeline for FILE) |
+| 3 | source AV offset in 1/16 ms, signed (±524 s) |
+| 6, only with bit 3 | sender calibration: method u8 (1 clap with a second phone, 2 transponder calibrator, 3 pulse-train), offset i16 in 0.1 ms (sound output minus picture output, positive: sound later; same sign as `av_offset_ms`, §3.2), uncertainty u8 in 0.5 ms, day u16 since 2020-01-01 (0 unknown) |
+| 1 + n | test id: n characters (1–64) of `0-9a-zA-Z-_`, 6 bits each; the source id is CRC-32 of the id. n = 0: the 4-byte source id alone follows (the id did not fit or does not give that source id); the analyzer then shows `source-<8 hex>` |
+| rest | generator name, UTF-8, 0–24 bytes; cosmetic, not part of the id |
+
+The encoder cuts the name at a character boundary to the room left (24 bytes,
+less with a long id or a calibration block). Stable phone and container ids
+(§10.2) always fit. A parser rejects unknown formats or methods, a phone clock in
+FILE mode, a negative T_k, bad padding bits, invalid UTF-8 or control
+characters in the name, and leftover bytes. The container's name is
+the Signal form Title (`AVSYNC_SOURCE`), the phone's Title field (stored as `generatorName`). Generators send method none until the
+source-output calibration exists. `AVS2:` and `AVS3:` payloads are no longer
+read (all generators and readers change together).
 
 **Burst.** Around event k the fields swap 8 times at chip offsets {0, 1, 2, 4,
 5, 6, 7, 8} (k even) or {0, 1, 2, 3, 4, 6, 7, 8} (k odd); transition 0 is the
