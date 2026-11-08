@@ -9,17 +9,22 @@ export function senderKey(sourceId) {
  return Number.isInteger(sourceId) && sourceId > 0 ? String(sourceId) : null;
 }
 
-// Short form of the sender ID. The analyser does not know the generator's title (it is only
-// drawn in the picture, not in the QR), so the default name is this short ID.
+// Short form of the sender ID: the default name when the sender sends no title (AVS4 QR name).
 export function shortId(result) {
  if (typeof result?.testId === 'string' && result.testId) return result.testId.length > 10 ? `${result.testId.slice(0, 10)}…` : result.testId;
  const key = senderKey(result?.sourceId);
  return key ? `ID ${(Number(key) >>> 0).toString(16).padStart(8, '0').slice(0, 4)}…` : null;
 }
 
+// The title the sender sends in its AVS4 QR (generator name), or null.
+export function senderTitle(sample) {
+ return typeof sample?.title === 'string' && sample.title.trim() ? sample.title.trim() : null;
+}
+
+// A nickname the user set wins, then the sender's title, then the short ID.
 export function senderName(senders, key, sample) {
  const nickname = senders?.[key]?.nickname;
- return typeof nickname === 'string' && nickname.trim() ? nickname.trim() : shortId(sample) || 'Unknown sender';
+ return typeof nickname === 'string' && nickname.trim() ? nickname.trim() : senderTitle(sample) || shortId(sample) || 'Unknown sender';
 }
 
 export function referenceFor(senders, key, results) {
@@ -35,13 +40,13 @@ export function resultDelta(result, reference) {
  return { offsetMs: diff(result.offsetMs, reference.offsetMs), videoLatencyMs: diff(result.videoLatencyMs, reference.videoLatencyMs), audioLatencyMs: diff(result.audioLatencyMs, reference.audioLatencyMs) };
 }
 
-// "check" when the camera mode or the calibration offset differs from the reference's.
-// A missing camera mode on either side (older results) is not compared.
-export function needsCheck(reference, { captureContext = null, calibrationMs = null } = {}) {
+// "check" when the camera mode, the calibration offset or the sender calibration differs from the
+// reference's. A missing camera mode on either side (older results) is not compared.
+export function needsCheck(reference, { captureContext = null, calibrationMs = null, senderCalibrationMs = null } = {}) {
  if (!reference) return false;
  const was = reference.captureContext?.cameraMode, now = captureContext?.cameraMode;
  if (was !== undefined && now !== undefined && was !== now) return true;
- return (reference.calibrationMs ?? null) !== (calibrationMs ?? null);
+ return (reference.calibrationMs ?? null) !== (calibrationMs ?? null) || (reference.senderCalibrationMs ?? null) !== (senderCalibrationMs ?? null);
 }
 
 // Groups for the Results tab: senders by newest result, "Unknown sender" last.
@@ -57,9 +62,11 @@ export function groupResults(results, senders) {
   const reference = referenceFor(senders, key, items);
   const sorted = [...items].sort((a, b) => b.at - a.at);
   const ordered = reference ? [reference, ...sorted.filter(r => r !== reference)] : sorted;
+  // The newest title wins, so an unset nickname follows a renamed sender.
+  const sample = sorted.find(r => senderTitle(r)) || sorted[0];
   return {
-   key, name: key ? senderName(senders, key, sorted[0]) : 'Unknown sender', id: key ? shortId(sorted[0]) : null,
-   latestAt: sorted[0].at, reference,
+   key, name: key ? senderName(senders, key, sample) : 'Unknown sender', id: key ? shortId(sorted[0]) : null,
+   title: key ? senderTitle(sample) : null, latestAt: sorted[0].at, reference,
    items: ordered.map(result => ({
     result, isReference: result === reference,
     delta: reference && result !== reference ? resultDelta(result, reference) : null,
@@ -75,7 +82,8 @@ export function liveDelta(reading, { senders, results, captureContext = null, ca
  const key = senderKey(reading?.sourceId);
  const reference = referenceFor(senders, key, results || []);
  if (!reference) return null;
- return { name: senderName(senders, key, reference), ...resultDelta(reading, reference), check: needsCheck(reference, { captureContext, calibrationMs }) };
+ return { name: senderName(senders, key, senderTitle(reading) ? reading : reference), ...resultDelta(reading, reference),
+  check: needsCheck(reference, { captureContext, calibrationMs, senderCalibrationMs: reading?.senderCalibrationMs ?? null }) };
 }
 
 export function deltaText(ms) {

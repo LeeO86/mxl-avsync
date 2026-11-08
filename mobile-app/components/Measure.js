@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Animated, Pressable, Text, View } from 'react-native';
 import { Button, colors, small, text } from './ui';
-import { latencyText, offsetSentence, offsetText } from '../src/live.mjs';
+import { latencyText, offsetSentence, offsetText, senderCalibrationText } from '../src/live.mjs';
 import { FADE_MS, REFOCUS_MS, tapPoint } from '../src/focus.mjs';
 import { deltaText } from '../src/results.mjs';
 
@@ -50,6 +50,7 @@ export default function Measure({ camera, view, flow, calibrated, delta, onSave,
    </Text>
    {reading && delta && Number.isFinite(delta.offsetMs) ? <Text style={{ ...small, color: colors.accent, marginTop: 4 }}>{`${deltaText(delta.offsetMs)} vs ${delta.name}${delta.check ? ' · check' : ''}`}</Text> : null}
    {reading ? <Text style={{ ...small, marginTop: 4 }}>{`±${(reading.spreadMs / 2).toFixed(1)} ms · ${reading.events} events${calibrated ? '' : ' · not calibrated'}`}</Text> : null}
+   {reading && senderCalibrationText(reading) ? <Text style={{ ...small, marginTop: 2 }}>{senderCalibrationText(reading)}</Text> : null}
    <View style={{ flexDirection: 'row', marginTop: 12 }}>
     <View style={{ flex: 1 }}><Text style={small}>VIDEO LATENCY</Text><Text style={{ ...text, fontSize: 20 }}>{latencyText(reading?.videoLatencyMs)}</Text></View>
     <View style={{ flex: 1 }}><Text style={small}>AUDIO LATENCY</Text><Text style={{ ...text, fontSize: 20 }}>{latencyText(reading?.audioLatencyMs)}</Text></View>

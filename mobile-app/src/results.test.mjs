@@ -59,6 +59,25 @@ test('live Δ for the sender heard, with its nickname', () => {
  assert.equal(deltaText(null), '');
 });
 
+test('the sender title (AVS4 QR name) is the default nickname; a set nickname wins', () => {
+ const results = [r('3', 300, { title: 'Studio B' }), r('2', 200), r('1', 100, { title: 'Studio A' })];
+ let groups = groupResults(results, {});
+ assert.deepEqual([groups[0].name, groups[0].title, groups[0].id], ['Studio B', 'Studio B', 'phone-3fa9…']); // newest title
+ groups = groupResults(results, { 11: { nickname: 'Desk' } });
+ assert.equal(groups[0].name, 'Desk');
+ assert.equal(groupResults([r('1', 100)], {})[0].name, 'phone-3fa9…'); // no title: short ID
+ const senders = { 11: { referenceId: '1' } };
+ assert.equal(liveDelta({ sourceId: 11, offsetMs: 1, title: 'Studio C' }, { senders, results }).name, 'Studio C');
+ assert.equal(liveDelta({ sourceId: 11, offsetMs: 1 }, { senders, results }).name, 'Studio A'); // the reference's title
+});
+
+test('check marker when the sender calibration differs', () => {
+ const ref = r('1', 100, { senderCalibrationMs: -38 });
+ assert.equal(needsCheck(ref, { captureContext: cam, calibrationMs: 2, senderCalibrationMs: -38 }), false);
+ assert.equal(needsCheck(ref, { captureContext: cam, calibrationMs: 2, senderCalibrationMs: null }), true);
+ assert.equal(needsCheck(r('1', 100), { captureContext: cam, calibrationMs: 2 }), false); // older result without the field
+});
+
 test('reference toggles, nickname sets and resets', () => {
  let senders = toggleReference({}, r('1', 100));
  assert.equal(senders[11].referenceId, '1');

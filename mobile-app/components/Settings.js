@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import { Button, Card, Choice, Row, colors, small, text } from './ui';
 import { latencyText, offsetText } from '../src/live.mjs';
 
@@ -81,7 +81,9 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
    <Button title="Apply" onPress={() => onChange({ ntpServer: server.trim(), clockMaxUncertaintyMs: Number(limit), taiUtcSeconds: Number(tai) })} />
   </Card>
   <Button title="Clear saved results" onPress={onClearResults} />
-  <Button title="Clear calibration" onPress={onClearCalibration} />
+  <Button title="Clear calibration" onPress={() => Alert.alert('Clear calibration?',
+   'Clears both: the analyser calibration (camera vs microphone) and the sender calibration (screen vs speaker).',
+   [{ text: 'Cancel', style: 'cancel' }, { text: 'Clear both', style: 'destructive', onPress: onClearCalibration }])} />
   <Button title="Back" onPress={onBack} />
  </>;
 }

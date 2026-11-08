@@ -209,7 +209,7 @@ export default function App() {
     ? <Debug onBack={() => setSheet('settings')} session={session} onChange={applyDebug} report={report}
      clockDetails={reference ? clockCheckDetails(reference) : clockError}
      onShare={() => share({ report, reference, calibration: session.calibration, results: (session.results || []).slice(0, 5) })}
-     onClearResults={() => update({ results: [] })} onClearCalibration={() => { update({ calibration: null, senderCalibration: null }); setNotice('Calibration cleared'); }} />
+     onClearResults={() => update({ results: [] })} onClearCalibration={() => { update({ calibration: null, senderCalibration: null }); setNotice('Analyser and sender calibration cleared'); }} />
     : <Settings onClose={() => setSheet(null)} calibration={calibrationLabel} sender={senderLabel} clock={clockLabel} onCalibrate={startCalibration}
      onCalibrator={supportsCalibrator ? startCalibrator : null}
      onSyncClock={syncClock} syncing={syncing} keepAwake={screenAwakeEnabled(session)} onKeepAwake={value => update({ keepScreenAwake: value })}
