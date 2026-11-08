@@ -114,7 +114,7 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     const auto beep=avsync::calibration_beep(int(std::lround(rate)));
     return [NSData dataWithBytes:beep.data() length:beep.size()*sizeof(float)];
 }
-+ (NSDictionary *)displayCalibrationForSamples:(NSData *)samples sampleRate:(double)rate minimumPairs:(NSInteger)minimum {
++ (NSDictionary<NSString *, id> *)displayCalibrationForSamples:(NSData *)samples sampleRate:(double)rate minimumPairs:(NSInteger)minimum {
     const auto sounds=avsync::find_sound_onsets((const float*)samples.bytes,samples.length/sizeof(float),int(std::lround(rate)),0);
     avsync::DisplayCalibrationOptions options;options.min_pairs=int(std::max<NSInteger>(1,minimum));
     const auto r=avsync::display_calibration(sounds,options);

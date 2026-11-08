@@ -21,7 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (uint64_t)calibrationSwapFrame:(uint64_t)swap fps:(NSInteger)fps NS_SWIFT_NAME(calibrationSwapFrame(swap:fps:));
 + (NSData *)calibrationBeepWithSampleRate:(double)sampleRate NS_SWIFT_NAME(calibrationBeep(sampleRate:));
 // Clicks and beeps in mono float samples: pairs, clicks and, with enough pairs, the result.
-+ (NSDictionary *)displayCalibrationForSamples:(NSData *)samples sampleRate:(double)sampleRate minimumPairs:(NSInteger)minimumPairs NS_SWIFT_NAME(displayCalibration(samples:sampleRate:minimumPairs:));
++ (NSDictionary<NSString *, id> *)displayCalibrationForSamples:(NSData *)samples sampleRate:(double)sampleRate minimumPairs:(NSInteger)minimumPairs NS_SWIFT_NAME(displayCalibration(samples:sampleRate:minimumPairs:));
 @end
 
 NS_ASSUME_NONNULL_END
