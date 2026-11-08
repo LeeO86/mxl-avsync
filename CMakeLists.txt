@@ -59,6 +59,7 @@ add_library(avsync-core STATIC
     core/src/phone_generator.cpp
     core/src/picture_reader.cpp
     core/src/two_way.cpp
+    core/src/calibrator.cpp
     third_party/nayuki/qrcodegen.cpp
 )
 target_include_directories(avsync-core
@@ -70,7 +71,7 @@ set_source_files_properties(core/src/text.cpp PROPERTIES OBJECT_DEPENDS "${DEJAV
 target_link_libraries(avsync-core PUBLIC blend2d::blend2d)
 target_compile_options(avsync-core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
-add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp tests/unit/test_timecode.cpp)
+add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp tests/unit/test_timecode.cpp tests/unit/test_calibrator.cpp)
 target_include_directories(avsync-core-tests PRIVATE third_party/doctest)
 target_link_libraries(avsync-core-tests PRIVATE avsync-core)
 target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
