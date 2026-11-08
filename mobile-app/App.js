@@ -16,6 +16,7 @@ import { clockCheckDetails, clockSettings, generatorClockOptions, referenceAt, s
 import { calibrationSummary, makeCalibration, validCalibration } from './src/workflow.mjs';
 import { generatorOptions } from './src/generator.mjs';
 import { screenAwakeEnabled } from './src/screen-awake.mjs';
+import { addResult, liveDelta, loadSessionState, setNickname, toggleReference } from './src/results.mjs';
 
 const NativeCamera = native?.supportsLiveCapture?.() ? requireNativeViewManager('Avsync') : null;
 const RESYNC_MS = CLOCK_MAX_AGE_MS - 60000; // renew the clock reference a minute before it expires
@@ -23,7 +24,7 @@ const UNCERTAIN_RESYNC_MS = 30000; // or sooner, at most every 30 s, once the ho
 const TABS = [['measure', 'Measure', 'speedometer-outline'], ['generate', 'Signal', 'tv-outline'], ['results', 'Results', 'list-outline']];
 
 function loadSession() {
- try { return JSON.parse(native?.loadState?.() || 'null') || { calibration: null, results: [] }; } catch { return { calibration: null, results: [] }; }
+ try { return loadSessionState(native?.loadState?.()); } catch { return loadSessionState(null); }
 }
 
 export default function App() {
@@ -84,12 +85,13 @@ export default function App() {
  };
  const view = liveView(report, { reference, maxUncertaintyMs: limits.maxUncertaintyMs, calibrationMs: calibration?.offset_ms ?? 0, ageMs: reportAt ? performance.now() - reportAt : 0, held });
  useEffect(() => { if (view.reading?.fresh) setHeld(view.reading); }, [report]);
+ const delta = liveDelta(view.reading, { senders: session.senders, results: session.results, captureContext: report?.captureContext ?? null, calibrationMs: calibration?.offset_ms ?? null });
 
  const restart = () => { setReport(null); setHeld(null); setNotice(null); camera.current?.resumeAnalysis?.(); };
  const save = () => {
-  const item = savedResult(view.reading, { calibration });
+  const item = savedResult(view.reading, { calibration, captureContext: report?.captureContext ?? null });
   if (!item) return;
-  update(previous => ({ results: [item, ...(previous.results || [])].slice(0, 100) }));
+  update(previous => ({ results: addResult(previous.results, item, previous.senders) }));
   setNotice(item.held ? 'Last reading saved' : 'Saved');
  };
  const share = async value => { try { await Share.share({ message: JSON.stringify(value, null, 2) }); } catch (error) { setNotice(error.message); } };
@@ -146,14 +148,16 @@ export default function App() {
    </Pressable>
   </View>
   <View style={{ flex: 1, display: tab === 'measure' ? 'flex' : 'none' }}>
-   <Measure camera={cameraView} view={view} flow={flow} calibrated={Boolean(calibration)} notice={notice}
+   <Measure camera={cameraView} view={view} flow={flow} calibrated={Boolean(calibration)} delta={delta} notice={notice}
     onSave={save} onRestart={restart}
     onStartCalibration={() => { setFlow('listening'); setNotice(null); camera.current?.beginCalibration?.(); }}
     onCancelCalibration={() => { setFlow(null); restart(); }} />
   </View>
   {tab === 'generate' && <Generate session={session} onChange={(key, value) => update({ [key]: value })} image={image} busy={generating} picking={picking}
    onPickImage={native?.pickGeneratorImage ? pickImage : null} onStart={startSignal} supported={Boolean(native?.supportsGenerator?.())} notice={notice} />}
-  {tab === 'results' && <Results results={session.results || []} onShare={share} />}
+  {tab === 'results' && <Results results={session.results || []} senders={session.senders} onShare={share}
+   onToggleReference={item => update(previous => ({ senders: toggleReference(previous.senders, item) }))}
+   onRename={(key, name) => update(previous => ({ senders: setNickname(previous.senders, key, name) }))} />}
   {!flow && <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.line }}>
    {TABS.map(([key, label, icon]) => <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected: tab === key }} onPress={() => { setTab(key); setNotice(null); }} style={{ flex: 1, paddingVertical: 10, alignItems: 'center' }}>
     <Ionicons name={icon} size={22} color={tab === key ? colors.accent : colors.muted} />

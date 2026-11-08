@@ -13,6 +13,13 @@
   33 × 33 modules), error correction M instead of Q. The phone report's `signal`
   has the new `name` and `senderCalibration` and the real `testId` (was
   `source-<hex>`). The Android reader takes `AVS4:` (`docs/phone-generator.md`).
+- Results are grouped by sender, with a nickname per sender (pencil) and one
+  reference result per sender (★). The other results of that sender show Δ AV
+  offset and, when both have a latency, Δ video/audio latency; Measure shows the
+  live Δ ("Δ +18.4 ms vs Studio iPhone"). "check" marks a Δ when the camera mode
+  or calibration differs from the reference. Saved results now also keep
+  `testId` and `captureContext`; older saved state loads unchanged
+  (`mobile-app/src/results.mjs`, `mobile-app/README.md`).
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
   release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
   that touch the app or the core (`mobile-app/README.md`).

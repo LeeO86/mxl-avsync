@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { liveView, offsetText, offsetSentence, savedResult, clockCorrection, clockText, HOLD_MS } from './live.mjs';
 
-const status = extra => ({ kind: 'status', stage: 'measuring', timeMs: 5000, signal: { live: true, sourceId: 7 },
+const status = extra => ({ kind: 'status', stage: 'measuring', timeMs: 5000, signal: { live: true, sourceId: 7, testId: 'phone-ab' },
  reading: { offsetMs: 12.5, spreadMs: 0.8, events: 8, videoLatencyMs: 70, audioLatencyMs: 82.5 }, ...extra });
 const reference = { source: 'ntp', clockId: 'c', timebase: 'ios-host', referenceUnixMs: 1.8e12, referenceMonotonicMs: 1000, uncertaintyMs: 2 };
 const mapping = { clockId: 'c', timebase: 'ios-host', monotonicMs: 3000, deviceUnixMs: 1.8e12 + 2000 - 15 };
@@ -48,6 +48,8 @@ test('texts and saved results', () => {
  assert.equal(offsetSentence(0.2), 'Audio and video in sync');
  const saved = savedResult(liveView(status()).reading, { calibration: { offset_ms: 1 }, now: 42 });
  assert.deepEqual([saved.id, saved.offsetMs, saved.calibrationMs, saved.held], ['42', 12.5, 1, false]);
+ const withContext = savedResult(liveView(status()).reading, { captureContext: { cameraMode: 'm' }, now: 43 });
+ assert.deepEqual([withContext.sourceId, withContext.testId, withContext.captureContext], [7, 'phone-ab', { cameraMode: 'm' }]);
 });
 
 test('the clock label shows the check accuracy and its age, not the holdover allowance', () => {

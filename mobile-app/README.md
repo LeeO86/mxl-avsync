@@ -30,12 +30,29 @@ with its sound audible. After a few events the screen shows:
   clock is synchronized (NTP, automatic, renewed every 4 minutes).
 
 When the signal drops, the last reading stays greyed for 8 s. **Save** stores
-it in Results (tap a result to share it as JSON). **Restart** clears the
-history, for example after moving the phone.
+it in Results. **Restart** clears the history, for example after moving the
+phone. When the sender you hear has a reference (see Results), a line under the
+number shows the difference, e.g. "Δ +18.4 ms vs Studio iPhone".
 
 The camera runs at its fastest mode up to 240 fps. After 1.5 s it locks focus
 and white balance and exposes for the full frame interval
 ([why](../docs/qr-flash.md)). A 30 fps camera needs a 1 event/s source.
+
+## Results
+
+Saved results are grouped by sender (the sender ID in the test signal).
+Results without a sender ID are under "Unknown sender". Tap a result to share
+it as JSON. The newest 100 results are kept (references are always kept).
+
+- **Nickname** (pencil): give a sender a name. The default is a short form of
+  its ID, because the generator's title is only drawn in the picture and the
+  analyser does not read it. An empty name goes back to the default.
+- **Reference** (★): one result per sender. All other results of that sender
+  show Δ AV offset, and Δ video/audio latency when both results have a latency
+  (both had a clock reference). Raw values stay visible. Tap ★ again to clear it.
+- **check**: shown next to the Δ when the camera mode or the calibration offset
+  differs from the reference's. Results saved before this version have no
+  camera mode, so only the calibration is compared for them.
 
 ## Calibration
 
@@ -59,7 +76,7 @@ per seq, share diagnostics, and clear results or calibration.
 
 ## Verification
 
-- `npm test`: the view model, clock reference, calibration and playback logic.
+- `npm test`: the view model, clock reference, calibration, playback and saved-results logic.
 - `npm run test:ios-native`: the real iOS bridge, CoreMedia buffers and Vision
   on a simulated 240 fps capture of the phone source (+20 ms AV, 30/50 ms
   latency; spread below 2 ms) and a calibration take.
