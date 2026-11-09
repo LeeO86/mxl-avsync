@@ -105,12 +105,27 @@ moves to the new check gently instead of jumping (core
 - **What stays.** The test ID and source ID, the "Phone clock changed" check
   (it watches the phone's own wall clock against the host clock and does not
   use the check), and the other stop reasons.
-- **Status line.** "NTP UTC" stays, now with the age of the newest check and
-  the total timestamp change since Start: "NTP UTC (check 42 s ago, +1.2 ms)"
-  (no change shown while it is 0).
-- A signal started without a valid check (device UTC) stays on device UTC
-  until the next Start. The calibration pattern uses no clock reference; it is
-  not affected. The container generator uses the host/PTP clock and has no
+- **Status line.** "NTP UTC" stays, now with the age of the newest check and,
+  while the timestamps still slew, the part still to go: "NTP UTC (check 42 s
+  ago, adjusting +0.8 ms)".
+- **Started before the first check.** Pressing Start right after the app comes
+  to the front, before its first check is done, starts the signal on device
+  UTC. The first accepted check then switches it to NTP UTC with the same
+  100 ppm slew, from the device-UTC timestamps to the NTP ones (same code as
+  above, same on iOS and Android). The status line shows "NTP UTC (…,
+  adjusting …)" from that moment. If the device clock is further from the
+  check than the limit, the signal does **not** stop: it keeps running on
+  device UTC and says so, e.g. "device UTC (clock check +35.0 ms off, more than
+  the 20 ms limit)". A later check within the limit can still switch it. Once
+  switched it follows the rules above (refresh, expiry, stop on a big jump).
+- **What an analyser sees.** The QR and the audio packet carry no
+  "device or NTP" mark: phone timestamps are always flagged as estimated, and
+  the server reports `source_reference: phone-utc-scheduled-output` either way.
+  So an analyser only sees the timestamps slew, never a jump or a flag change.
+  The result when the screen closes has `clockApplied: true` and the check in
+  `clockReference` as soon as the signal switched (at the switch, not when the
+  slew ends).
+- The calibration pattern uses no clock reference; it is not affected. The container generator uses the host/PTP clock and has no
   such refresh.
 
 ## Timestamp-relative versus emission-to-capture latency

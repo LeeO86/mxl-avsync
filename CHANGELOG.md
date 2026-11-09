@@ -9,7 +9,11 @@
   jumping, and only for events not queued yet (core
   `PhoneGeneratorPlan::retime`). It still stops when no check gets through for
   too long (no network), or when a new check is further off than the
-  uncertainty limit. The status line shows "NTP UTC (check … s ago, ±… ms)".
+  uncertainty limit. The status line shows "NTP UTC (check … s ago,
+  adjusting ±… ms)". A signal started before the first clock check (device
+  UTC) now switches to NTP UTC with the first check within the limit, slewed
+  the same way; one further off keeps it on device UTC (no stop, said in the
+  status line). Before, it stayed on device UTC for the whole run.
   The app now also checks a minute before the holdover would pass the limit,
   not only after. New native call `updateGeneratorClock(options)`
   (`docs/phone-clock.md`).

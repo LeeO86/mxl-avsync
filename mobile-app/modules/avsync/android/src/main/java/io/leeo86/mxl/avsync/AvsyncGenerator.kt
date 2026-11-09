@@ -75,6 +75,7 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
   private var planUtcMinusHost = 0.0 // the mapping the plan's stamps started from
   private var clockReference = options.clockReference // the newest accepted clock check (updateClock)
   private var usingReference = false
+  private var deviceNote = "" // why a signal on device UTC did not switch to a clock check
   private var senderCalibrationNote = ""
   // Calibration pattern: the microphone take.
   private var recorder: AudioCapture? = null
@@ -254,13 +255,13 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
       if (usingReference && anchor != null && radius != null && limit != null) {
         val age = PhoneClock.nowMs() - anchor
         if (PhoneGenerator.clockReferenceExpired(age, radius, limit)) return stop("Clock reference expired. Close and synchronize again.")
-        val adjusted = plan.clockOffsetMs(frame.sequence)
+        val remaining = plan.clockOffsetMs(Long.MAX_VALUE) - plan.clockOffsetMs(frame.sequence)
         clockNote = " (check ${(age / 1000).toLong()} s ago" +
-          (if (abs(adjusted) >= 0.05) String.format(java.util.Locale.ROOT, ", %+.1f ms", adjusted) else "") + ")"
+          (if (abs(remaining) >= 0.05) String.format(java.util.Locale.ROOT, ", adjusting %+.1f ms", remaining) else "") + ")"
       }
       if (abs(System.currentTimeMillis() / 1000.0 - now - utcMinusHost) > 0.1) return stop("Phone clock changed. Tap Start to create a fresh clock mapping.")
       outputLatency = audio.latencyNs / 1e9
-      status.text = "TEST SIGNAL ACTIVE · 1200 baud · $rate/s · frame skips $lateFrames\nEstimated output timing · ${if (usingReference) "NTP UTC$clockNote" else "device UTC"} · " +
+      status.text = "TEST SIGNAL ACTIVE · 1200 baud · $rate/s · frame skips $lateFrames\nEstimated output timing · ${if (usingReference) "NTP UTC$clockNote" else "device UTC$deviceNote"} · " +
         "audio lead ${Math.round(outputLatency * 1000)} ms$senderCalibrationNote"
     }
   }
@@ -280,6 +281,7 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
       usingReference = true
     }
     planUtcMinusHost = referenceUtcMinusHost
+    deviceNote = ""
     val epochTai = ((referenceUtcMinusHost + options.taiUtc + epochHost) * 1e9).roundToLong()
     val next = PhoneGenerator(sourceID, rate, epochTai, epochHost, options.name.ifEmpty { "Android" })
     plan = next
@@ -316,9 +318,10 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
   }
 
   // A newer clock check from the app (docs/phone-clock.md), like updateClock on iOS. Before the plan starts
-  // (or while stopped) it replaces the reference for the next start. While the signal runs on NTP UTC, the
-  // stamps of the events not scheduled yet slew to it (core retime, 100 ppm); host times and the Test ID
-  // stay. A check further from the current stamps than the limit stops the signal instead.
+  // (or while stopped) it replaces the reference for the next start. While the signal runs, the stamps of the
+  // events not scheduled yet slew to it (core retime, 100 ppm); host times and the Test ID stay. A signal on
+  // device UTC switches to NTP UTC this way. A check further from the current stamps than the limit stops a
+  // signal on NTP UTC; one on device UTC keeps running and says so in the status line.
   fun updateClock(reference: Map<String, String>) {
     if (calibrate || finishing) return
     val bootMinusHost = (SystemClock.elapsedRealtimeNanos() - System.nanoTime()) / 1e9
@@ -329,11 +332,15 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
     val limit = reference["clockLimitMs"]?.toDoubleOrNull() ?: return
     if (PhoneGenerator.clockReferenceExpired(nowBootMs - anchor, radius, limit)) return
     val plan = plan ?: run { clockReference = reference; return }
-    if (!usingReference) return // started on device UTC: stays on it until the next start
     val offset = mapping - planUtcMinusHost
-    clockReference = reference
-    if (plan.retime(Math.round(offset * 1e9), nextAudio, Math.round(limit * 1e6))) return
+    if (plan.retime(Math.round(offset * 1e9), nextAudio, Math.round(limit * 1e6))) {
+      clockReference = reference; usingReference = true; deviceNote = ""; return
+    }
     val change = offset * 1000 - plan.clockOffsetMs(nextAudio)
+    if (!usingReference) {
+      deviceNote = String.format(java.util.Locale.ROOT, " (clock check %+.1f ms off, more than the %.0f ms limit)", change, limit); return
+    }
+    clockReference = reference
     stop(String.format(java.util.Locale.ROOT, "New clock check is %+.1f ms off (more than the %.0f ms limit). Tap Start for a fresh clock mapping.", change, limit))
   }
 

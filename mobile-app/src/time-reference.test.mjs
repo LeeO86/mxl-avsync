@@ -152,3 +152,14 @@ test('clock checks come before the reference expires, so a running test signal n
   else assert.equal(stopped,240500);
  }
 });
+
+test('a signal started before the first check gets that check as soon as it arrives', () => {
+ // Start right after coming to the front: no reference yet, so the signal starts on device UTC ...
+ assert.deepEqual(generatorClockOptions(null,now),{});
+ // ... and the first accepted check is what App.js hands to it (updateGeneratorClock).
+ const first=bindReference(sample,now,10);
+ const options=generatorClockOptions(first,now);
+ assert.equal(options.clockUnixMs,String(epoch));
+ assert.equal(options.clockLimitMs,'20');
+ assert.equal(options.clockId,'boot-a');
+});

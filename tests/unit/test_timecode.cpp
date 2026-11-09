@@ -331,6 +331,22 @@ TEST_CASE("phone generator clock refresh slews stamps of unscheduled events only
     }
 }
 
+TEST_CASE("phone generator started on device UTC switches to the first clock check within the limit") {
+    // The plan's start mapping is device UTC (offset 0). The native side retimes with
+    // NTP minus device; a refusal keeps the signal on device UTC (no stop).
+    constexpr int64_t epoch = 1792963237123456789LL, ms = 1000000;
+    PhoneGeneratorPlan plan("phone-switch",2,epoch,0);
+    CHECK_FALSE(plan.retime(35*ms,10,20*ms));                  // device clock 35 ms off: stays device UTC
+    CHECK(plan.clock_offset_ns(100000) == 0);
+    CHECK(plan.qr(500).tk == epoch + 499*500000000LL);
+    REQUIRE(plan.retime(12*ms,200,20*ms));                     // a later check within the limit: switch
+    CHECK(plan.clock_offset_ns(200) == 0);
+    CHECK(plan.clock_offset_ns(200 + 12*ms/50000) == 12*ms);   // 240 events = 120 s at 100 ppm
+    int64_t last = plan.qr(200).tk;
+    for (uint64_t k = 201; k < 500; ++k) { const auto tk = plan.qr(k).tk; CHECK(std::llabs(tk - last - 500000000LL) <= 50000); last = tk; }
+    CHECK(plan.host_seconds(300) == doctest::Approx(149.5));
+}
+
 TEST_CASE("phone generator keeps running past 5 minutes with refreshed clock checks and stops without them") {
     // A 15 min run at 2 events/s: status every 0.5 s, packets 2.5 s ahead, a check
     // (radius 8 ms, limit 20 ms) whenever the app's rule asks for one

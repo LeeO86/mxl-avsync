@@ -78,7 +78,9 @@ jump over 100 ms, missed scheduling deadlines and the 23-hour session limit stop
 the source. Restart creates a fresh clock mapping. With NTP UTC, new clock checks
 reach the running signal and its timestamps slew to them (at most 100 ppm); it
 only stops when no check got through for too long or a check is further off than
-the limit ([phone-clock.md](phone-clock.md#clock-refresh-while-the-test-signal-runs)). Bluetooth and other external
+the limit. A signal started before the first check (device UTC) switches to NTP
+UTC with the first check within the limit, slewed the same way; a check further
+off leaves it on device UTC, without stopping ([phone-clock.md](phone-clock.md#clock-refresh-while-the-test-signal-runs)). Bluetooth and other external
 output paths have unverified delays; use the built-in speaker.
 
 ## Calibration mode
