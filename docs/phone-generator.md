@@ -1,6 +1,6 @@
-# iPhone test-signal source
+# Phone test-signal source (iPhone and Android)
 
-Use the current native iOS/TestFlight build, open **Generate**, choose **1 or 2 chirps/s**,
+Use the current native iOS/TestFlight build or the Android APK, open **Signal**, choose **1 or 2 chirps/s**,
 set **Title**, **Subtitle** and optionally **Choose image**, then **Start fullscreen signal**. Hold the phone sideways. The raster rotates
 inside the fullscreen screen; Measure/Results keep their portrait layout.
 Film the entire test picture, including all four corner fiducials, with an
@@ -40,12 +40,35 @@ ends. Normal server and FILE packets retain their original bytes/semantics.
 
 ## Native scheduling and lifecycle
 
-A native CADisplayLink supplies the next presentation target. The first source
+iPhone: a native CADisplayLink supplies the next presentation target. The first source
 event is planned 1.5 s ahead on that cadence. Subsequent source frames/events
 follow a 60-Hz logical host-clock timeline. AVAudioPlayerNode buffers are queued
 2.5 s ahead on the same host clock, subtracting the node's reported downstream
 output presentation latency. This is an OS timing estimate, not a microphone or
 photodiode measurement. All timing and synthesis run outside JavaScript.
+
+Android does the same with its own clocks (`AvsyncGenerator.kt`):
+
+- **Picture.** A fullscreen screen over the app. Choreographer gives each
+  frame's expected presentation time (Android 13 and newer; before that the
+  frame start plus two display periods, an estimate). The screen asks for a
+  60 Hz display mode. Each frame shows what the 60 Hz plan says for that time.
+- **Sound.** One AudioTrack stream (48 kHz, mono) that a thread keeps writing
+  in 5 ms blocks, silence between the packets. `AudioTrack.getTimestamp` says
+  which sample leaves the output at which time, on the same clock as
+  Choreographer (`System.nanoTime`). A packet planned for time T starts at
+  that sample + (T − timestamp time) × 48 000, so it is placed to the sample,
+  with the reported output latency already inside. The position is worked out
+  again with the newest timestamp until the packet starts, so drift between
+  the audio clock and the system clock does not add up. Why AudioTrack and not
+  AAudio/Oboe: the timestamp gives the same exact mapping from API 24 on,
+  without native audio code or a new library; low latency does not matter
+  because every packet is planned 2.5 s ahead. A dropout (underrun) stops the
+  signal, because everything already written would then play late.
+- **Same rules otherwise.** The same 1.5 s start, 2.5 s queue, status line,
+  "Stopped" screen, brightness and screen wake, and the same stop reasons
+  (app in the background, audio focus lost, output changed, clock jump, missed
+  deadline, 23 hours).
 
 The screen reports skipped logical display frames and the reported audio lead.
 It prevents automatic screen lock and raises brightness while active, restoring
@@ -63,7 +86,10 @@ with the calibration pattern instead of the test picture
 layers, audio engine and player node; the beep (1.5 kHz, 4 ms) is scheduled
 100 ms after each swap on the host clock, minus the reported output latency,
 like the chirps. The audio session is play-and-record on the built-in speaker
-so the microphone can listen. The result comes back when the screen closes:
+so the microphone can listen. Android: the same frame clock and AudioTrack as
+the test signal (the beep is placed on the output's timestamps), the
+microphone records with AudioRecord meanwhile, and the outline is drawn in
+real millimetres from the display's density. The result comes back when the screen closes:
 `calibration` (`offsetMs`, `uncertaintyMs`, `pairs`, `directionMs`,
 `audioRoute`, `outputLatencyMs`) or `calibrationError`.
 
@@ -72,8 +98,8 @@ so the microphone can listen. The result comes back when the screen closes:
 The source ID (the QR test id; the audio packet carries its CRC-32) stays the
 same when you stop and start the generator again. It is `phone-` plus 12 hex
 digits of a hash of a random install ID, the app version with its build
-number (for example `2.0.8 (12)`) and the timing settings (now only the event
-rate). So you get a new ID after a reinstall, a new app version or build (also a
+number (for example `2.0.8 (12)`; Android: version name and version code) and
+the timing settings (now only the event rate). So you get a new ID after a reinstall, a new app version or build (also a
 new TestFlight build) or another event rate. Name, subtitle and image do not change
 it. The install ID is random, not a hardware ID, and only lives in the app's
 settings. The container generator uses the same rule with its NMOS seed in
@@ -124,6 +150,12 @@ Expo Go does not contain this native module. Rebuild/install the iOS development
 client after updating this branch (`npm install`, `npx pod-install`, then
 `npx expo run:ios` or the existing Xcode workspace/device workflow).
 
+Android, from `mobile-app/android` after `npx expo prebuild -p android`:
+`./gradlew :avsync:testDebugUnitTest` (audio placement and screen layout) and,
+with a device or emulator, `./gradlew :avsync:connectedDebugAndroidTest`
+(`PhoneGeneratorTest`: the picture with Android text and the AVS4 QR read by
+ML Kit, the audio packet, the stable ID test vector, the calibration pattern).
+
 ```sh
 cmake --build build --target avsync-core-tests avsync-picture-tests
 ctest --test-dir build --output-on-failure
@@ -167,12 +199,15 @@ QR, source labels/logo and the early/zero/late sync scale. The square is red
 while early, white at the event and green while late; its zero crossing shares
 the planned chirp/flash onset. iOS animates it with native display-timestamped
 layers over a static plate, with the same coordinates/colors as the renderer.
-The bundled font is DejaVu Sans on both targets (CoreText on iOS, Blend2D on
-the server); source-event labels describe scheduled phone output.
+The bundled font is DejaVu Sans on every target (CoreText on iOS, Android's
+own text drawing on Android, Blend2D on the server); source-event labels
+describe scheduled phone output. Android draws the same layers in one view.
 
 Name/subtitle and the selected image persist locally. Photos selection uses
-the system picker, which shares only the image you select. The app stores a
-normalized copy up to 512 px in private Application Support; Remove image
+the system picker (Android: the photo picker, or the document picker before
+Android 13), which shares only the image you select. The app stores a
+normalized copy up to 512 px in private Application Support (Android: the
+app's private files); Remove image
 removes that copy, preserving the original in Photos. Images are not uploaded
 with EAS builds or sent to a server. Labels/image are display identity and
 do not change protected timecode/source IDs or calibration.

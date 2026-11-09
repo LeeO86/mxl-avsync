@@ -71,7 +71,7 @@ clap once. Then pick the first frame where the hands touch; the sound is marked
 orange. Save stores sound time minus that frame's time; it applies to AV offset
 only, for this OS version and camera mode, for 90 days.
 
-Settings → With calibrator (iPhone): a wizard for the calibrator board. Step 2
+Settings → With calibrator: a wizard for the calibrator board. Step 2
 measures camera vs microphone with the board's flashes and clicks and saves it
 like the clap calibration. Step 3 measures this phone's screen vs speaker with
 the generator's calibration pattern and saves it as the sender calibration,
@@ -83,7 +83,9 @@ next to it. Debug → Clear calibration clears both (after a confirm). Details:
 ## Signal
 
 Signal → Start test signal shows the fullscreen AVS4 source with its sound
-(2 events/s; 1/s under Options, with title, subtitle and image).
+(2 events/s; 1/s under Options, with title, subtitle and image). iPhone and
+Android have the same signal and options
+([phone generator](../docs/phone-generator.md)).
 
 ## Settings and Debug
 
@@ -107,7 +109,11 @@ per seq, share diagnostics, and clear results or calibration.
 `modules/avsync/android` builds the core into `libavsync-jni` (CMake, C++20,
 arm64-v8a and x86_64 only: the core uses `__int128`) and implements the
 [native contract](../docs/mobile-native.md) with Camera2, AudioRecord and ML Kit
-(bundled QR model). Capture uses the normal session (ImageReader) up to the
+(bundled QR model). The generator (`AvsyncGenerator.kt`) draws the shared
+picture with Choreographer frame times and plays the sound through one
+AudioTrack placed by its timestamps
+([phone generator](../docs/phone-generator.md#native-scheduling-and-lifecycle)).
+Capture uses the normal session (ImageReader) up to the
 best rate it lists; when 120/240 fps exist only in the constrained high-speed
 mode, `HighSpeedCapture.kt` reads the frames on the GPU instead, with a
 fallback to the normal session ([capture paths](../docs/mobile-native.md#android-capture-paths)).
@@ -128,9 +134,11 @@ cd android
 ```
 
 Unit tests cover the camera mode choice (normal and high-speed), the
-high-speed texture crop, the fixed-exposure ISO, SNTP and the
-calibration WAV/waveform. `src/androidTest` checks the JNI bridge (live
-snapshot/poll and a clap calibration take).
+high-speed texture crop, the fixed-exposure ISO, SNTP, the
+calibration WAV/waveform, the generator's audio placement and its screen
+layout. `src/androidTest` checks the JNI bridge (live snapshot/poll and a
+clap calibration take) and the generator (picture with the AVS4 QR, audio,
+stable ID, calibration pattern).
 
 Not yet verified: the app on the emulator with a camera preview, the
 instrumented JNI test, and any real device (frame rate, exposure lock, the

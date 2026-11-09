@@ -2,6 +2,16 @@
 
 ## Mobile (not released yet)
 
+- Android test signal: Signal → Start test signal now works on Android, with
+  the same picture, options (1 or 2 events/s, title, subtitle, image), AVS4 QR
+  (test ID, title, sender calibration), stable sender ID and "Stopped" screen
+  as on the iPhone. Frames are timed with Choreographer, the sound with one
+  AudioTrack placed to the sample by its output timestamps
+  (`docs/phone-generator.md`). Not tested on a phone yet.
+- Calibrator wizard on Android: Settings → With calibrator now shows on Android
+  too. The camera step uses the new camera view method `beginCalibrator`
+  (lowest ISO where the camera allows it), the screen step the generator's
+  calibration mode with the microphone listening. Not tested with a board yet.
 - Analysers subtract the sender calibration: when the AVS4 QR carries one, the
   AV offset shown and saved is the measured value minus the sender's own
   screen-vs-speaker offset. Measure and Results show the raw value and the

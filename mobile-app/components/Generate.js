@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Pressable, ScrollView, Text, TextInput } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, Text, TextInput } from 'react-native';
 import { Button, Card, Choice, colors, small, text } from './ui';
 
 const input = { ...text, backgroundColor: colors.bg, padding: 12, borderRadius: 8, marginTop: 6 };
@@ -23,7 +23,7 @@ export default function Generate({ session, onChange, image, busy, picking, onPi
    <Choice options={[[2, '2 / s'], [1, '1 / s']]} value={session.generatorRate === 1 ? 1 : 2} onChange={value => onChange('generatorRate', value)} disabled={busy} />
    <Text style={{ ...small, marginTop: 6 }}>Use 1 / s when the measuring camera runs at 30 fps.</Text>
    <Text style={{ ...small, marginTop: 14 }}>Title</Text>
-   <TextInput accessibilityLabel="Title" editable={!busy} maxLength={64} placeholder="iPhone" placeholderTextColor={colors.muted} value={session.generatorName || ''} onChangeText={value => onChange('generatorName', value)} style={input} />
+   <TextInput accessibilityLabel="Title" editable={!busy} maxLength={64} placeholder={Platform.OS === 'android' ? 'Android' : 'iPhone'} placeholderTextColor={colors.muted} value={session.generatorName || ''} onChangeText={value => onChange('generatorName', value)} style={input} />
    <Text style={{ ...small, marginTop: 12 }}>Subtitle</Text>
    <TextInput accessibilityLabel="Subtitle" editable={!busy} maxLength={128} placeholder="Camera or signal path" placeholderTextColor={colors.muted} value={session.generatorSubtitle || ''} onChangeText={value => onChange('generatorSubtitle', value)} style={input} />
    {image && <Image accessibilityLabel="Image preview" source={{ uri: image.uri }} resizeMode="contain" style={{ width: 72, height: 72, marginTop: 12, borderRadius: 8, backgroundColor: colors.bg }} />}

@@ -1288,8 +1288,9 @@ sender calibration) is one more entry. Name, subtitle and image are not inputs.
   when used, so a live rate change gives the new id at once, and config export
   keeps the empty value instead of freezing an old id. `GET /api/v1/generator`
   shows `test_id`. The analyzer's own fallback label stays the NMOS seed.
-- Android has no generator yet (`supportsGenerator` is false); it should call the
-  same core function when it gets one.
+- Android (2026-11-08): prefix `phone-`, a random install ID in the app's
+  preferences (new after a reinstall), version `<versionName> (<versionCode>)`,
+  settings `rate=<1|2>`, through the same core function.
 The core test holds the shared test vector.
 
 Generator name in the QR: not done. The live QR of the phone and the container
@@ -1369,9 +1370,8 @@ Maintainer design (2026-11-08): Settings → With calibrator, a three-step wizar
 - Screen calibration is a mode of the generators, not a React view: iPhone
   `generateStyled(..., {mode: 'calibration'})` (same display link, layers,
   audio engine and player node), container `AVSYNC_PATTERN=calibration`
-  (live key, Signal API `pattern`, web form "Picture"). Android has no
-  generator (`supportsGenerator` false): skipped; its analyser could call
-  `begin_calibrator` through JNI later (not wired).
+  (live key, Signal API `pattern`, web form "Picture"). Android: added
+  later the same way (see "Android generator and calibrator take").
 - Results: camera → analyser calibration record (method `calibrator-pulse`,
   same validity as the clap); screen → `senderCalibration` in the session
   state (method `transponder`, 90 days, same OS version, sent only on the same
@@ -1400,9 +1400,38 @@ Deviations and choices:
   (`raw_av_offset_ms` / `rawOffsetMs`) and the calibration next to it. The
   phone's analyser calibration stays in the app (`liveView`), so nothing is
   counted twice.
-- The wizard and the calibrator take are iOS only (`beginCalibrator` is not in
-  the Android camera view yet); the Settings entry is hidden on Android.
+- The wizard and the calibrator take were iOS only at first; Android got them
+  with its generator (next section).
 - Debug → Clear calibration clears the sender calibration too (decided; with
   a confirm that says both are cleared).
 - The iPhone pattern size assumes about 6 pt per mm (current iPhones); the
   outline is a placing guide, the pattern line itself is exact.
+
+## Android generator and calibrator take (2026-11-08)
+
+Maintainer rule: all generators get the same features. Android gets the phone
+generator (test signal and calibration pattern) and the calibrator take, behind
+the same JS API as iOS (`supportsGenerator`, `generate`, `generateStyled`,
+`pickGeneratorImage`, `generatorImageInfo`, camera view `beginCalibrator`), so
+the app has no platform branch for them (only the Title placeholder).
+
+- Shared core and renderer: `PhoneGeneratorPlan`, `generator_test_id`, the AVS4
+  QR, `render_picture`/`render_sync_foreground` and the calibration functions
+  compile into the Android library as on iOS (`generator_jni.cpp`).
+- Text: Android draws the renderer's text itself (DejaVu Sans from the iOS
+  resource folder, `GeneratorText.kt` through JNI), as iOS uses CoreText.
+  Deviation from the server: not Blend2D; glyph shapes can differ by a pixel.
+- Frame time: Choreographer's expected presentation time on Android 13+;
+  before that the frame start plus two display periods (an estimate). The
+  screen asks for a 60 Hz display mode; on a display that stays at 90/120 Hz
+  each frame still shows the 60 Hz plan's frame for its time.
+- Sound: one streaming AudioTrack, packets placed by `AudioTrack.getTimestamp`
+  (frame ↔ System.nanoTime) instead of AAudio/Oboe: exact sample placement from
+  API 24, no native audio code or new dependency. The timestamp includes the
+  output latency, so nothing is subtracted. An underrun stops the signal.
+- Calibrator camera take: lowest ISO when the camera allows manual exposure,
+  else auto exposure locked at the lowest exposure compensation; high-speed
+  mode only AE lock.
+- The calibration pattern is drawn in real millimetres (display xdpi).
+- Not verified on a device here (no emulator with KVM): timing, the pattern,
+  the microphone during playback, the photo picker. Device test list in the PR.

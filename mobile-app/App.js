@@ -115,7 +115,7 @@ export default function App() {
 
  // With calibrator: step 1 is a camera take (this phone's camera vs microphone), step 2 the
  // generator's calibration pattern (this phone's screen vs speaker, sent in the AVS4 QR).
- const supportsCalibrator = Platform.OS === 'ios' && Boolean(NativeCamera) && Boolean(native?.supportsGenerator?.());
+ const supportsCalibrator = Boolean(NativeCamera) && Boolean(native?.supportsGenerator?.());
  const startCalibrator = () => { setSheet(null); setTab('measure'); setNotice(null); setFlow(null); setCal({ step: 'plug' }); };
  const closeCalibrator = message => { setCal(null); restart(); setNotice(message ?? null); };
  const calibratorStart = async base => {

@@ -1,6 +1,6 @@
 # AV Sync calibrator: signal contract
 
-**v1 proposal. The app side is built (iOS app and container generator, see [App side](#app-side-built)), but only tested on synthetic signals. The board is not built or tested yet.**
+**v1 proposal. The app side is built (iOS and Android app and container generator, see [App side](#app-side-built)), but only tested on synthetic signals. The board is not built or tested yet.**
 
 The calibrator is a small board (66 × 22 mm) that the phone powers over a USB-C to USB-C cable.
 The cable is not included: the user brings their own.
@@ -173,7 +173,7 @@ flips, no timed delay). Then it ignores the sensors for **200 ms** (lock-out).
 ## App side (built)
 
 Code: `core/include/avsync/calibrator.hpp` (all analysis, shared by every app),
-`PhoneAnalyzer::begin_calibrator` (camera take), the iPhone generator's
+`PhoneAnalyzer::begin_calibrator` (camera take), the iPhone and Android generators'
 calibration mode and the container's `AVSYNC_PATTERN=calibration`. User guide:
 [calibration.md](calibration.md#with-the-calibrator).
 
@@ -197,7 +197,9 @@ flash lands on different rows, and click − flash grows with the row by exactly
 the readout time. Flashes and clicks are paired by the most common difference
 (±12 ms around it). Offset = median of the pairs after dropping outliers
 (beyond 3 σ, at least 0.5 ms); uncertainty = standard error of the median.
-For the camera take the iPhone locks the exposure at the lowest ISO.
+For the camera take the iPhone locks the exposure at the lowest ISO; Android
+too when the camera allows manual exposure, else it locks auto exposure at the
+lowest exposure compensation (and in the high-speed mode, which allows neither).
 
 **Display mode.** Every click is paired with the next beep less than 450 ms
 later. Offset = beep − click − D, the median per swap direction (every other
@@ -207,8 +209,8 @@ times, so the same analysis works for a TV fed by the container generator.
 **Pattern.** Every generator uses the same core functions: period k lasts
 500 ms on its frame grid (for 59.94 fps the swap is the first frame at or
 after k × 500 ms), left half white in even periods, the beep D after each
-swap. The iPhone draws the halves in portrait near the bottom microphone,
-about 62 mm tall, with a red outline of the board (sensor end down, notch
+swap. The phones draw the halves in portrait near the bottom microphone,
+about 62 mm tall (Android in real millimetres from the display density), with a red outline of the board (sensor end down, notch
 tick). The container fills the whole picture and draws a grey tick at both
 ends of the pattern line.
 

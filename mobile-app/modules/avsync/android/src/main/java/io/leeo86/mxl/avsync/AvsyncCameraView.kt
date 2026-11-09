@@ -87,6 +87,9 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var lastQrScan = 0L
   private var lastHousekeeping = 0L
   private var calibrationReported = false
+  // Calibrator camera take: starts at the next lock (endFocus), which uses the lowest ISO (lowGain).
+  private var pendingCalibrator: String? = null
+  private var lowGain = false
   private var lastFrameMs = -1.0
   private var maxFrameGapMs = 0.0
   private var failedFrames = 0
@@ -125,9 +128,20 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     }
   }
   fun beginCalibration() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.beginCalibration() } }
-  // Restart: drop the history and run the auto step again, metered at the centre.
-  fun resumeAnalysis() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.reset(); refocus(null, null) } }
-  fun focusAt(x: Double, y: Double) { capture.post { refocus(x, y) } }
+  // Calibrator board take ("camera" or "display", docs/calibrator.md). For the camera the LED floods
+  // the lens: run the auto step again and lock at the lowest ISO; the take starts at the lock.
+  fun beginCalibrator(mode: String) {
+    outline.clear()
+    capture.post {
+      generation++; focusing = false; calibrationReported = false; analyzer.reset()
+      if (mode != "camera") { pendingCalibrator = null; lowGain = false; analyzer.beginCalibrator(mode); return@post }
+      pendingCalibrator = mode; lowGain = true
+      refocus(null, null)
+    }
+  }
+  // Restart: drop the history and run the auto step again, metered at the centre (also cancels a calibrator take).
+  fun resumeAnalysis() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; pendingCalibrator = null; lowGain = false; analyzer.reset(); refocus(null, null) } }
+  fun focusAt(x: Double, y: Double) { capture.post { if (pendingCalibrator == null && !analyzer.calibratorActive()) refocus(x, y) } }
 
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
@@ -314,7 +328,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     val exposureRange = c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
     val isoRange = c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
     if (CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR in capabilities && exposure != null && iso != null && exposureRange != null && isoRange != null) {
-      val (fixed, gain) = CaptureProfile.fixedExposure(exposure, iso, frameNs, exposureRange.lower..exposureRange.upper, isoRange.lower..isoRange.upper)
+      val (fixed, auto) = CaptureProfile.fixedExposure(exposure, iso, frameNs, exposureRange.lower..exposureRange.upper, isoRange.lower..isoRange.upper)
+      val gain = if (lowGain) isoRange.lower else auto
       request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
       request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, fixed)
       request.set(CaptureRequest.SENSOR_SENSITIVITY, gain)
@@ -366,6 +381,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     if ((c.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0) > 0) request.set(CaptureRequest.CONTROL_AE_REGIONS, region)
     request.set(CaptureRequest.CONTROL_AE_LOCK, false)
     request.set(CaptureRequest.CONTROL_AWB_LOCK, false)
+    // Cameras without manual exposure: the calibrator take meters as dark as allowed instead of the lowest ISO.
+    request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, if (lowGain) c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)?.lower ?: 0 else 0)
     runCatching {
       if (s is CameraConstrainedHighSpeedCaptureSession) {
         // AF stays continuous-video in this mode: one cancel trigger releases the locked focus.
@@ -386,6 +403,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private fun endFocus() {
     if (!focusing) return
     focusing = false; generation++; calibrationReported = false; analyzer.reset()
+    pendingCalibrator?.let { analyzer.beginCalibrator(it) }
+    pendingCalibrator = null; lowGain = false
   }
 
   private val results = object : CameraCaptureSession.CaptureCallback() {
@@ -469,6 +488,13 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     analyzer.setTaiUtcSeconds(taiUtcSeconds)
     val corners = analyzer.picture()
     main.post { outline.show(corners) }
+    // A calibrator take reports about once a second (as iOS: otherwise the live poll goes on).
+    analyzer.pollCalibrator()?.let { text ->
+      val report = toMap(JSONObject(text))
+      if (report["kind"] != "calibrator-progress") analyzer.reset() // done: live analysis resumes
+      emit(report)
+      return
+    }
     if (analyzer.calibrating()) {
       if (calibrationReported) return
       analyzer.takeCalibration()?.let { take ->
