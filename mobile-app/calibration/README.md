@@ -1,5 +1,7 @@
 # Calibration rig
 
+New (in development): a small USB-C powered calibrator board with camera and display modes, see [`hardware/calibrator/`](../../hardware/calibrator/README.md) and [`docs/calibrator.md`](../../docs/calibrator.md).
+
 A phone's camera and microphone are not assumed to be in sync. The rig is the reference: one microcontroller pin drives an LED and a piezo at the same instant (well under 0.1 ms apart), pulsing at the event rate (default 2 Hz). The app measures that pulse, stores the capture offset per device model and OS version, and subtracts it from later measurements.
 
 A measurement with no record, a record older than 90 days, or a record from another OS version is shown uncalibrated, in orange, with no grade colour.

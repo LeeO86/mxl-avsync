@@ -193,3 +193,26 @@ jobs:
             core/src/two_way.cpp core/src/timecode.cpp core/src/chirp.cpp core/src/detect.cpp core/src/g711.cpp \
             -framework Foundation -o /tmp/avsync-calibration-math
           /tmp/avsync-calibration-math
+
+  calibrator:
+    # Calibrator board: firmware build, host tests, KiCad ERC/DRC (hardware/calibrator).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf make
+      - name: firmware (CH32X035, RISC-V)
+        working-directory: hardware/calibrator/firmware
+        run: |
+          make test
+          make CROSS=riscv64-unknown-elf- EXTRA_CFLAGS="-isystem /usr/lib/picolibc/riscv64-unknown-elf/include"
+      - name: ERC and DRC (KiCad 9.0.9)
+        working-directory: hardware/calibrator
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" -w /work kicad/kicad:9.0.9 \
+            sh -c 'kicad-cli sch erc --severity-error --exit-code-violations -o /tmp/erc.rpt calibrator.kicad_sch &&
+                   kicad-cli sch export netlist --format kicadsexpr -o /tmp/cal.net calibrator.kicad_sch &&
+                   python3 scripts/check_netlist.py /tmp/cal.net &&
+                   kicad-cli pcb drc --severity-error --exit-code-violations -o /tmp/drc.rpt calibrator.kicad_pcb'

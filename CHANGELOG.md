@@ -1,5 +1,16 @@
 # Changelog
 
+## Hardware (in development)
+
+- Calibrator board v0.3 under `hardware/calibrator/` (signal contract in
+  `docs/calibrator.md`): KiCad 9 project, JLCPCB files, CH32X035 firmware with host
+  tests. USB-C powered by the phone (no battery, no cables supplied); the firmware never
+  enables USB, so a phone only supplies power, and it can be updated over USB-C with the
+  BOOT button and open tools (wchisp, chprog). Comparator with hysteresis for the sensor
+  pair, 1 nF sensor filters. AVsync logo on both sides (gold ENIG copper, white silk,
+  black mask), QR code to the project site. Board files CERN-OHL-P-2.0, firmware MIT.
+  A first batch of 10 is ordered; not tested yet.
+
 ## Mobile (not released yet)
 
 - Test signal (iPhone and Android) no longer stops by itself about 5 minutes

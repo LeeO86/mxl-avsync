@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "calibrator")(type "KiCad")(uri "${KIPRJMOD}/calibrator.pretty")(options "")(descr "AVsync calibrator custom footprints"))
+)

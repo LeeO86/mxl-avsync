@@ -9,7 +9,7 @@ The rig is an LED and a piezo on one microcontroller pin. Parts and firmware are
 ## With the calibrator
 
 The calibrator is a small board with an LED, a buzzer and two light sensors
-([signal contract](calibrator.md)). The phone powers it over a USB-C cable.
+([signal contract](calibrator.md), [hardware](../hardware/calibrator/README.md)). The phone powers it over a USB-C cable.
 In the app: **Settings → With calibrator** (iPhone and Android; the clap
 calibration stays as it is). Three steps:
 
