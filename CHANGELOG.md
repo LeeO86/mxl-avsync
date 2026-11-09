@@ -2,18 +2,14 @@
 
 ## Hardware (in development)
 
-- Calibrator board v1 proposal under `hardware/calibrator/`: KiCad 9 project, JLCPCB
-  files, PY32F002A firmware with host tests, and the signal contract in
-  `docs/calibrator.md`. Not built or tested yet; the app side is not built.
-- Calibrator v0.2 look: AVsync logo on both sides (gold ENIG copper + white silk on a
-  black mask), QR code to the project site on the bottom, split line also on the top,
-  redrawn schematic. Board files are CERN-OHL-P-2.0; firmware stays MIT.
-- Calibrator v0.3: CH32X035G8R6 instead of PY32F002A, 16-pin USB-C and an update
-  button, so the firmware can be updated over USB-C with open tools (wchisp, chprog); the
-  firmware never enables USB, so phones only supply power. Comparator 3 with hysteresis
-  for the sensor pair. No cables are supplied.
-- Calibrator sensor filter 10 nF → 1 nF (C4/C5): the comparator flips ~0.13 ms earlier
-  (filter delay ~0.15 ms → ~15 µs). Board copper unchanged.
+- Calibrator board v0.3 under `hardware/calibrator/` (signal contract in
+  `docs/calibrator.md`): KiCad 9 project, JLCPCB files, CH32X035 firmware with host
+  tests. USB-C powered by the phone (no battery, no cables supplied); the firmware never
+  enables USB, so a phone only supplies power, and it can be updated over USB-C with the
+  BOOT button and open tools (wchisp, chprog). Comparator with hysteresis for the sensor
+  pair, 1 nF sensor filters. AVsync logo on both sides (gold ENIG copper, white silk,
+  black mask), QR code to the project site. Board files CERN-OHL-P-2.0, firmware MIT.
+  A first batch of 10 is ordered; not tested yet.
 
 ## Mobile (not released yet)
 
