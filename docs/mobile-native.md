@@ -17,12 +17,15 @@ the core, so both platforms give the same numbers.
 | `synchronizeClock(server)` | Promise of `{source:'ntp', server, referenceUnixMs, referenceMonotonicMs, uncertaintyMs, roundTripMs, offsetMs, clockId, timebase}` (SNTP, 8 samples, smallest round trip) |
 | `setScreenAwake(on)` | keeps the display on |
 | `generate(rate, taiUtcSeconds, options)` | Promise; shows the fullscreen AVS3 source until closed, resolves `{skippedDisplayFrames}` |
+| `generateStyled(rate, taiUtcSeconds, options)` | the same with string options; `mode: 'calibration'` shows the calibration pattern and resolves with `calibration` or `calibrationError`; `senderCalibrationMethod/OffsetMs/UncertaintyMs/Day/Route` put the sender calibration in the QR (iOS; [phone-generator.md](phone-generator.md#calibration-mode)) |
 
 ## Camera view `Avsync`
 
 Props: `active` (bool), `captureFps` (0 = automatic best rate), `taiUtcOffset`
 (seconds, default 37). Methods: `beginCalibration()`, `resumeAnalysis()`,
-`focusAt(x, y)` (tap to focus; x and y are 0–1 across the view, see below).
+`focusAt(x, y)` (tap to focus; x and y are 0–1 across the view, see below),
+`beginCalibrator(mode)` (iOS only so far; `camera` or `display`, see
+[calibrator.md](calibrator.md#app-side-built)).
 Event `onReport` with one of:
 
 - **status** — `PhoneAnalyzer::poll()` parsed, plus `captureContext`
@@ -30,11 +33,19 @@ Event `onReport` with one of:
   `inputGain, inputGainSettable`; Android adds `capturePath` `normal` or
   `high_speed`, and `captureStats.gpuReadMaxMs` on the high-speed path), `configuredFps`
   and `clockMapping {monotonicMs, deviceUnixMs, clockId, timebase}` for the
-  report's `timeMs`.
+  report's `timeMs`. `reading.offsetMs` has the sender calibration from the
+  AVS4 QR subtracted; `reading.rawOffsetMs` is as measured and
+  `reading.senderCalibrationMs` is present when the QR carries one. The
+  phone's own analyser calibration is not in the report (the app subtracts it).
 - **calibration** — `{frames:[{timeMs, uri}], spikeTimeMs, fps, uri (WAV),
   waveform (256 peaks), waveformStartMs, waveformBinDurationMs,
   waveformDurationMs, audioStartMs, captureContext}` from
   `PhoneAnalyzer::take_calibration()`; frames as JPEG files.
+- **calibrator-progress** — `{mode, pairs, wanted, flashes, clicks, elapsedMs}`
+  about once a second during a calibrator take.
+- **calibrator** — `{mode, method, offsetMs, uncertaintyMs, spreadMs, pairs,
+  rejected, directionMs, readoutMs, fps, captureContext}` once at its end, from
+  `PhoneAnalyzer::poll_calibrator()`.
 - **error** — `{message}`.
 
 ## Capture rules

@@ -1352,3 +1352,57 @@ only calibration is compared for them. The 100-result limit stays, but a
 reference result is never dropped by it. `sourceId` 0 (a QR without a timecode
 ID) counts as unknown sender.
 
+
+## Calibrator wizard (2026-11-08)
+
+Maintainer design (2026-11-08): Settings → With calibrator, a three-step wizard
+(plug in, camera, screen) for the calibrator board (contract
+`docs/calibrator.md`, hardware on PR #69). The clap calibration is unchanged.
+
+- Analysis in core C++ (`calibrator.hpp`): sound onsets (click/beep), flash
+  onsets from row bands, camera pairing, display pairing, robust median and
+  uncertainty; the calibration pattern (frame based) and the beep. Unit tests
+  on synthetic signals (noise, missing pulses, stray sound, rolling shutter
+  with known, estimated and fitted readout, long exposure, slow screen,
+  sensor mismatch, external TV, failures). `PhoneAnalyzer::begin_calibrator`
+  runs the camera take (and an audio-only take for an external screen).
+- Screen calibration is a mode of the generators, not a React view: iPhone
+  `generateStyled(..., {mode: 'calibration'})` (same display link, layers,
+  audio engine and player node), container `AVSYNC_PATTERN=calibration`
+  (live key, Signal API `pattern`, web form "Picture"). Android has no
+  generator (`supportsGenerator` false): skipped; its analyser could call
+  `begin_calibrator` through JNI later (not wired).
+- Results: camera → analyser calibration record (method `calibrator-pulse`,
+  same validity as the clap); screen → `senderCalibration` in the session
+  state (method `transponder`, 90 days, same OS version, sent only on the same
+  audio output) → AVS4 QR of the phone generator.
+
+Deviations and choices:
+
+- AVS4 method: `transponder` for the sender calibration (the board answers
+  each screen swap with a click). `pulse-train` stays unused: the flash train
+  of camera mode calibrates the analyser, not a sender.
+- Contract additions, no firmware change (listed in `docs/calibrator.md`):
+  the generator's sound is a 4 ms 1.5 kHz beep; camera mode uses every paired
+  pulse incl. the start pulses; display mode does not need the swap times
+  (beep 0–450 ms after the click).
+- iOS rolling shutter: no readout time from the camera, full-frame exposure;
+  the readout is fitted over the pulses (the board's clock drifts against the
+  camera). The camera take locks exposure at the lowest ISO.
+- The screen calibration needs the microphone, so the generator runs the
+  audio session in play-and-record (built-in speaker) instead of playback.
+  Same output node and latency compensation; to verify on a device (open
+  point in `docs/calibrator.md`).
+- Constants still 0: buzzer delay, display path difference. Camera mode
+  subtracts 1.5 cm sound travel.
+- Decided (Adrian, 2026-11-08): the analysers subtract the sender calibration
+  once in core (`Pairer::set_sender_calibration`), keep the raw value
+  (`raw_av_offset_ms` / `rawOffsetMs`) and the calibration next to it. The
+  phone's analyser calibration stays in the app (`liveView`), so nothing is
+  counted twice.
+- The wizard and the calibrator take are iOS only (`beginCalibrator` is not in
+  the Android camera view yet); the Settings entry is hidden on Android.
+- Debug → Clear calibration clears the sender calibration too (decided; with
+  a confirm that says both are cleared).
+- The iPhone pattern size assumes about 6 pt per mm (current iPhones); the
+  outline is a placing guide, the pattern line itself is exact.

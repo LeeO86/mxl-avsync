@@ -3,7 +3,7 @@ project(avsync-android CXX)
 
 # The shared phone analyzer, compiled from the repository's core like the iOS Core_*.cpp wrappers.
 set(REPO ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
-set(CORE_SOURCES chirp detect g711 grade locate marker optical_code phone phone_analyzer plan qr sync_scale timecode two_way)
+set(CORE_SOURCES chirp detect g711 grade locate marker optical_code phone phone_analyzer plan qr sync_scale timecode two_way calibrator)
 list(TRANSFORM CORE_SOURCES PREPEND ${REPO}/core/src/)
 list(TRANSFORM CORE_SOURCES APPEND .cpp)
 

@@ -32,6 +32,7 @@ NSString *jpeg(const avsync::PhoneAnalyzer::CalibrationFrame& f, NSString *path)
 - (instancetype)init { if((self=[super init])){core=std::make_unique<avsync::PhoneAnalyzer>();} return self; }
 - (void)reset { core->reset(); }
 - (void)beginCalibration { core->begin_calibration(); }
+- (void)beginCalibrator:(NSString *)mode { core->begin_calibrator([mode isEqualToString:@"display"]?avsync::PhoneAnalyzer::CalibratorMode::Display:avsync::PhoneAnalyzer::CalibratorMode::Camera); }
 - (void)setTaiUtcOffset:(double)seconds { core->set_tai_utc_seconds(seconds); }
 - (void)setDeviceUtcOffset:(double)offset { core->set_device_utc_offset(offset); }
 - (void)observeQRDetection:(NSDictionary *)detection timeMs:(double)timeMs {
@@ -84,6 +85,13 @@ NSString *jpeg(const avsync::PhoneAnalyzer::CalibrationFrame& f, NSString *path)
 }
 - (void)mergeAudio:(AVSyncPhoneAnalyzer *)analyzed { if(analyzed)core->merge_audio(*analyzed->core); }
 - (NSDictionary *)pollCalibration {
+ if(core->calibrator_active()){
+  const auto text=core->poll_calibrator();
+  if(text.empty())return nil;
+  NSDictionary *report=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:text.data() length:text.size()] options:0 error:nil];
+  if(![report[@"kind"] isEqual:@"calibrator-progress"])core->reset(); // done: live analysis resumes
+  return report;
+ }
  if(!core->calibrating())return nil;
  if(auto error=core->calibration_error()){NSString *message=[NSString stringWithUTF8String:error->c_str()];core->reset();return @{@"kind":@"error",@"message":message};}
  auto take=core->take_calibration();

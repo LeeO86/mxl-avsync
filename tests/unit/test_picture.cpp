@@ -660,7 +660,10 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     INFO(last);
     REQUIRE(last.find("\"stage\":\"measuring\"")!=std::string::npos);
     auto value=[&](const char* key){const auto at=last.find(std::string("\"")+key+"\":",last.find("\"reading\""));REQUIRE(at!=std::string::npos);return std::stod(last.substr(at+std::strlen(key)+3));};
-    CHECK(std::abs(value("offsetMs")-20)<.6);
+    // Measured +20 ms; the QR's sender calibration (-12.5 ms) is subtracted.
+    CHECK(std::abs(value("offsetMs")-32.5)<.6);
+    CHECK(std::abs(value("rawOffsetMs")-20)<.6);
+    CHECK(value("senderCalibrationMs")==-12.5);
     CHECK(std::abs(value("videoLatencyMs")-30)<.6);
     CHECK(std::abs(value("audioLatencyMs")-50)<.3);
     CHECK(value("spreadMs")<1.0);

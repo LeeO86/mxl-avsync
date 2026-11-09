@@ -557,6 +557,10 @@ struct Measurement {
     std::optional<double> av_offset_ms;
     double expected_av_offset_ms = 0;
     std::optional<double> deviation_ms;
+    // AVS4 sender calibration (the generator's own sound-minus-picture output offset), only when the
+    // QR names one: av_offset_ms and deviation_ms have it subtracted, raw_av_offset_ms is the value before.
+    std::optional<double> raw_av_offset_ms;
+    std::optional<double> sender_calibration_ms;
     std::optional<double> av_offset_arrival_ms;
     std::optional<double> video_latency_ms;
     std::optional<double> audio_latency_ms;
@@ -764,6 +768,8 @@ public:
     Pairer(double period_ms, GradeWindows windows, ReferenceInfo reference, std::string mode, std::string test_id);
     void set_expected_offset(double ms) { default_offset_ms_ = ms; }
     void set_reference(ReferenceInfo reference) { reference_ = std::move(reference); }
+    // AVS4: the sender calibration from the QR; events paired from now on have it subtracted.
+    void set_sender_calibration(SenderCalibration calibration) { sender_calibration_ = std::move(calibration); }
     // Live: also report audio events no video claimed ("missing_video"), and drop closed events and
     // old observations instead of keeping the whole history (results() then stays empty).
     void set_live_stream(bool on) { live_stream_ = on; }
@@ -788,6 +794,7 @@ private:
     std::string mode_;
     std::string test_id_;
     double default_offset_ms_ = 0;
+    SenderCalibration sender_calibration_;
     std::vector<PendingVideo> videos_;
     std::vector<AudioObservation> audios_;
     std::vector<bool> audio_used_;

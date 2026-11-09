@@ -142,5 +142,29 @@ int main(int argc, char **argv) { @autoreleasepool {
             assert(packets[i].video_send_ns==quantize_timecode_ns(1700000037000000000LL+i*1000000000LL/rate));
         }
     }
+    // Sender calibration in the QR, and the calibration pattern helpers.
+    {
+        AVSyncGenerator *source=[[AVSyncGenerator alloc] initWithTestID:@"phone-native-test" rate:2 epochTaiNs:1700000037000000000LL epochHost:100];
+        [source setSenderCalibrationMethod:@"transponder" offsetMs:-38.04 uncertaintyMs:1.0 day:2503];
+        CVPixelBufferRef pixel=nullptr;
+        assert(CVPixelBufferCreate(kCFAllocatorDefault,width,height,kCVPixelFormatType_32BGRA,(__bridge CFDictionaryRef)@{(id)kCVPixelBufferIOSurfacePropertiesKey:@{}},&pixel)==kCVReturnSuccess);
+        CVPixelBufferLockBaseAddress(pixel,0);
+        CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
+        CGContextRef context=CGBitmapContextCreate(CVPixelBufferGetBaseAddress(pixel),width,height,8,CVPixelBufferGetBytesPerRow(pixel),space,CGBitmapInfo(kCGBitmapByteOrder32Little)|CGBitmapInfo(kCGImageAlphaPremultipliedFirst));
+        CGContextDrawImage(context,CGRectMake(0,0,width,height),[source imageForSequence:1].CGImage);
+        CVPixelBufferUnlockBaseAddress(pixel,0);
+        bool found=false;
+        for(NSString *payload in [AVSyncQRCodeReader readPixelBuffer:pixel][@"payloads"]) if(auto parsed=parse_qr_payload(payload.UTF8String)) {
+            assert(parsed->calibration.method=="transponder" && std::abs(parsed->calibration.offset_ms+38.0)<1e-9 && parsed->calibration.uncertainty_ms==1.0 && parsed->calibration.day==2503);found=true;
+        }
+        assert(found);
+        CGContextRelease(context);CGColorSpaceRelease(space);CVPixelBufferRelease(pixel);
+        [source setSenderCalibrationMethod:@"bogus" offsetMs:1 uncertaintyMs:1 day:1]; // ignored: method none
+        assert([AVSyncGenerator calibrationLeftWhiteAtFrame:29 fps:60] && ![AVSyncGenerator calibrationLeftWhiteAtFrame:30 fps:60]);
+        assert([AVSyncGenerator calibrationSwapFrame:2 fps:60]==60);
+        NSData *beep=[AVSyncGenerator calibrationBeepWithSampleRate:48000];
+        assert(beep.length==192*sizeof(float));
+        assert(![[AVSyncGenerator displayCalibrationForSamples:[NSMutableData dataWithLength:48000*sizeof(float)] sampleRate:48000 minimumPairs:8][@"ok"] boolValue]);
+    }
     std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR geometry/flash onset and 1/2-Hz independent audio.\n";
 } }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { liveView, offsetText, offsetSentence, savedResult, clockCorrection, clockText, HOLD_MS } from './live.mjs';
+import { liveView, offsetText, offsetSentence, savedResult, senderCalibrationText, clockCorrection, clockText, HOLD_MS } from './live.mjs';
 
 const status = extra => ({ kind: 'status', stage: 'measuring', timeMs: 5000, signal: { live: true, sourceId: 7, testId: 'phone-ab' },
  reading: { offsetMs: 12.5, spreadMs: 0.8, events: 8, videoLatencyMs: 70, audioLatencyMs: 82.5 }, ...extra });
@@ -13,6 +13,23 @@ test('a measuring report shows the calibrated AV offset and no latency without a
  assert.equal(view.reading.offsetMs, 10);
  assert.equal(view.reading.rawOffsetMs, 12.5);
  assert.equal(view.reading.videoLatencyMs, null);
+});
+
+test('the sender calibration is subtracted natively once; the analyser calibration here; raw kept', () => {
+ // Native: measured +50.5, sender calibration +38.0 already off offsetMs.
+ const report = status({ signal: { live: true, sourceId: 7, testId: 'phone-ab', name: 'Studio iPhone' },
+  reading: { offsetMs: 12.5, rawOffsetMs: 50.5, senderCalibrationMs: 38, spreadMs: 0.8, events: 8 } });
+ const view = liveView(report, { calibrationMs: 2.5 });
+ assert.equal(view.reading.offsetMs, 10);
+ assert.equal(view.reading.rawOffsetMs, 50.5);
+ assert.equal(view.reading.senderCalibrationMs, 38);
+ assert.equal(view.reading.title, 'Studio iPhone');
+ assert.equal(senderCalibrationText(view.reading), 'raw +50.5 ms · sender calibration +38.0 ms');
+ const saved = savedResult(view.reading, { calibration: { offset_ms: 2.5 }, now: 1 });
+ assert.deepEqual([saved.offsetMs, saved.rawOffsetMs, saved.senderCalibrationMs, saved.calibrationMs, saved.title], [10, 50.5, 38, 2.5, 'Studio iPhone']);
+ // Not calibrated sender: nothing extra shown.
+ assert.equal(liveView(status()).reading.senderCalibrationMs, null);
+ assert.equal(senderCalibrationText(liveView(status()).reading), '');
 });
 
 test('the NTP reference corrects device-UTC latencies', () => {

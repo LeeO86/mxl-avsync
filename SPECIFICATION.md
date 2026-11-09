@@ -113,7 +113,7 @@ The readers MUST NOT copy whole grains. The marker detector reads only its regio
 
 | Quantity | Definition | Needs |
 | --- | --- | --- |
-| **AV offset** | `av_offset_ms = audio_event_time_ms − video_event_time_ms`, both at the measuring point | nothing beyond the signal |
+| **AV offset** | `av_offset_ms = audio_event_time_ms − video_event_time_ms`, both at the measuring point; minus the sender calibration when the AVS4 QR carries one (§5.6; the measured value is then `raw_av_offset_ms`) | nothing beyond the signal |
 | **Deviation** | `deviation_ms = av_offset_ms − expected_av_offset_ms` (the generator's set offset) | the event's expected offset (QR or manifest) |
 | **Video latency** | time the video event is seen at the measuring point − time it was emitted | a common clock |
 | **Audio latency** | same for audio | a common clock |
@@ -368,6 +368,7 @@ The rule of mxl-scopes §6, for the same reasons: a stuck reader takes down one 
 | `test_id`, `event_id`, `seq`, `mode` | |
 | `video_event_time`, `audio_event_time` | ms (FILE) or TAI ns (LIVE), index times |
 | `av_offset_ms`, `expected_av_offset_ms`, `deviation_ms` | §3.1 |
+| `raw_av_offset_ms`, `sender_calibration_ms` | only when the AVS4 QR carries a sender calibration: the measured offset before it was subtracted, and the calibration (§5.6) |
 | `av_offset_arrival_ms` | LIVE only |
 | `video_latency_ms`, `audio_latency_ms`, `video_index_shift_ms`, `audio_index_shift_ms` | LIVE with a reference only; else absent |
 | `video_source_emit_offset_ms`, `audio_source_emit_offset_ms`, `video_chain_latency_ms`, `audio_chain_latency_ms` | with a latency and a source emit offset (entered, or the flow's NMOS tag; §3.3); else absent |
@@ -515,6 +516,7 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_VIDEO_FORMAT` | `1080p50` | flow | §5.4 |
 | `AVSYNC_AUDIO_CHANNELS` | 2 | flow | 1–16 |
 | `AVSYNC_AV_OFFSET_MS` | 0 | live | −500…+500, set offset |
+| `AVSYNC_PATTERN` | `test` | live | `test` (the AV sync test signal) or `calibration`: the calibrator board's pattern (halves swap every 500 ms, 1.5 kHz beep 100 ms after each swap at the chirp level; docs/calibrator.md). The flows and test id stay the same |
 | `AVSYNC_CHIRP_LEVEL_DBFS` | −12 | live | −40…−1 |
 | `AVSYNC_AUDIO_ENABLE` | `true` | live | `false` mutes the chirps (silence, flows keep running) |
 | `AVSYNC_AUDIO_LEAD_MS` | 20 | restart | how far ahead of TAI audio is written |
@@ -667,6 +669,7 @@ The camera and microphone have different capture latencies (OS buffers, exposure
 - The app measures the rig, stores the capture offset per device model and OS version with the date, the method, the number of events and the spread, and subtracts it from later measurements.
 - A calibration expires after an OS update or 90 days. Uncalibrated measurements are allowed and shown as **uncalibrated** in orange, with no grade colour.
 - Expected accuracy is unknown until measured on real devices; the app shows the measured spread of its own calibration as its uncertainty.
+- **Calibrator board** (maintainer design, 2026-11-08; contract docs/calibrator.md): Settings → With calibrator. Camera mode (flash + click on the rear camera) gives the capture calibration above (method `calibrator-pulse`, same record and validity as the clap). Display mode (the generator's calibration pattern, the board clicks at each swap, the generator beeps D = 100 ms later) gives the phone's **sender calibration** (screen vs speaker, AVS4 method `transponder`), which the phone generator then sends in the QR. The pattern is a mode of the generators themselves (same display and audio path); the container has it too (`AVSYNC_PATTERN`). Analysis in `core/…/calibrator.hpp`. Every analyser (phone, container, file) subtracts the sender calibration from the measured AV offset once, in core (`Pairer`), and keeps the raw value and the calibration next to it; "not calibrated" changes nothing. The phone's own capture calibration is subtracted separately (app), so neither is counted twice. Debug → Clear calibration clears both.
 
 ---
 
@@ -785,10 +788,10 @@ Family look: header with label, role, state and registration pills, version; tab
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/v1/info` | both | version, core version, MXL revision, role, label |
-| GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary; analyzer: `signal`, the source the picture QR names (`source_id`, `test_id`, `name`, `live`, `rate`, `format`, `estimated_source`, `sender_calibration` {`method`, and when calibrated `offset_ms`, `uncertainty_ms`, `date`}), null without a QR |
+| GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary; analyzer: `signal`, the source the picture QR names (`source_id`, `test_id`, `name`, `live`, `rate`, `format`, `estimated_source`, `sender_calibration` {`method`, and when calibrated `offset_ms`, `uncertainty_ms`, `date`}; analysers subtract it), null without a QR |
 | GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate; GET also shows `test_id` |
 | POST | `/api/v1/generator/stop`, `/start` | gen | §11 |
-| GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics |
+| GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics; with a sender calibration also `raw_offset_ms` and `sender_calibration_ms` |
 | GET | `/api/v1/events?since=<seq>&limit=` | ana | the newest matching event records, newest first, plus `total` |
 | GET | `/api/v1/statistics` | ana | window and since-start statistics (§8.2) |
 | POST | `/api/v1/statistics/reset` | ana | new statistics epoch (the event log keeps everything) |
@@ -1057,7 +1060,7 @@ integers big-endian:
 | 5 | event sequence k (40 bits) |
 | 8 | video send time T_k in ns (TAI for LIVE, media timeline for FILE) |
 | 3 | source AV offset in 1/16 ms, signed (±524 s) |
-| 6, only with bit 3 | sender calibration: method u8 (1 clap with a second phone, 2 transponder calibrator, 3 pulse-train), offset i16 in 0.1 ms (sound output minus picture output, positive: sound later; same sign as `av_offset_ms`, §3.2), uncertainty u8 in 0.5 ms, day u16 since 2020-01-01 (0 unknown) |
+| 6, only with bit 3 | sender calibration: method u8 (1 clap with a second phone, 2 transponder calibrator, 3 pulse-train), offset i16 in 0.1 ms (sound output minus picture output, positive: sound later; same sign as `av_offset_ms`, §3.2; analysers subtract it from the measured offset), uncertainty u8 in 0.5 ms, day u16 since 2020-01-01 (0 unknown) |
 | 1 + n | test id: n characters (1–64) of `0-9a-zA-Z-_`, 6 bits each; the source id is CRC-32 of the id. n = 0: the 4-byte source id alone follows (the id did not fit or does not give that source id); the analyzer then shows `source-<8 hex>` |
 | rest | generator name, UTF-8, 0–24 bytes; cosmetic, not part of the id |
 

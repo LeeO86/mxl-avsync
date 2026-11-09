@@ -2,6 +2,32 @@
 
 ## Mobile (not released yet)
 
+- Analysers subtract the sender calibration: when the AVS4 QR carries one, the
+  AV offset shown and saved is the measured value minus the sender's own
+  screen-vs-speaker offset. Measure and Results show the raw value and the
+  sender calibration in a small line; saved results keep `rawOffsetMs` and
+  `senderCalibrationMs`. Done once in core C++, so iOS and Android behave the
+  same; this phone's own camera-vs-mic calibration is still subtracted on top,
+  once. "check" in Results also marks a different sender calibration.
+- Debug → Clear calibration now asks first and says it clears both: the
+  analyser calibration and the sender calibration.
+- Results: a sender's default name is its Title from the QR (the newest one),
+  then the short ID. A nickname you set always wins.
+- iPhone test signal: Stop now clears the whole picture (the scale and the
+  marker stayed on screen before) and shows a large "Stopped".
+- Calibrator wizard (iPhone): Settings → With calibrator. Step 2 measures
+  camera vs microphone with the calibrator board's flashes and clicks and saves
+  it like a clap calibration (method `calibrator-pulse`). Step 3 shows the
+  generator's calibration pattern (halves swap every 500 ms, a beep 100 ms
+  later) and saves screen vs speaker as the phone's sender calibration; the test
+  signal then sends it in the AVS4 QR (method `transponder`) instead of "not
+  calibrated". A TV fed by the container's calibration pattern can be measured
+  too (not saved). New camera view method `beginCalibrator(mode)`, generator
+  option `mode: 'calibration'` and `senderCalibration*` options. Not tested
+  with a real board yet (`docs/calibration.md`, `docs/calibrator.md`).
+- Container generator: `AVSYNC_PATTERN=calibration` (live; Signal API
+  `pattern`, web form "Picture") sends the calibration pattern instead of the
+  test signal, for a phone with the calibrator on a TV or monitor.
 - iPhone generator: the source ID stays the same when the generator is stopped
   and started again. It changes only after a reinstall, a new app version or
   build, or another event rate; name, subtitle and image do not change it
@@ -59,6 +85,12 @@
 
 ## Container (not released yet)
 
+- Analyzer (live and file): subtracts the sender calibration from the AVS4 QR
+  from `av_offset_ms` (and `deviation_ms`, grade, metrics). Events keep
+  `raw_av_offset_ms` and `sender_calibration_ms`; `/api/v1/measurement` has
+  `raw_offset_ms` and `sender_calibration_ms`; the web UI Input card shows
+  "AV sync raw"; the file result `summary` has `sender_calibration_ms` and
+  `median_raw_av_offset_ms`. Not calibrated: no change.
 - Generator: the default `AVSYNC_TEST_ID` is now `<NMOS seed>-` plus a short
   hash of the seed, the app version and the timing settings (event rate, audio
   timecode, video format, AV offset, audio/video lead, source emit offsets),

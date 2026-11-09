@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import { Button, Card, Choice, Row, colors, small, text } from './ui';
 import { latencyText, offsetText } from '../src/live.mjs';
 
@@ -15,11 +15,13 @@ export function Sheet({ visible, onClose, children }) {
 }
 
 // Settings and Debug share one modal (UIKit cannot present a second one while the first closes).
-export function Settings({ onClose, calibration, clock, onCalibrate, onSyncClock, syncing, keepAwake, onKeepAwake, onPrivacy, onDebug }) {
+export function Settings({ onClose, calibration, sender, clock, onCalibrate, onCalibrator, onSyncClock, syncing, keepAwake, onKeepAwake, onPrivacy, onDebug }) {
  return <>
   <Text accessibilityRole="header" style={{ ...text, fontSize: 22, marginBottom: 6 }}>Settings</Text>
   <Row label="Calibration" value={calibration} />
   <Button title="Calibrate this phone" onPress={onCalibrate} style={{ marginTop: 0, marginBottom: 10 }} />
+  {onCalibrator ? <Button title="With calibrator" onPress={onCalibrator} style={{ marginTop: 0, marginBottom: 10 }} /> : null}
+  <Row label="Sender calibration" value={sender} />
   <Row label="Clock" value={clock} />
   <Button title={syncing ? 'Synchronizing…' : 'Sync clock now'} disabled={syncing} onPress={onSyncClock} style={{ marginTop: 0, marginBottom: 10 }} />
   <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingRight: 8, borderTopWidth: 1, borderTopColor: colors.line }}>
@@ -79,7 +81,9 @@ export function Debug({ onBack, session, onChange, report, clockDetails, onShare
    <Button title="Apply" onPress={() => onChange({ ntpServer: server.trim(), clockMaxUncertaintyMs: Number(limit), taiUtcSeconds: Number(tai) })} />
   </Card>
   <Button title="Clear saved results" onPress={onClearResults} />
-  <Button title="Clear calibration" onPress={onClearCalibration} />
+  <Button title="Clear calibration" onPress={() => Alert.alert('Clear calibration?',
+   'Clears both: the analyser calibration (camera vs microphone) and the sender calibration (screen vs speaker).',
+   [{ text: 'Cancel', style: 'cancel' }, { text: 'Clear both', style: 'destructive', onPress: onClearCalibration }])} />
   <Button title="Back" onPress={onBack} />
  </>;
 }

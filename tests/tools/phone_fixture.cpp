@@ -45,6 +45,8 @@ int main(int argc, char** argv)
     }
     const int64_t epoch = (tai_now() / 1000000000ULL + 2) * 1000000000ULL;
     PhoneGeneratorPlan plan("phone-fixture-" + std::to_string(rate), rate, epoch, 1000);
+    // AVS4 sender calibration at 2 Hz (sound 12.5 ms before picture at the sender); 1 Hz stays not calibrated.
+    const SenderCalibration calibration = rate == 2 ? SenderCalibration{"transponder", -12.5, 0.5, 2503} : SenderCalibration{};
     struct Packet { uint64_t start; std::vector<float> wave; };
     std::vector<Packet> packets;
     for (int k = 1; k <= 22 * rate; ++k) {
@@ -54,6 +56,7 @@ int main(int argc, char** argv)
     output << "{\"epoch_tai_ns\":" << epoch << ",\"rate\":" << rate
            << ",\"video_delay_ms\":120,\"audio_delay_ms\":155,\"lost_from_ns\":" << epoch + 8000000000LL
            << ",\"lost_until_ns\":" << epoch + 11000000000LL << ",\"source_id\":" << plan.qr(1).source_id
+           << ",\"sender_calibration_ms\":" << (calibration.calibrated() ? std::to_string(calibration.offset_ms) : "null")
            << ",\"video_flow\":\"" << video_id << "\",\"audio_flow\":\"" << audio_id << "\"}";
     output.close();
     if (!output) return 1;
@@ -80,6 +83,7 @@ int main(int argc, char** argv)
             info.source = "Synthetic phone camera";
             auto qr = plan.qr(plan.named_seq(frame));
             qr.name = "Fixture phone"; // AVS4: the analyzer status shows it with the real test ID
+            qr.calibration = calibration;
             info.qr_json = qr_payload_text(qr);
             info.period_ms = 1000.0 / rate;
             render_picture(source, info, sequence, position, plan.period_frames(), plan.a_white(frame));

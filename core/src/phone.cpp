@@ -318,6 +318,7 @@ PhoneReport PhoneSession::finish(const std::string& test_id)
     // Latency is against the device clock; the app checks that clock by NTP and hides it otherwise.
     reference.sync_state = "locked";
     Pairer pairer(detect.period_ms, windows_, reference, "LIVE", test_id);
+    if (signal_) pairer.set_sender_calibration(signal_->calibration);
     const bool coded = (signal_ && signal_->timecode) || !report.audio_timecodes.empty();
     for (auto video : videos_) {
         if (signal_ && !video.timecode) identify_video(video, *signal_);

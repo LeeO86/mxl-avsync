@@ -132,7 +132,8 @@
           <dt>Format</dt><dd>{{ status.width ? status.width + '×' + status.height + (status.interlaced ? ' i' : ' p') : '–' }}</dd>
           <dt>Rate</dt><dd>{{ ratePerSecond }}</dd>
           <dt>Source (QR)</dt><dd>{{ status.signal ? (status.signal.name ? status.signal.name + ' · ' : '') + status.signal.test_id : '–' }}</dd>
-          <dt>Source calibration</dt><dd>{{ !status.signal ? '–' : status.signal.sender_calibration.method === 'none' ? 'not calibrated' : status.signal.sender_calibration.method + ' ' + ms1(status.signal.sender_calibration.offset_ms) + ' ± ' + ms1(status.signal.sender_calibration.uncertainty_ms) }}</dd>
+          <dt>Source calibration</dt><dd>{{ !status.signal ? '–' : status.signal.sender_calibration.method === 'none' ? 'not calibrated' : status.signal.sender_calibration.method + ' ' + ms1(status.signal.sender_calibration.offset_ms) + ' ± ' + ms1(status.signal.sender_calibration.uncertainty_ms) + ' · subtracted' }}</dd>
+          <dt v-if="measurement.raw_offset_ms != null">AV sync raw</dt><dd v-if="measurement.raw_offset_ms != null">{{ signedMs(measurement.raw_offset_ms) }} (before the source calibration {{ signedMs(measurement.sender_calibration_ms) }})</dd>
         </dl></div>
         <div class="card"><h3>Counters</h3><dl class="kv">
           <dt>Video drops</dt><dd>{{ metric('mxl_avsync_video_drops_total') }}</dd>
@@ -156,6 +157,10 @@
         v-memo="[generatorBaseline, signalDirty, signalSaving, signalError, imageFile, imageSet, imageFrames, imageUrl, audioOn, stopped]">
         <p v-if="signalError" class="banner" role="alert">{{ signalError }}</p>
         <p v-if="signalDirty" role="status">Unsaved changes</p>
+        <label>Picture
+          <select v-model="pattern"><option value="test">Test signal</option><option value="calibration">Calibration pattern (calibrator board)</option></select>
+        </label>
+        <p class="note" v-if="pattern === 'calibration'">Halves swap every 500 ms with a beep 100 ms later. Lay the calibrator on the screen's centre line and use the phone app (Settings → Calibration → With calibrator).</p>
         <label>Set offset (ms, + audio late) <input type="number" v-model.number="offset" min="-500" max="500"/></label>
         <label>Chirps per second
           <select v-model.number="eventRate"><option :value="1">1 / second</option><option :value="2">2 / second</option><option v-if="audioTimecode === 'legacy'" :value="4">4 / second (legacy)</option></select>
@@ -294,7 +299,7 @@
 <script>
 const { createApp } = Vue;
 createApp({
-  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], liveKeys:[], settingsError:'', restartRequired:[], skipped:[], autoTestId:'', generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
+  data() { return { tab:'', info:{}, status:{}, measurement:{}, events:[], eventsSince:'', grading:{}, offset:0, level:-12, eventRate:2, audioTimecode:'1200', pattern:'test', title:'', source:'', subtitle:'', imageFile:null, imageSet:false, imageFrames:0, imageUrl:'', audioOn:true, stopped:false, metrics:{}, health:'…', readyText:'…', nmosView:null, nmosError:'', previewTick:0, previewErrors:{input:false, generated:false}, config:{}, draft:{}, envSet:[], liveKeys:[], settingsError:'', restartRequired:[], skipped:[], autoTestId:'', generatorBaseline:null, signalError:'', signalSaving:false, settingsSaving:false }; },
   computed: {
     role() { return this.info.role || ''; },
     previewSlots() {
@@ -328,7 +333,7 @@ createApp({
     settingGroups() {
       const groups = [
         ['Grading', ['AVSYNC_PASS_MIN_MS','AVSYNC_PASS_MAX_MS','AVSYNC_WARN_MIN_MS','AVSYNC_WARN_MAX_MS','AVSYNC_GRADE_EVENTS','AVSYNC_STALE_S']],
-        ['Signal', ['AVSYNC_AV_OFFSET_MS','AVSYNC_CHIRP_LEVEL_DBFS','AVSYNC_AUDIO_ENABLE','AVSYNC_AUDIO_TIMECODE','AVSYNC_EVENT_RATE','AVSYNC_VIDEO_FORMAT','AVSYNC_AUDIO_CHANNELS','AVSYNC_CHIRP_MS','AVSYNC_CHIRP_LOW_HZ','AVSYNC_CHIRP_HIGH_HZ','AVSYNC_TITLE','AVSYNC_SOURCE','AVSYNC_SUBTITLE','AVSYNC_NOTES','AVSYNC_TEST_ID']],
+        ['Signal', ['AVSYNC_PATTERN','AVSYNC_AV_OFFSET_MS','AVSYNC_CHIRP_LEVEL_DBFS','AVSYNC_AUDIO_ENABLE','AVSYNC_AUDIO_TIMECODE','AVSYNC_EVENT_RATE','AVSYNC_VIDEO_FORMAT','AVSYNC_AUDIO_CHANNELS','AVSYNC_CHIRP_MS','AVSYNC_CHIRP_LOW_HZ','AVSYNC_CHIRP_HIGH_HZ','AVSYNC_TITLE','AVSYNC_SOURCE','AVSYNC_SUBTITLE','AVSYNC_NOTES','AVSYNC_TEST_ID']],
         ['Latency', ['AVSYNC_SOURCE_EMIT_VIDEO_MS','AVSYNC_SOURCE_EMIT_AUDIO_MS']],
         ['Measurement', ['AVSYNC_AUDIO_CHANNEL','AVSYNC_AUDIO_THRESHOLD','AVSYNC_QR_RATE','AVSYNC_STATS_WINDOW','AVSYNC_RESULT_ENABLE','LOG_LEVEL']]
       ];
@@ -474,14 +479,14 @@ createApp({
       if (this.$refs?.sourceImageInput) this.$refs.sourceImageInput.value = '';
     },
     generatorDraft() {
-      return {event_rate:this.eventRate, audio_timecode:this.audioTimecode, offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle};
+      return {event_rate:this.eventRate, audio_timecode:this.audioTimecode, pattern:this.pattern, offset_ms:this.offset, level_dbfs:this.level, title:this.title, source:this.source, subtitle:this.subtitle};
     },
     sameDraft(a, b) { return Object.keys(a).every(key => a[key] === b[key]) && Object.keys(a).length === Object.keys(b).length; },
     adoptGenerator(g, submitted = null) {
       const accept = !submitted || this.sameDraft(this.generatorDraft(), submitted);
-      this.generatorBaseline = {event_rate:g.event_rate, audio_timecode:g.audio_timecode || 'legacy', offset_ms:g.offset_ms, level_dbfs:g.level_dbfs, title:g.title || '', source:g.source || '', subtitle:g.subtitle || ''};
+      this.generatorBaseline = {event_rate:g.event_rate, audio_timecode:g.audio_timecode || 'legacy', pattern:g.pattern || 'test', offset_ms:g.offset_ms, level_dbfs:g.level_dbfs, title:g.title || '', source:g.source || '', subtitle:g.subtitle || ''};
       if (accept) {
-        this.eventRate = this.generatorBaseline.event_rate; this.audioTimecode = this.generatorBaseline.audio_timecode;
+        this.eventRate = this.generatorBaseline.event_rate; this.audioTimecode = this.generatorBaseline.audio_timecode; this.pattern = this.generatorBaseline.pattern;
         this.offset = this.generatorBaseline.offset_ms; this.level = this.generatorBaseline.level_dbfs;
         this.title = this.generatorBaseline.title; this.source = this.generatorBaseline.source; this.subtitle = this.generatorBaseline.subtitle;
       }

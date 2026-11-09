@@ -587,7 +587,7 @@ void install_web(HttpServer& http, Runtime& rt)
             {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"subtitle", rt.config.subtitle},
             {"notes", rt.config.notes}, {"test_id", rt.config.effective_test_id()},
             {"timing_reference", rt.config.audio_timecode == "legacy" ? "centre" : "start"}, {"marker", rt.config.audio_timecode == "legacy" ? "toggle" : "flash"}, {"audio_timecode", rt.config.audio_timecode}, {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
-            {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
+            {"pattern", rt.config.pattern}, {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
     });
     http.add("PATCH", "/api/v1/generator", [&](const HttpRequest& request) {
         std::lock_guard lock(rt.mu);
@@ -612,6 +612,7 @@ void install_web(HttpServer& http, Runtime& rt)
         if (body.contains("muted")) flat["AVSYNC_AUDIO_ENABLE"] = body["muted"].get<bool>() ? "false" : "true";
         if (body.contains("audio_timecode")) flat["AVSYNC_AUDIO_TIMECODE"] = body["audio_timecode"].get<std::string>();
         if (body.contains("event_rate")) flat["AVSYNC_EVENT_RATE"] = std::to_string(body["event_rate"].get<int>());
+        if (body.contains("pattern")) flat["AVSYNC_PATTERN"] = body["pattern"].get<std::string>();
         try {
             apply_settings(rt.config, flat, nullptr);
         } catch (const std::exception& ex) {
@@ -715,6 +716,11 @@ void install_web(HttpServer& http, Runtime& rt)
             const double age_ms = now_ms - last->video_time_ms;
             body["age_ms"] = age_ms;
             body["offset_ms"] = *last->av_offset_ms;
+            if (last->sender_calibration_ms) {
+                // AVS4: offset_ms has the sender's own output offset subtracted; raw is as measured.
+                body["raw_offset_ms"] = *last->raw_av_offset_ms;
+                body["sender_calibration_ms"] = *last->sender_calibration_ms;
+            }
             if (grade == "invalid") {
                 std::ostringstream sentence;
                 sentence.setf(std::ios::fixed);

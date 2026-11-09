@@ -7,6 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface AVSyncPhoneAnalyzer : NSObject
 - (void)reset;
 - (void)beginCalibration;
+// Calibrator board take: "camera" (flash + click) or "display" (external screen, microphone only).
+- (void)beginCalibrator:(NSString *)mode;
 - (void)setTaiUtcOffset:(double)seconds;
 - (void)setDeviceUtcOffset:(double)unixMinusCaptureMs;
 - (void)observeQRDetection:(NSDictionary *)detection timeMs:(double)timeMs;
@@ -18,6 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSDictionary *)poll;
 - (void)mergeAudio:(AVSyncPhoneAnalyzer *)analyzed;
 // nil while a take runs; then once an error report or a calibration report with written files.
+// A calibrator take also gives a progress report about once a second.
 - (nullable NSDictionary *)pollCalibration;
 - (NSDictionary *)pictureObservation;
 @end

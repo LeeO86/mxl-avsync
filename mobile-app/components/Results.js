@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, small, text } from './ui';
-import { formatWhen, latencyText, offsetText } from '../src/live.mjs';
+import { formatWhen, latencyText, offsetText, senderCalibrationText } from '../src/live.mjs';
 import { deltaText, groupResults } from '../src/results.mjs';
 
 // Saved results grouped by sender. ★ marks a sender's reference; the other results show Δ to it.
@@ -19,7 +19,7 @@ export default function Results({ results, senders, onShare, onToggleReference, 
      <Ionicons name={isOpen(group, i) ? 'chevron-down' : 'chevron-forward'} size={18} color={colors.muted} style={{ marginRight: 6 }} />
      {editing === group.key
       ? <TextInput autoFocus accessibilityLabel="Sender nickname" value={draft} onChangeText={setDraft} onSubmitEditing={finishEdit} onBlur={finishEdit}
-       maxLength={40} placeholder={group.id || ''} placeholderTextColor={colors.muted} returnKeyType="done"
+       maxLength={40} placeholder={group.title || group.id || ''} placeholderTextColor={colors.muted} returnKeyType="done"
        style={{ ...text, flex: 1, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.accent }} />
       : <Text style={{ ...text, fontWeight: '600', flexShrink: 1 }}>{group.name}
        <Text style={small}>{group.key === null ? `  (${group.items.length} results)` : group.id && group.id !== group.name ? `  (${group.id})` : ''}</Text></Text>}
@@ -41,6 +41,7 @@ export default function Results({ results, senders, onShare, onToggleReference, 
       <Text style={small}>{isReference ? 'Reference · ' : ''}{formatWhen(item.at)}</Text>
      </View>
      <Text style={small}>Video {latencyText(item.videoLatencyMs)} · Audio {latencyText(item.audioLatencyMs)} · ±{Number.isFinite(item.spreadMs) ? (item.spreadMs / 2).toFixed(1) : '—'} ms{item.calibrationMs === null ? ' · not calibrated' : ''}</Text>
+     {senderCalibrationText(item) ? <Text style={small}>{senderCalibrationText(item)}</Text> : null}
      {delta && (Number.isFinite(delta.videoLatencyMs) || Number.isFinite(delta.audioLatencyMs) || check) ? <Text style={{ ...small, color: colors.accent }}>
       {[Number.isFinite(delta.videoLatencyMs) && `Video ${deltaText(delta.videoLatencyMs)}`, Number.isFinite(delta.audioLatencyMs) && `Audio ${deltaText(delta.audioLatencyMs)}`,
        check && 'check: camera mode or calibration differs from the reference'].filter(Boolean).join(' · ')}

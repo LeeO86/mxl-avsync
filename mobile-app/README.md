@@ -23,7 +23,9 @@ Point the camera at an AVS4 test signal (QR and the two-field panel visible)
 with its sound audible. After a few events the screen shows:
 
 - the **AV offset**: positive means audio after video; calibrated when a
-  calibration is saved for this phone and camera mode;
+  calibration is saved for this phone and camera mode. When the sender sends
+  its own calibration (screen vs speaker, in the QR), that is subtracted too and
+  a small line shows the raw value and the sender calibration;
 - the **spread** (±, half the 10–90 % range) and the number of events in the
   reading (the last 8 within 10 s);
 - **video and audio latency** from the source time to this phone, once the
@@ -51,14 +53,15 @@ Saved results are grouped by sender (the sender ID in the test signal).
 Results without a sender ID are under "Unknown sender". Tap a result to share
 it as JSON. The newest 100 results are kept (references are always kept).
 
-- **Nickname** (pencil): give a sender a name. The default is a short form of
-  its ID, because the generator's title is only drawn in the picture and the
-  analyser does not read it. An empty name goes back to the default.
+- **Nickname** (pencil): give a sender a name. The default is the Title the
+  sender sends in its QR (the newest one, so a renamed sender follows), or a
+  short form of its ID when it sends none. A nickname you set always wins; an
+  empty name goes back to the default.
 - **Reference** (★): one result per sender. All other results of that sender
   show Δ AV offset, and Δ video/audio latency when both results have a latency
   (both had a clock reference). Raw values stay visible. Tap ★ again to clear it.
-- **check**: shown next to the Δ when the camera mode or the calibration offset
-  differs from the reference's. Results saved before this version have no
+- **check**: shown next to the Δ when the camera mode, the calibration offset
+  or the sender calibration differs from the reference's. Results saved before this version have no
   camera mode, so only the calibration is compared for them.
 
 ## Calibration
@@ -67,6 +70,15 @@ Settings → Calibrate this phone. Point the camera at your hands, tap Start and
 clap once. Then pick the first frame where the hands touch; the sound is marked
 orange. Save stores sound time minus that frame's time; it applies to AV offset
 only, for this OS version and camera mode, for 90 days.
+
+Settings → With calibrator (iPhone): a wizard for the calibrator board. Step 2
+measures camera vs microphone with the board's flashes and clicks and saves it
+like the clap calibration. Step 3 measures this phone's screen vs speaker with
+the generator's calibration pattern and saves it as the sender calibration,
+which the test signal then sends in its QR. Settings shows it under "Sender
+calibration". Analysers subtract the sender calibration and show the raw value
+next to it. Debug → Clear calibration clears both (after a confirm). Details:
+[calibration](../docs/calibration.md#with-the-calibrator).
 
 ## Signal
 
@@ -83,7 +95,7 @@ per seq, share diagnostics, and clear results or calibration.
 
 ## Verification
 
-- `npm test`: the view model, clock reference, calibration, playback and saved-results logic.
+- `npm test`: the view model, clock reference, calibration (clap and calibrator), playback and saved-results logic.
 - `npm run test:ios-native`: the real iOS bridge, CoreMedia buffers and Vision
   on a simulated 240 fps capture of the phone source (+20 ms AV, 30/50 ms
   latency; spread below 2 ms) and a calibration take.

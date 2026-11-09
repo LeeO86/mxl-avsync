@@ -45,6 +45,10 @@ nlohmann::json measurement_to_json(const Measurement& m)
     }
     j["av_offset_ms"] = opt_num(m.av_offset_ms);
     j["deviation_ms"] = opt_num(m.deviation_ms);
+    if (m.sender_calibration_ms) {
+        j["raw_av_offset_ms"] = opt_num(m.raw_av_offset_ms);
+        j["sender_calibration_ms"] = *m.sender_calibration_ms;
+    }
     if (m.av_offset_arrival_ms) {
         j["av_offset_arrival_ms"] = *m.av_offset_arrival_ms;
     }
@@ -156,6 +160,15 @@ nlohmann::json result_document(const std::string& test_id, const std::string& mo
     if (bundle.offset.median) {
         sentence = describe_offset(*bundle.offset.median).line;
     }
+    nlohmann::json summary = {{"sentence", sentence}, {"valid", bundle.offset.valid}, {"discarded", bundle.offset.discarded},
+        {"median_av_offset_ms", opt_num(bundle.offset.median)}};
+    // AVS4: the sender calibration the events have subtracted (one QR, so one value), and the median before it.
+    for (auto it = events.rbegin(); it != events.rend(); ++it) {
+        if (!it->sender_calibration_ms) continue;
+        summary["sender_calibration_ms"] = *it->sender_calibration_ms;
+        if (bundle.offset.median) summary["median_raw_av_offset_ms"] = *bundle.offset.median + *it->sender_calibration_ms;
+        break;
+    }
     return {
         {"schema", kResultSchema},
         {"test_id", test_id},
@@ -164,8 +177,7 @@ nlohmann::json result_document(const std::string& test_id, const std::string& mo
         {"reference", {{"type", reference.type}, {"domain", reference.domain}, {"sync_state", reference.sync_state},
                           {"accuracy_ns", reference.accuracy}}},
         {"stream", stream},
-        {"summary", {{"sentence", sentence}, {"valid", bundle.offset.valid}, {"discarded", bundle.offset.discarded},
-                        {"median_av_offset_ms", opt_num(bundle.offset.median)}}},
+        {"summary", summary},
         {"statistics", {{"window", statistics_to_json(bundle.offset)}, {"deviation", statistics_to_json(bundle.deviation)},
                            {"video_latency", statistics_to_json(bundle.video_latency)},
                            {"audio_latency", statistics_to_json(bundle.audio_latency)}}},
@@ -239,6 +251,15 @@ std::string human_report(const nlohmann::json& result)
         }
         if (stats["stddev"].is_number()) {
             os << "  σ " << stats["stddev"].get<double>();
+        }
+        os << "\n";
+    }
+    if (result.contains("summary") && result["summary"].contains("sender_calibration_ms")) {
+        const double c = result["summary"]["sender_calibration_ms"].get<double>();
+        os << "  sender calibration " << (c >= 0 ? "+" : "") << c << " ms subtracted (QR)";
+        if (result["summary"]["median_raw_av_offset_ms"].is_number()) {
+            const double raw = result["summary"]["median_raw_av_offset_ms"].get<double>();
+            os << ", raw median " << (raw >= 0 ? "+" : "") << raw << " ms";
         }
         os << "\n";
     }
