@@ -1,8 +1,10 @@
 #import "AVSyncGenerator.h"
 #include "avsync/phone_generator.hpp"
+#include "avsync/calibrator.hpp"
 #include "../../../../generator/picture.hpp"
 #include <memory>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 void rgb(uint16_t y,uint16_t cb,uint16_t cr,uint8_t *out) {
@@ -44,6 +46,12 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
     avsync::PictureInfo _info;
     avsync::SourceStill _sourceImage;
     avsync::SourceStill _appIcon;
+    avsync::SenderCalibration _calibration;
+}
++ (NSString *)testIDWithPrefix:(NSString *)prefix installID:(NSString *)installID version:(NSString *)version settings:(NSArray<NSString *> *)settings {
+    std::vector<std::string> values;
+    for(NSString *setting in settings)values.emplace_back(setting.UTF8String);
+    return @(avsync::generator_test_id(prefix.UTF8String,installID.UTF8String,version.UTF8String,values).c_str());
 }
 - (instancetype)initWithTestID:(NSString *)testID rate:(NSInteger)rate epochTaiNs:(int64_t)epoch epochHost:(double)host {
     if ((self = [super init])) {
@@ -86,9 +94,35 @@ void make_still(UIImage *image,avsync::SourceStill& still) {
 - (double)hostTimeForSequence:(uint64_t)seq { return _plan->host_seconds(seq); }
 - (NSData *)audioForSequence:(uint64_t)seq { const auto samples=_plan->audio(seq);return [NSData dataWithBytes:samples.data() length:samples.size()*sizeof(float)]; }
 - (UIImage *)imageForSequence:(uint64_t)seq {
-    _info.qr_json=avsync::qr_payload_text(_plan->qr(seq));_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
+    // AVS4 carries the shown name and this phone's sender calibration (method none until saved).
+    auto qr=_plan->qr(seq);qr.name=_info.source;qr.calibration=_calibration;
+    _info.qr_json=avsync::qr_payload_text(qr);_info.counter="Event "+std::to_string(seq);_info.time_line="Scheduled source output";
     avsync::Yuv422p10 frame;frame.resize(1280,720);
     avsync::render_picture(frame,_info,seq,0,_plan->period_frames(),false);
     return image_from_frame(frame);
+}
+- (void)setSenderCalibrationMethod:(NSString *)method offsetMs:(double)offset uncertaintyMs:(double)uncertainty day:(NSInteger)day {
+    _calibration={};
+    const std::string m=method.UTF8String?:"";
+    // The QR encoder throws on values it cannot carry: keep method none then.
+    if((m!="clap"&&m!="transponder"&&m!="pulse-train")||!std::isfinite(offset)||std::abs(offset)>3276||!std::isfinite(uncertainty)||uncertainty<0||uncertainty>127||day<0||day>0xFFFF)return;
+    _calibration.method=m;_calibration.offset_ms=offset;_calibration.uncertainty_ms=uncertainty;_calibration.day=int(day);
+}
+- (BOOL)retimeOffsetNs:(int64_t)offset fromSequence:(uint64_t)seq maxStepNs:(int64_t)maxStep { return _plan->retime(offset,seq,maxStep); }
+- (double)clockOffsetMsForSequence:(uint64_t)seq { return double(_plan->clock_offset_ns(seq))/1e6; }
++ (BOOL)clockReferenceExpiredAgeMs:(double)age radiusMs:(double)radius limitMs:(double)limit { return avsync::clock_reference_expired(age,radius,limit); }
++ (BOOL)calibrationLeftWhiteAtFrame:(uint64_t)frame fps:(NSInteger)fps { return avsync::calibration_left_white(frame,fps,1); }
++ (uint64_t)calibrationSwapFrame:(uint64_t)swap fps:(NSInteger)fps { return avsync::calibration_swap_frame(swap,fps,1); }
++ (NSData *)calibrationBeepWithSampleRate:(double)rate {
+    const auto beep=avsync::calibration_beep(int(std::lround(rate)));
+    return [NSData dataWithBytes:beep.data() length:beep.size()*sizeof(float)];
+}
++ (NSDictionary<NSString *, id> *)displayCalibrationForSamples:(NSData *)samples sampleRate:(double)rate minimumPairs:(NSInteger)minimum {
+    const auto sounds=avsync::find_sound_onsets((const float*)samples.bytes,samples.length/sizeof(float),int(std::lround(rate)),0);
+    avsync::DisplayCalibrationOptions options;options.min_pairs=int(std::max<NSInteger>(1,minimum));
+    const auto r=avsync::display_calibration(sounds,options);
+    NSInteger clicks=0;for(const auto& sound:sounds)clicks+=sound.click();
+    if(!r.ok)return @{@"ok":@NO,@"error":@(r.error.c_str()),@"clicks":@(clicks),@"sounds":@(sounds.size()),@"pairs":@0};
+    return @{@"ok":@YES,@"offsetMs":@(r.offset_ms),@"uncertaintyMs":@(r.uncertainty_ms),@"spreadMs":@(r.spread_ms),@"pairs":@(r.pairs),@"rejected":@(r.rejected),@"directionMs":@(r.direction_ms),@"clicks":@(clicks),@"sounds":@(sounds.size())};
 }
 @end

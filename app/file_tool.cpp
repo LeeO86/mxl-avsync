@@ -355,7 +355,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
             info.time_line = timetext;
             uint64_t named_seq = shown_seq;
             if (plan_config.timecode_baud) {
-                // AVS3: the QR names event k from half a period before its burst.
+                // AVS4: the QR names event k from half a period before its burst.
                 named_seq = 0;
                 for (const auto& event : plan.events) {
                     if (2 * uint64_t(index) + uint64_t(period.grains) < 2 * event.video_grain) break;
@@ -370,6 +370,7 @@ int run_generate(const GenerateRequest& request, std::string& error)
                 payload.qr_flash = payload.optical_code = payload.timecode;
                 payload.source_id = plan_config.source_id;
                 payload.test_id = request.test_id;
+                payload.name = request.source;
                 payload.mode = "FILE";
                 payload.k = payload.qr_flash ? named_seq : qr_seq;
                 payload.tk = payload.qr_flash && named_seq == 0 ? 0 : tk;
@@ -772,6 +773,7 @@ int run_analyze(const AnalyzeRequest& request, std::string& error)
         reference.sync_state = "unknown";
         const std::string test_id = have_manifest ? manifest.value("test_id", qr ? qr->test_id : "TEST") : (qr ? qr->test_id : "TEST");
         Pairer pairer(detect.period_ms, GradeWindows{}, reference, "FILE", test_id);
+        if (qr) pairer.set_sender_calibration(qr->calibration);
         for (const auto& video : videos) {
             double expected = 0;
             if (have_manifest) {

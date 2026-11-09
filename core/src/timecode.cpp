@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -172,6 +173,24 @@ bool decode_candidate(const Demod &d, const Candidate &c, AudioTimecode &out, in
 uint32_t timecode_source_id(const char *text) {
     const std::string value(text ? text : "");
     return crc32(reinterpret_cast<const uint8_t *>(value.data()), value.size());
+}
+
+std::string generator_test_id(const std::string &prefix, const std::string &install_id,
+                              const std::string &app_version, const std::vector<std::string> &settings) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    auto add = [&](const std::string &field) { // each field ends with a newline
+        for (unsigned char c : field + "\n") {
+            h ^= c;
+            h *= 0x100000001b3ull;
+        }
+    };
+    add(install_id);
+    add(app_version);
+    for (const auto &setting : settings)
+        add(setting);
+    char hex[13];
+    std::snprintf(hex, sizeof hex, "%012llx", static_cast<unsigned long long>(h >> 16));
+    return prefix.substr(0, 64 - 12) + hex;
 }
 
 int64_t quantize_timecode_ns(int64_t ns) {

@@ -252,7 +252,7 @@ struct FrameGeometry {
 };
 
 FrameGeometry frame_geometry(int width, int height);
-// AVS2: version-4 QR (33 modules + 4 quiet modules per side), then a 4-module gap and equal flash panel.
+// AVS4: version-4 QR (33 modules + 4 quiet modules per side), then a 4-module gap and equal flash panel.
 FrameGeometry qr_flash_geometry(int width, int height);
 
 struct LumaView {
@@ -413,6 +413,21 @@ void unpack_v210_luma(const uint8_t* src, int width, int height, uint16_t* y, in
 
 // ---- QR payload (§5.6) ---------------------------------------------------
 
+// AVS4: compact picture QR text, "AVS4:" + base45 bytes (§5.6). Version 4 (33 modules), ECC M.
+inline constexpr char kQrCompactPrefix[] = "AVS4:";
+inline constexpr size_t kQrNameMaxBytes = 24; // UTF-8 bytes; less when a long ID or calibration needs the room
+
+// How the generator measured its own output offset (screen vs speaker). "none": not calibrated.
+struct SenderCalibration {
+    std::string method = "none"; // none, clap (second phone), transponder (calibrator), pulse-train
+    double offset_ms = 0;        // sound output minus picture output; positive: sound later (same sign as av_offset_ms). 0.1 ms steps, +/-3276.7
+    double uncertainty_ms = 0;   // 0.5 ms steps, 0..127.5
+    int day = 0;                 // date of the calibration, days since 2020-01-01; 0: unknown
+    bool calibrated() const { return method != "none"; }
+};
+// "YYYY-MM-DD" for SenderCalibration::day, empty for 0.
+std::string calibration_date(int day);
+
 struct QrPayload {
     std::string schema = kQrSchema;
     std::string test_id;
@@ -425,9 +440,11 @@ struct QrPayload {
     std::string format = "1080p50";
     bool estimated_source = false; // QR clk=phone-utc
     bool timecode = false;
-    bool qr_flash = false; // AVS2/AVS3: compact QR with a neighbouring optical marker.
-    bool optical_code = false; // AVS3: A/B burst marker; QR names event k from half a period before it to half after.
+    bool qr_flash = false; // AVS4: compact QR with a neighbouring optical marker.
+    bool optical_code = false; // AVS4: A/B burst marker; QR names event k from half a period before it to half after.
     uint32_t source_id = 0;
+    std::string name; // AVS4: generator name, cosmetic (not part of the ID); cut to fit, at most kQrNameMaxBytes
+    SenderCalibration calibration; // AVS4: the generator's own screen-vs-speaker output offset
 };
 
 bool identify_video(VideoObservation& video, const QrPayload& payload);
@@ -440,7 +457,7 @@ struct QrDetection {
     QrPayload payload;
     std::array<double, 4> x{}, y{};
 };
-// AVS3: slow QR geometry/identity, fast sparse field photometry on every frame.
+// AVS4: slow QR geometry/identity, fast sparse field photometry on every frame.
 // No raster rectification. The OpticalCodeDetector times each burst; the QR seen
 // around it (or the event grid) names it.
 class QrFlashTracker {
@@ -540,6 +557,10 @@ struct Measurement {
     std::optional<double> av_offset_ms;
     double expected_av_offset_ms = 0;
     std::optional<double> deviation_ms;
+    // AVS4 sender calibration (the generator's own sound-minus-picture output offset), only when the
+    // QR names one: av_offset_ms and deviation_ms have it subtracted, raw_av_offset_ms is the value before.
+    std::optional<double> raw_av_offset_ms;
+    std::optional<double> sender_calibration_ms;
     std::optional<double> av_offset_arrival_ms;
     std::optional<double> video_latency_ms;
     std::optional<double> audio_latency_ms;
@@ -747,6 +768,8 @@ public:
     Pairer(double period_ms, GradeWindows windows, ReferenceInfo reference, std::string mode, std::string test_id);
     void set_expected_offset(double ms) { default_offset_ms_ = ms; }
     void set_reference(ReferenceInfo reference) { reference_ = std::move(reference); }
+    // AVS4: the sender calibration from the QR; events paired from now on have it subtracted.
+    void set_sender_calibration(SenderCalibration calibration) { sender_calibration_ = std::move(calibration); }
     // Live: also report audio events no video claimed ("missing_video"), and drop closed events and
     // old observations instead of keeping the whole history (results() then stays empty).
     void set_live_stream(bool on) { live_stream_ = on; }
@@ -771,6 +794,7 @@ private:
     std::string mode_;
     std::string test_id_;
     double default_offset_ms_ = 0;
+    SenderCalibration sender_calibration_;
     std::vector<PendingVideo> videos_;
     std::vector<AudioObservation> audios_;
     std::vector<bool> audio_used_;

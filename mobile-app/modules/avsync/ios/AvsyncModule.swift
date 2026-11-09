@@ -39,6 +39,11 @@ public class AvsyncModule: Module {
     AsyncFunction("generateStyled") { (rate: Int, taiUtc: Double, options: [String: String], promise: Promise) in
       self.presentGenerator(rate: rate, taiUtc: taiUtc, options: options, promise: promise)
     }.runOnQueue(.main)
+    // A newer clock check for the running test signal (docs/phone-clock.md); ignored when none runs.
+    AsyncFunction("updateGeneratorClock") { (options: [String: String]) in
+      guard let generator = self.generator else { return }
+      generator.updateClock(options.filter { $0.key.hasPrefix("clock") })
+    }.runOnQueue(.main)
     Function("generatorImageInfo") { (id: String) -> [String: Any]? in GeneratorImageStore.info(id: id) }
     AsyncFunction("pickGeneratorImage") { (promise: Promise) in
       guard self.imagePicker == nil, let parent = self.appContext?.utilities?.currentViewController(), parent.presentedViewController == nil else {
@@ -59,7 +64,9 @@ public class AvsyncModule: Module {
       Prop("captureFps") { (view: AvsyncCameraView, fps: Double) in view.setRequestedFps(fps) }
       Prop("taiUtcOffset") { (view: AvsyncCameraView, seconds: Double) in view.setTaiUtcOffset(seconds) }
       AsyncFunction("beginCalibration") { (view: AvsyncCameraView) in view.beginCalibration() }
+      AsyncFunction("beginCalibrator") { (view: AvsyncCameraView, mode: String) in view.beginCalibrator(mode) }
       AsyncFunction("resumeAnalysis") { (view: AvsyncCameraView) in view.resumeAnalysis() }
+      AsyncFunction("focusAt") { (view: AvsyncCameraView, x: Double, y: Double) in view.focus(atX: x, y: y) }
     }
     OnDestroy {
       let controller = self.generator, picker = self.imagePicker, awake = self.screenAwake
@@ -93,7 +100,9 @@ public class AvsyncModule: Module {
     }
     do {
       let image = try GeneratorImageStore.load(id: options["imageId"] ?? "")
-      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false")
+      // mode "calibration": the calibration pattern for the calibrator board instead of the test signal.
+      let controller = AvsyncGeneratorController(rate: rate, taiUtc: taiUtc, name: label("name", limit: 64), subtitle: label("subtitle", limit: 128), image: image, clockReference: options.filter { $0.key.hasPrefix("clock") }, keepScreenAwake: options["keepAwake"] != "false",
+                                                 senderCalibration: options.filter { $0.key.hasPrefix("senderCalibration") }, calibrate: options["mode"] == "calibration")
       generator = controller; controller.onClose = { result in promise.resolve(result) }
       parent.view.endEditing(true)
       parent.present(controller, animated: true)

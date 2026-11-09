@@ -507,7 +507,7 @@ void render_avs3(Yuv422p10& image, uint64_t index, int grains, int rate, int chi
 
 TEST_CASE("AVS3 QR payload round trip and burst schedule") {
     QrPayload p=avs3_payload(37,25,2,"1080p50");
-    const auto text=qr_payload_text(p);CHECK(text.substr(0,5)=="AVS3:");CHECK(text.size()==59);
+    const auto text=qr_payload_text(p);CHECK(text.substr(0,5)=="AVS4:");CHECK(text.size()<=90);
     auto back=parse_qr_payload(text);REQUIRE(back);CHECK(back->optical_code);CHECK(back->k==p.k);CHECK(back->tk==p.tk);
     // The QR names event k from half a period before its burst.
     CHECK(optical_named_seq(37,25)==1);CHECK(optical_named_seq(38,25)==2);CHECK(optical_named_seq(62,25)==2);CHECK(optical_named_seq(63,25)==3);
@@ -626,7 +626,8 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     std::vector<std::vector<uint8_t>> shown;
     const int frames=60*6;
     for(int n=0;n<frames;++n) {
-        PictureInfo info;info.period_ms=500;auto qr=plan.qr(plan.named_seq(n));qr.estimated_source=phone_source;info.qr_json=qr_payload_text(qr);
+        PictureInfo info;info.period_ms=500;auto qr=plan.qr(plan.named_seq(n));qr.estimated_source=phone_source;qr.name="Studio iPhone Ü";
+        qr.calibration={"clap",-12.5,1.5,2502};info.qr_json=qr_payload_text(qr); // calibration: sender sound 12.5 ms before its picture
         render_picture(frame,info,1+n/30,n%30,30,plan.a_white(n));
         std::vector<uint8_t> small(size_t(w)*h);
         for(int y=0;y<h;++y)for(int x=0;x<w;++x)small[size_t(y)*w+x]=uint8_t(frame.y[size_t(y*2)*1280+x*2]>>2);
@@ -658,13 +659,19 @@ TEST_CASE("phone analyzer end to end: 60 Hz phone source, 240 fps camera, +20 ms
     }
     INFO(last);
     REQUIRE(last.find("\"stage\":\"measuring\"")!=std::string::npos);
-    auto value=[&](const char* key){const auto at=last.find(std::string("\"")+key+"\":");REQUIRE(at!=std::string::npos);return std::stod(last.substr(at+std::strlen(key)+3));};
-    CHECK(std::abs(value("offsetMs")-20)<.6);
+    auto value=[&](const char* key){const auto at=last.find(std::string("\"")+key+"\":",last.find("\"reading\""));REQUIRE(at!=std::string::npos);return std::stod(last.substr(at+std::strlen(key)+3));};
+    // Measured +20 ms; the QR's sender calibration (-12.5 ms) is subtracted.
+    CHECK(std::abs(value("offsetMs")-32.5)<.6);
+    CHECK(std::abs(value("rawOffsetMs")-20)<.6);
+    CHECK(value("senderCalibrationMs")==-12.5);
     CHECK(std::abs(value("videoLatencyMs")-30)<.6);
     CHECK(std::abs(value("audioLatencyMs")-50)<.3);
     CHECK(value("spreadMs")<1.0);
     CHECK(last.find("\"audioBursts\":[{")!=std::string::npos);
     CHECK(last.find("\"ok\":false")==std::string::npos);
+    // AVS4: the report names the real test ID, the generator name and its own calibration.
+    CHECK(last.find("\"testId\":\"phone-e2e\",\"name\":\"Studio iPhone Ü\"")!=std::string::npos);
+    CHECK(last.find("\"senderCalibration\":{\"method\":\"clap\",\"offsetMs\":-12.500,\"uncertaintyMs\":1.500,\"date\":\"2026-11-07\"}")!=std::string::npos);
     }
 }
 

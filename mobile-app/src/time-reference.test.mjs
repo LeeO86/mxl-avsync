@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTimeReference, bindReference, clockCheckDetails, compareClockReferences, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
+import { applyTimeReference, bindReference, clockCheckDetails, clockCheckDue, compareClockReferences, clockRadiusText, clockSettings, measurementClockLabel, generatorClockOptions, referenceAt, referenceSummary, synchronizeClock } from './time-reference.mjs';
 const epoch = 1793450000000;
 const sample = {source:'ntp',server:'lab.example',referenceUnixMs:epoch,referenceMonotonicMs:1000,deviceUnixMs:epoch-100,uncertaintyMs:2,roundTripMs:2,clockId:'boot-a',timebase:'ios-host'};
 const now = {monotonicMs:1100,clockId:'boot-a',timebase:'ios-host'};
@@ -128,4 +128,38 @@ test('independent sync checks compare at a common native time without treating n
  assert.equal(compareClockReferences({...current,referenceMonotonicMs:500000},reference),null);
  assert.equal(compareClockReferences({...current,uncertaintyMs:NaN},reference),null);
  assert.equal(compareClockReferences(current,null),null);
+});
+
+test('clock checks come before the reference expires, so a running test signal never runs out', () => {
+ const at=(t,radius=2)=>bindReference({...sample,referenceMonotonicMs:t,uncertaintyMs:radius},{...now,monotonicMs:t},t);
+ assert.equal(clockCheckDue(null,0),true);
+ assert.equal(clockCheckDue(at(0),239000),false);
+ assert.equal(clockCheckDue(at(0),241000),true);                   // a minute before the 5 min limit
+ assert.equal(clockCheckDue(at(0,8),179000),false);
+ assert.equal(clockCheckDue(at(0,8),181000),true);                 // 8 ms + 240 s x 50 ppm reaches 20 ms
+ assert.equal(clockCheckDue(at(0,19),29000),false);                // never more often than every 30 s
+ assert.equal(clockCheckDue(at(0,19),31000),true);
+ // 15 min of test signal: every 0.5 s the app asks clockCheckDue; a check answers 1 s later and is
+ // pushed to the generator (generatorClockOptions), which stops once its reference is no longer usable.
+ for(const network of [true,false]) {
+  let pushed=at(0,8),pending=null,stopped=null,pushes=0;
+  for(let t=0;t<=900000&&stopped===null;t+=500) {
+   if(pending!==null&&t>=pending){pushed=at(pending-1000,8);pending=null;assert.ok(generatorClockOptions(pushed,{...now,monotonicMs:t}).clockUnixMs);pushes++;}
+   if(network&&pending===null&&clockCheckDue(pushed,t)) pending=t+1000;
+   if(referenceAt(pushed,{...now,monotonicMs:t}).state!=='estimated') stopped=t;
+  }
+  if(network){assert.equal(stopped,null);assert.ok(pushes>=4);}
+  else assert.equal(stopped,240500);
+ }
+});
+
+test('a signal started before the first check gets that check as soon as it arrives', () => {
+ // Start right after coming to the front: no reference yet, so the signal starts on device UTC ...
+ assert.deepEqual(generatorClockOptions(null,now),{});
+ // ... and the first accepted check is what App.js hands to it (updateGeneratorClock).
+ const first=bindReference(sample,now,10);
+ const options=generatorClockOptions(first,now);
+ assert.equal(options.clockUnixMs,String(epoch));
+ assert.equal(options.clockLimitMs,'20');
+ assert.equal(options.clockId,'boot-a');
 });

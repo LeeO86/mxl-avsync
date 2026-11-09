@@ -59,6 +59,7 @@ add_library(avsync-core STATIC
     core/src/phone_generator.cpp
     core/src/picture_reader.cpp
     core/src/two_way.cpp
+    core/src/calibrator.cpp
     third_party/nayuki/qrcodegen.cpp
 )
 target_include_directories(avsync-core
@@ -70,7 +71,7 @@ set_source_files_properties(core/src/text.cpp PROPERTIES OBJECT_DEPENDS "${DEJAV
 target_link_libraries(avsync-core PUBLIC blend2d::blend2d)
 target_compile_options(avsync-core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
-add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp tests/unit/test_timecode.cpp)
+add_executable(avsync-core-tests tests/unit/test_core.cpp tests/unit/test_stage23.cpp tests/unit/test_timecode.cpp tests/unit/test_calibrator.cpp)
 target_include_directories(avsync-core-tests PRIVATE third_party/doctest)
 target_link_libraries(avsync-core-tests PRIVATE avsync-core)
 target_compile_options(avsync-core-tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -182,8 +183,11 @@ if(FFMPEG_FOUND AND NOT AVSYNC_CORE_ONLY)
         add_executable(avsync-phone-fixture tests/tools/phone_fixture.cpp)
         target_link_libraries(avsync-phone-fixture PRIVATE avsync-mxlio)
         target_compile_options(avsync-phone-fixture PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        add_executable(avsync-calibration-flow tests/tools/calibration_flow.cpp)
+        target_link_libraries(avsync-calibration-flow PRIVATE avsync-mxlio)
+        target_compile_options(avsync-calibration-flow PRIVATE -Wall -Wextra -Wno-unused-parameter)
         if(MXL_RUNTIME_LIB_DIRS)
-            set_target_properties(avsync-sample-flow avsync-pattern-writer avsync-phone-fixture PROPERTIES BUILD_RPATH "${MXL_RUNTIME_LIB_DIRS}")
+            set_target_properties(avsync-sample-flow avsync-pattern-writer avsync-phone-fixture avsync-calibration-flow PROPERTIES BUILD_RPATH "${MXL_RUNTIME_LIB_DIRS}")
         endif()
         message(STATUS "libmxl found: live reader and writer are linked into mxl-avsync")
     else()

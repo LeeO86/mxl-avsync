@@ -23,6 +23,8 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   private var configured = false, cameraDevice: AVCaptureDevice?, requestedFps = 0.0, lockGeneration = 0
   // samples queue
   private var analysisBusy = false, qrBusy = false, lastQrScan = -10.0, lastPoll = 0.0, generation = 0
+  private var focusing = false // the 1.5 s auto step: frames are dropped until the lock
+  private var pendingCalibrator: String? // samples queue: starts at the next restart (the exposure lock)
   private var targetFps = 0.0, captureMode = "unknown", capturedSampleRate = 0.0, exposureMs = 0.0
   // main queue
   private var active = true, background = false
@@ -81,18 +83,42 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   }
   func beginCalibration() {
     DispatchQueue.main.async { [weak self] in self?.clearOutline() }
-    samples.async { [weak self] in guard let self else { return }; self.generation += 1; self.processor.beginCalibration() }
+    samples.async { [weak self] in guard let self else { return }; self.generation += 1; self.focusing = false; self.processor.beginCalibration() }
+  }
+  // Calibrator board take ("camera" or "display", docs/calibrator.md). For the camera the LED
+  // floods the lens: lock exposure again at the lowest gain first; the take starts at the lock.
+  func beginCalibrator(_ mode: String) {
+    DispatchQueue.main.async { [weak self] in self?.clearOutline() }
+    guard mode == "camera" else {
+      samples.async { [weak self] in guard let self else { return }; self.generation += 1; self.focusing = false; self.processor.beginCalibrator(mode) }
+      return
+    }
+    samples.async { [weak self] in self?.pendingCalibrator = mode }
+    control.async { [weak self] in self?.scheduleExposureLock(lowGain: true) }
+  }
+  // Tap to focus (x, y: 0…1 across the view): re-run the auto step metered on that spot.
+  func focus(atX x: Double, y: Double) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.bounds.width > 0, self.bounds.height > 0 else { return }
+      // The preview layer fills the view and knows its aspect fill and rotation.
+      let point = self.preview.captureDevicePointConverted(fromLayerPoint: CGPoint(x: x * self.bounds.width, y: y * self.bounds.height))
+      self.clearOutline()
+      self.control.async { self.scheduleExposureLock(at: point) }
+    }
   }
   // Re-aim: drop the history and lock exposure again for the new view.
   func resumeAnalysis() {
     DispatchQueue.main.async { [weak self] in self?.clearOutline() }
-    samples.async { [weak self] in self?.restart() }
+    samples.async { [weak self] in self?.pendingCalibrator = nil; self?.restart() } // also cancels a calibrator take waiting for its lock
     control.async { [weak self] in self?.scheduleExposureLock() }
   }
 
   // MARK: session
 
-  private func restart() { generation += 1; processor.reset(); telemetry.reset(fps: targetFps) }
+  private func restart() {
+    generation += 1; focusing = false; processor.reset(); telemetry.reset(fps: targetFps)
+    if let mode = pendingCalibrator { pendingCalibrator = nil; processor.beginCalibrator(mode) }
+  }
   private func updateRunning() {
     let shouldRun = window != nil && active && !background
     control.async { [weak self] in
@@ -192,22 +218,31 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
   // After 1.5 s of automatic exposure and focus: lock focus and white balance, and expose for
   // the whole frame interval at the ISO that keeps the same brightness. A full-frame exposure
   // turns each light edge into a ramp across one frame, which the core times exactly.
-  private func scheduleExposureLock() {
+  // Focus and exposure are metered at the tap point, else at the centre (device coordinates).
+  // The analysis holds during the auto step and starts fresh at the lock (also on camera start
+  // and Restart), so no frame from the auto step reaches a reading.
+  private func scheduleExposureLock(at point: CGPoint? = nil, lowGain: Bool = false) {
     lockGeneration += 1
     let ticket = lockGeneration
+    samples.async { [weak self] in self?.generation += 1; self?.focusing = true }
     if let device = cameraDevice, (try? device.lockForConfiguration()) != nil {
+      let spot = point ?? CGPoint(x: 0.5, y: 0.5)
+      if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = spot }
+      if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = spot }
       if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
       if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
       if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
       device.unlockForConfiguration()
     }
     control.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-      guard let self, ticket == self.lockGeneration, let device = self.cameraDevice, self.session.isRunning,
-            (try? device.lockForConfiguration()) != nil else { return }
+      guard let self, ticket == self.lockGeneration else { return } // a newer tap or restart owns the lock
+      // The hold ends here even when the lock fails: analyse with the focus it has.
+      defer { self.samples.async { if self.focusing { self.restart() } } }
+      guard let device = self.cameraDevice, self.session.isRunning, (try? device.lockForConfiguration()) != nil else { return }
       defer { device.unlockForConfiguration() }
       let frame = device.activeVideoMinFrameDuration, longest = device.activeFormat.maxExposureDuration
       let duration = CMTimeCompare(frame, longest) <= 0 ? frame : longest
-      let iso = min(max(device.iso * Float(device.exposureDuration.seconds / duration.seconds), device.activeFormat.minISO), device.activeFormat.maxISO)
+      let iso = lowGain ? device.activeFormat.minISO : min(max(device.iso * Float(device.exposureDuration.seconds / duration.seconds), device.activeFormat.minISO), device.activeFormat.maxISO)
       if device.isExposureModeSupported(.custom) { device.setExposureModeCustom(duration: duration, iso: iso, completionHandler: nil) }
       if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
       if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
@@ -273,6 +308,7 @@ final class AvsyncCameraView: ExpoView, AVCaptureVideoDataOutputSampleBufferDele
     telemetry.drop(reason: value == kCMSampleBufferDroppedFrameReason_FrameWasLate as String ? "late" : value == kCMSampleBufferDroppedFrameReason_OutOfBuffers as String ? "outOfBuffers" : "other")
   }
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    guard !focusing else { return }
     let started = PhoneClock.nowMs(), isVideo = output is AVCaptureVideoDataOutput
     defer { telemetry.processing(isVideo ? "video" : "audio", ms: PhoneClock.nowMs() - started) }
     autoreleasepool {

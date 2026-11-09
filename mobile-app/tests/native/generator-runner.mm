@@ -129,9 +129,10 @@ int main(int argc, char **argv) { @autoreleasepool {
         for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
             const size_t at=(size_t(y)*width+x)*4;
             const bool differs=!std::equal(before.begin()+at,before.begin()+at+4,after.begin()+at);
-            if(differs) { ++changed;assert(y>g.marker_y+g.marker_side && y<height); }
+            const bool inQr=x>=g.qr_x && x<g.qr_x+g.qr_size && y>=g.qr_y && y<g.qr_y+g.qr_size;
+            if(differs && !inQr) { ++changed;assert(y>g.marker_y+g.marker_side && y<height); }
         }
-        assert(changed>500); // Labels/logo actually visible, never cover timing/QR.
+        assert(changed>500); // Labels/logo actually visible, never cover timing. The QR carries the name (AVS4), so it may change.
         [source setSourceName:@"" subtitle:@"" image:nil];
         const auto packets=decode_timecodes(signal.data(),signal.size(),48000);
         assert(packets.size()==3);
@@ -141,5 +142,39 @@ int main(int argc, char **argv) { @autoreleasepool {
             assert(packets[i].video_send_ns==quantize_timecode_ns(1700000037000000000LL+i*1000000000LL/rate));
         }
     }
-    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR geometry/flash onset and 1/2-Hz independent audio.\n";
+    // Sender calibration in the QR, and the calibration pattern helpers.
+    {
+        AVSyncGenerator *source=[[AVSyncGenerator alloc] initWithTestID:@"phone-native-test" rate:2 epochTaiNs:1700000037000000000LL epochHost:100];
+        [source setSenderCalibrationMethod:@"transponder" offsetMs:-38.04 uncertaintyMs:1.0 day:2503];
+        CVPixelBufferRef pixel=nullptr;
+        assert(CVPixelBufferCreate(kCFAllocatorDefault,width,height,kCVPixelFormatType_32BGRA,(__bridge CFDictionaryRef)@{(id)kCVPixelBufferIOSurfacePropertiesKey:@{}},&pixel)==kCVReturnSuccess);
+        CVPixelBufferLockBaseAddress(pixel,0);
+        CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
+        CGContextRef context=CGBitmapContextCreate(CVPixelBufferGetBaseAddress(pixel),width,height,8,CVPixelBufferGetBytesPerRow(pixel),space,CGBitmapInfo(kCGBitmapByteOrder32Little)|CGBitmapInfo(kCGImageAlphaPremultipliedFirst));
+        CGContextDrawImage(context,CGRectMake(0,0,width,height),[source imageForSequence:1].CGImage);
+        CVPixelBufferUnlockBaseAddress(pixel,0);
+        bool found=false;
+        for(NSString *payload in [AVSyncQRCodeReader readPixelBuffer:pixel][@"payloads"]) if(auto parsed=parse_qr_payload(payload.UTF8String)) {
+            assert(parsed->calibration.method=="transponder" && std::abs(parsed->calibration.offset_ms+38.0)<1e-9 && parsed->calibration.uncertainty_ms==1.0 && parsed->calibration.day==2503);found=true;
+        }
+        assert(found);
+        CGContextRelease(context);CGColorSpaceRelease(space);CVPixelBufferRelease(pixel);
+        [source setSenderCalibrationMethod:@"bogus" offsetMs:1 uncertaintyMs:1 day:1]; // ignored: method none
+        assert([AVSyncGenerator calibrationLeftWhiteAtFrame:29 fps:60] && ![AVSyncGenerator calibrationLeftWhiteAtFrame:30 fps:60]);
+        assert([AVSyncGenerator calibrationSwapFrame:2 fps:60]==60);
+        NSData *beep=[AVSyncGenerator calibrationBeepWithSampleRate:48000];
+        assert(beep.length==192*sizeof(float));
+        assert(![[AVSyncGenerator displayCalibrationForSamples:[NSMutableData dataWithLength:48000*sizeof(float)] sampleRate:48000 minimumPairs:8][@"ok"] boolValue]);
+    }
+    {
+        // Clock refresh (core retime): stamps of events not scheduled yet slew, host times stay.
+        AVSyncGenerator *source=[[AVSyncGenerator alloc] initWithTestID:@"phone-native-slew" rate:2 epochTaiNs:1700000037000000000LL epochHost:100];
+        assert([source retimeOffsetNs:2000000 fromSequence:5 maxStepNs:20000000]);
+        assert(![source retimeOffsetNs:50000000 fromSequence:5 maxStepNs:20000000]);
+        assert([source clockOffsetMsForSequence:4]==0 && std::abs([source clockOffsetMsForSequence:100]-2)<1e-9);
+        assert(std::abs([source hostTimeForSequence:100]-(100+99/2.0))<1e-9);
+        assert([AVSyncGenerator clockReferenceExpiredAgeMs:300001 radiusMs:0 limitMs:20]);
+        assert(![AVSyncGenerator clockReferenceExpiredAgeMs:1000 radiusMs:5 limitMs:20]);
+    }
+    std::cout<<"PASS: shared color renderer, DejaVu text, custom name/subtitle/image, native sync scale, QR geometry/flash onset, 1/2-Hz independent audio and clock refresh slew.\n";
 } }

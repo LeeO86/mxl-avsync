@@ -102,6 +102,7 @@ struct Runtime {
     int frame_height = 0;
     bool interlaced_flow = false;
     double frame_rate_fps = 0;
+    std::optional<QrPayload> signal; // analyzer: the source named by the picture QR
     std::string source_image_path;
     int source_image_frames = 0;
     std::shared_ptr<const SourceClip> source_clip; // decoded once per upload, drawn by the live generator
@@ -242,6 +243,22 @@ nlohmann::json clock_brief_json(const Runtime& rt)
     const auto accuracy = clock_accuracy_ms(rt.clock_status);
     return {{"source", rt.clock_status.sync_source}, {"state", rt.clock_status.sync_state},
         {"accuracy_ms", accuracy ? nlohmann::json(*accuracy) : nlohmann::json(nullptr)}};
+}
+
+// Analyzer: the source the picture QR names (AVS4 carries the real test ID, a name and the
+// sender's own output calibration); null without a QR.
+nlohmann::json signal_json(const Runtime& rt)
+{
+    if (!rt.signal) return nullptr;
+    const auto& s = *rt.signal;
+    nlohmann::json calibration = {{"method", s.calibration.method}};
+    if (s.calibration.calibrated()) {
+        calibration["offset_ms"] = s.calibration.offset_ms;
+        calibration["uncertainty_ms"] = s.calibration.uncertainty_ms;
+        if (s.calibration.day > 0) calibration["date"] = calibration_date(s.calibration.day);
+    }
+    return {{"source_id", s.source_id}, {"test_id", s.test_id}, {"name", s.name}, {"live", s.mode == "LIVE"}, {"rate", s.rate},
+        {"format", s.format}, {"estimated_source", s.estimated_source}, {"sender_calibration", calibration}};
 }
 
 nlohmann::json clock_status_json(const Runtime& rt)
@@ -542,7 +559,7 @@ void install_web(HttpServer& http, Runtime& rt)
             {"audio_enable", rt.config.audio_enable}, {"video_flow", rt.video_flow}, {"audio_flow", rt.audio_flow},
             {"result_flow", rt.result_flow}, {"result_domain", rt.result_domain},
             {"width", rt.frame_width}, {"height", rt.frame_height}, {"grain_rows", rt.grain_rows},
-            {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps},
+            {"interlaced", rt.interlaced_flow}, {"video_rate_fps", rt.frame_rate_fps}, {"signal", signal_json(rt)},
             {"ptp", clock_status_json(rt)}, {rt.config.role == "generator" ? "emit_offsets" : "source_emit_offsets",
                 rt.config.role == "generator" ? emit_offsets_json(rt) : source_emit_json(rt)}});
     });
@@ -568,9 +585,9 @@ void install_web(HttpServer& http, Runtime& rt)
         if (rt.config.role != "generator") return json_response({{"error", "not a generator"}}, 404);
         return json_response({{"offset_ms", rt.config.offset_ms}, {"level_dbfs", rt.config.chirp_level_dbfs}, {"muted", !rt.config.audio_enable},
             {"stopped", rt.stopped}, {"title", rt.config.title}, {"source", rt.config.source}, {"subtitle", rt.config.subtitle},
-            {"notes", rt.config.notes},
+            {"notes", rt.config.notes}, {"test_id", rt.config.effective_test_id()},
             {"timing_reference", rt.config.audio_timecode == "legacy" ? "centre" : "start"}, {"marker", rt.config.audio_timecode == "legacy" ? "toggle" : "flash"}, {"audio_timecode", rt.config.audio_timecode}, {"event_rate", rt.config.event_rate}, {"format", rt.config.video_format},
-            {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
+            {"pattern", rt.config.pattern}, {"source_image", !rt.source_image_path.empty()}, {"source_image_frames", rt.source_image_frames}});
     });
     http.add("PATCH", "/api/v1/generator", [&](const HttpRequest& request) {
         std::lock_guard lock(rt.mu);
@@ -595,6 +612,7 @@ void install_web(HttpServer& http, Runtime& rt)
         if (body.contains("muted")) flat["AVSYNC_AUDIO_ENABLE"] = body["muted"].get<bool>() ? "false" : "true";
         if (body.contains("audio_timecode")) flat["AVSYNC_AUDIO_TIMECODE"] = body["audio_timecode"].get<std::string>();
         if (body.contains("event_rate")) flat["AVSYNC_EVENT_RATE"] = std::to_string(body["event_rate"].get<int>());
+        if (body.contains("pattern")) flat["AVSYNC_PATTERN"] = body["pattern"].get<std::string>();
         try {
             apply_settings(rt.config, flat, nullptr);
         } catch (const std::exception& ex) {
@@ -698,6 +716,11 @@ void install_web(HttpServer& http, Runtime& rt)
             const double age_ms = now_ms - last->video_time_ms;
             body["age_ms"] = age_ms;
             body["offset_ms"] = *last->av_offset_ms;
+            if (last->sender_calibration_ms) {
+                // AVS4: offset_ms has the sender's own output offset subtracted; raw is as measured.
+                body["raw_offset_ms"] = *last->raw_av_offset_ms;
+                body["sender_calibration_ms"] = *last->sender_calibration_ms;
+            }
             if (grade == "invalid") {
                 std::ostringstream sentence;
                 sentence.setf(std::ios::fixed);
@@ -1242,6 +1265,10 @@ int run_service(Config config)
             std::lock_guard lock(rt.mu);
             rt.result_flow = flow;
             rt.result_domain = domain;
+        };
+        callbacks.set_signal = [&](const std::optional<QrPayload>& signal) {
+            std::lock_guard lock(rt.mu);
+            rt.signal = signal;
         };
         callbacks.set_status = [&](const MediaStatus& status) {
             std::lock_guard lock(rt.mu);

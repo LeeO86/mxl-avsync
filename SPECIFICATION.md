@@ -113,7 +113,7 @@ The readers MUST NOT copy whole grains. The marker detector reads only its regio
 
 | Quantity | Definition | Needs |
 | --- | --- | --- |
-| **AV offset** | `av_offset_ms = audio_event_time_ms − video_event_time_ms`, both at the measuring point | nothing beyond the signal |
+| **AV offset** | `av_offset_ms = audio_event_time_ms − video_event_time_ms`, both at the measuring point; minus the sender calibration when the AVS4 QR carries one (§5.6; the measured value is then `raw_av_offset_ms`) | nothing beyond the signal |
 | **Deviation** | `deviation_ms = av_offset_ms − expected_av_offset_ms` (the generator's set offset) | the event's expected offset (QR or manifest) |
 | **Video latency** | time the video event is seen at the measuring point − time it was emitted | a common clock |
 | **Audio latency** | same for audio | a common clock |
@@ -226,7 +226,7 @@ Events are paired by identity, not by nearest neighbour:
 1. **QR code** (top left, about 18 % of the height): changes once per second (`AVSYNC_QR_PERIOD_MS`, default 1000), error correction level M. Payload §5.6. It identifies the test and the event; it is not needed for timing.
 2. **Frame counter** (text): the grain index the generator wrote, and in LIVE mode the TAI time of the grain. The text says "frame as written by the generator"; the analyzer reports the frame it saw separately.
 3. **Free text**: `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES`, and the format, rate, audio format and set offset, drawn once per change.
-4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal (AVS3, 2.1.0) splits it into two always-opposite fields that swap in an 8-transition burst from each event (see QR + optical code below). Its first transition coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
+4. **Timing marker**: a large block (40 % × 40 % of the height, centred). The default audio-timecode signal (AVS3 optical code since 2.1.0, AVS4 QR) splits it into two always-opposite fields that swap in an 8-transition burst from each event (see QR + optical code below). Its first transition coincides with chirp onset at zero source offset. Legacy mode retains alternating black/white per event.
 5. **Sweep bar**: a dot moving along a line, reaching a mark at every event and flashing there. A trained engineer sees a gross sync error against the chirp by ear and eye.
 6. **Frame counter strip**: 32 blocks along the bottom (each 1/40 of the width, full contrast): the low 24 bits of the sequence number of the current event in Gray code, 4 bits of the frame position within the period, a parity block and three fixed reference blocks (white, black, white) that give the detector its thresholds. It is readable in every frame, survives H.264 at low bitrate and 4:1 downscaling, and is what the analyzer uses to find drops, duplicates and the event id.
 7. **Fiducials**: four corner patterns (nested squares) for marker search in a scaled or cropped picture (a multiviewer tile, and the phone app). The live analyzer retains a fast full-raster path and can also locate/rectify an optical or scaled test picture using these fiducials.
@@ -264,7 +264,7 @@ The detector works on 10-bit luma from v210; its cost is a few thousand samples 
 
 ### 5.6 QR payload
 
-Compact JSON, versioned, at most 200 bytes:
+The audio-timecode signal (default) uses the compact `AVS4:` text, see "QR + optical code" below. Legacy audio mode uses compact JSON, versioned, at most 200 bytes:
 
 ```json
 {"s":"mxl-avsync/1","t":"TEST-2026-0001","m":"LIVE","k":3459211852,"tk":1729673412000000000,"o":0,"r":2,"f":"1080p50"}
@@ -273,7 +273,7 @@ Compact JSON, versioned, at most 200 bytes:
 | Key | Meaning |
 | --- | --- |
 | `s` | schema, `mxl-avsync/1` |
-| `t` | test id (`AVSYNC_TEST_ID`, default the generator's NMOS seed) |
+| `t` | test id (`AVSYNC_TEST_ID`, default the stable generator id of §10.2) |
 | `m` | `FILE` or `LIVE` |
 | `k` | sequence number of the next event |
 | `tk` | that event's set video time: TAI ns (LIVE) or ms on the file timeline (FILE) |
@@ -368,6 +368,7 @@ The rule of mxl-scopes §6, for the same reasons: a stuck reader takes down one 
 | `test_id`, `event_id`, `seq`, `mode` | |
 | `video_event_time`, `audio_event_time` | ms (FILE) or TAI ns (LIVE), index times |
 | `av_offset_ms`, `expected_av_offset_ms`, `deviation_ms` | §3.1 |
+| `raw_av_offset_ms`, `sender_calibration_ms` | only when the AVS4 QR carries a sender calibration: the measured offset before it was subtracted, and the calibration (§5.6) |
 | `av_offset_arrival_ms` | LIVE only |
 | `video_latency_ms`, `audio_latency_ms`, `video_index_shift_ms`, `audio_index_shift_ms` | LIVE with a reference only; else absent |
 | `video_source_emit_offset_ms`, `audio_source_emit_offset_ms`, `video_chain_latency_ms`, `audio_chain_latency_ms` | with a latency and a source emit offset (entered, or the flow's NMOS tag; §3.3); else absent |
@@ -515,12 +516,13 @@ Precedence: environment > `AVSYNC_CONFIG_FILE` (flat JSON, keys are the variable
 | `AVSYNC_VIDEO_FORMAT` | `1080p50` | flow | §5.4 |
 | `AVSYNC_AUDIO_CHANNELS` | 2 | flow | 1–16 |
 | `AVSYNC_AV_OFFSET_MS` | 0 | live | −500…+500, set offset |
+| `AVSYNC_PATTERN` | `test` | live | `test` (the AV sync test signal) or `calibration`: the calibrator board's pattern (halves swap every 500 ms, 1.5 kHz beep 100 ms after each swap at the chirp level; docs/calibrator.md). The flows and test id stay the same |
 | `AVSYNC_CHIRP_LEVEL_DBFS` | −12 | live | −40…−1 |
 | `AVSYNC_AUDIO_ENABLE` | `true` | live | `false` mutes the chirps (silence, flows keep running) |
 | `AVSYNC_AUDIO_LEAD_MS` | 20 | restart | how far ahead of TAI audio is written |
 | `AVSYNC_VIDEO_LEAD_MS` | 20 | restart | 0–100; how far ahead of its timestamp each video grain is committed (§2.2) |
 | `AVSYNC_QR_PERIOD_MS` | 1000 | live | 500–5000 |
-| `AVSYNC_TEST_ID` | the NMOS seed | live | in the QR and the results |
+| `AVSYNC_TEST_ID` | empty: stable generator id | live | in the QR and the results. A set value is used as it is. Empty: `<NMOS seed>-` + 12 hex digits of a hash of the NMOS seed, the app version and the timing settings (event rate, audio timecode, video format, AV offset, audio/video lead, source emit offsets), so a restart keeps it and a new version or timing setting gives a new one. Title, source and subtitle do not change it. The phone generator uses the same rule (`generator_test_id` in the core); `GET /api/v1/generator` shows the id in use, and the settings page shows it greyed in the empty field |
 | `AVSYNC_TITLE`, `AVSYNC_SOURCE`, `AVSYNC_NOTES` | empty | live | free text on the picture (each ≤ 80 characters) |
 
 ### 10.3 Analyzer
@@ -613,6 +615,14 @@ signal generation. Release on pause/stop, leaving capture, background/inactive
 or teardown; restore normal auto-lock. Disabling the preference restores normal
 behavior. Preserve measurement brightness and the original idle-timer state.
 
+### Saved results by sender (maintainer decision, 2026-11-07)
+
+"Compare" groups saved results by the QR/timecode sender ID (`sourceId`; none
+or 0 is "Unknown sender"). A sender has an optional local nickname and at most
+one reference result. Other results of that sender and the live reading show
+Δ AV offset, and Δ latency only when both values exist. A Δ is marked "check"
+when the camera mode or calibration offset differs from the reference.
+
 ### 12.1a Phone time reference (maintainer decision, 2026-10-31)
 
 Native iOS uses an explicit configurable SNTP exchange; Android uses raw GNSS
@@ -659,6 +669,7 @@ The camera and microphone have different capture latencies (OS buffers, exposure
 - The app measures the rig, stores the capture offset per device model and OS version with the date, the method, the number of events and the spread, and subtracts it from later measurements.
 - A calibration expires after an OS update or 90 days. Uncalibrated measurements are allowed and shown as **uncalibrated** in orange, with no grade colour.
 - Expected accuracy is unknown until measured on real devices; the app shows the measured spread of its own calibration as its uncertainty.
+- **Calibrator board** (maintainer design, 2026-11-08; contract docs/calibrator.md): Settings → With calibrator. Camera mode (flash + click on the rear camera) gives the capture calibration above (method `calibrator-pulse`, same record and validity as the clap). Display mode (the generator's calibration pattern, the board clicks at each swap, the generator beeps D = 100 ms later) gives the phone's **sender calibration** (screen vs speaker, AVS4 method `transponder`), which the phone generator then sends in the QR. The pattern is a mode of the generators themselves (same display and audio path); the container has it too (`AVSYNC_PATTERN`). Analysis in `core/…/calibrator.hpp`. Every analyser (phone, container, file) subtracts the sender calibration from the measured AV offset once, in core (`Pairer`), and keeps the raw value and the calibration next to it; "not calibrated" changes nothing. The phone's own capture calibration is subtracted separately (app), so neither is counted twice. Debug → Clear calibration clears both.
 
 ---
 
@@ -777,10 +788,10 @@ Family look: header with label, role, state and registration pills, version; tab
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/v1/info` | both | version, core version, MXL revision, role, label |
-| GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary |
-| GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate |
+| GET | `/api/v1/status` (also `/statusz`) | both | readers or writers, NMOS summary; analyzer: `signal`, the source the picture QR names (`source_id`, `test_id`, `name`, `live`, `rate`, `format`, `estimated_source`, `sender_calibration` {`method`, and when calibrated `offset_ms`, `uncertainty_ms`, `date`}; analysers subtract it), null without a QR |
+| GET/PATCH | `/api/v1/generator` | gen | offset, level, mute, texts, rate; GET also shows `test_id` |
 | POST | `/api/v1/generator/stop`, `/start` | gen | §11 |
-| GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics |
+| GET | `/api/v1/measurement` | ana | current grade, offset, latencies, window statistics; with a sender calibration also `raw_offset_ms` and `sender_calibration_ms` |
 | GET | `/api/v1/events?since=<seq>&limit=` | ana | the newest matching event records, newest first, plus `total` |
 | GET | `/api/v1/statistics` | ana | window and since-start statistics (§8.2) |
 | POST | `/api/v1/statistics/reset` | ana | new statistics epoch (the event log keeps everything) |
@@ -1028,22 +1039,39 @@ identity or imply source-output calibration. Text rasterization is CoreText
 on iOS with the same bundled DejaVu font, avoiding media/GUI dependencies in
 avsync-core and desktop rendering dependencies in the mobile binary.
 
-### QR + optical code (AVS3, 2.1.0)
+### QR + optical code (AVS3 optical code, AVS4 QR)
 
 The compact audio-timecode generator (file, MXL and phone sources) uses one
-large version-4 QR (33 modules, correction Q, four quiet modules per side)
+large version-4 QR (33 modules, correction M since AVS4, four quiet modules per side)
 beside a 41-module panel with a four-module gap, as in AVS2. The panel holds two
 fields: A is its left half, B its right half (both in the same rows). A and B
 are always opposite. Rest: A black (Y 64), B white (Y 940). Colour bars, source
 labels/image and the visual sync scale remain. Legacy audio mode retains its
 original video layout. See [docs/qr-flash.md](docs/qr-flash.md).
 
-The payload is `AVS3:` followed by the 54 hexadecimal characters of the AVS2
-layout: flags u8 (bit 0 LIVE, bit 1 estimated phone source), source id u32,
-full event sequence u64, video send time i64 (TAI for LIVE, media timeline for
-FILE), source AV offset i32 in 1/16 ms, format u8 (0–8: 1080p50, 1080p25,
-1080p59.94, 1080i25, 2160p50, 720p60, 720p50, 960x540p25, 540p25) and event
-rate u8 (1 or 2). `AVS2:` payloads still parse but no longer create events.
+**AVS4 payload.** `AVS4:` followed by base45 text (RFC 9285) of up to 56
+bytes, at most 90 characters, so it always fits version 4 at correction M. All
+characters are QR alphanumeric, and base45 never ends in a space. Bytes, all
+integers big-endian:
+
+| Bytes | Field |
+| --- | --- |
+| 1 | flags: bit 0 LIVE, bit 1 estimated phone source, bit 2 rate 2 (else 1), bit 3 calibration block follows, bits 4–7 format (0–8: 1080p50, 1080p25, 1080p59.94, 1080i25, 2160p50, 720p60, 720p50, 960x540p25, 540p25) |
+| 5 | event sequence k (40 bits) |
+| 8 | video send time T_k in ns (TAI for LIVE, media timeline for FILE) |
+| 3 | source AV offset in 1/16 ms, signed (±524 s) |
+| 6, only with bit 3 | sender calibration: method u8 (1 clap with a second phone, 2 transponder calibrator, 3 pulse-train), offset i16 in 0.1 ms (sound output minus picture output, positive: sound later; same sign as `av_offset_ms`, §3.2; analysers subtract it from the measured offset), uncertainty u8 in 0.5 ms, day u16 since 2020-01-01 (0 unknown) |
+| 1 + n | test id: n characters (1–64) of `0-9a-zA-Z-_`, 6 bits each; the source id is CRC-32 of the id. n = 0: the 4-byte source id alone follows (the id did not fit or does not give that source id); the analyzer then shows `source-<8 hex>` |
+| rest | generator name, UTF-8, 0–24 bytes; cosmetic, not part of the id |
+
+The encoder cuts the name at a character boundary to the room left (24 bytes,
+less with a long id or a calibration block). Stable phone and container ids
+(§10.2) always fit. A parser rejects unknown formats or methods, a phone clock in
+FILE mode, a negative T_k, bad padding bits, invalid UTF-8 or control
+characters in the name, and leftover bytes. The container's name is
+the Signal form Title (`AVSYNC_SOURCE`), the phone's Title field (stored as `generatorName`). Generators send method none until the
+source-output calibration exists. `AVS2:` and `AVS3:` payloads are no longer
+read (all generators and readers change together).
 
 **Burst.** Around event k the fields swap 8 times at chip offsets {0, 1, 2, 4,
 5, 6, 7, 8} (k even) or {0, 1, 2, 3, 4, 6, 7, 8} (k odd); transition 0 is the

@@ -61,6 +61,15 @@ JNIEXPORT jstring JNICALL AVSYNC(calibrationError)(JNIEnv* env, jclass, jlong h)
     return error ? env->NewStringUTF(error->c_str()) : nullptr;
 }
 
+// Calibrator board take (docs/calibrator.md): camera (flash + click) or display (an external screen, microphone only).
+JNIEXPORT void JNICALL AVSYNC(beginCalibrator)(JNIEnv*, jclass, jlong h, jboolean display)
+{
+    self(h)->begin_calibrator(display ? PhoneAnalyzer::CalibratorMode::Display : PhoneAnalyzer::CalibratorMode::Camera);
+}
+JNIEXPORT jboolean JNICALL AVSYNC(calibratorActive)(JNIEnv*, jclass, jlong h) { return self(h)->calibrator_active(); }
+// A progress report about once a second, then the result or an error (JSON), else null.
+JNIEXPORT jstring JNICALL AVSYNC(pollCalibrator)(JNIEnv* env, jclass, jlong h) { return text(env, self(h)->poll_calibrator()); }
+
 // Returns a PhoneAnalyzer.CalibrationTake, or null when no take is ready.
 JNIEXPORT jobject JNICALL AVSYNC(takeCalibration)(JNIEnv* env, jclass, jlong h)
 {

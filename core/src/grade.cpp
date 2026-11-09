@@ -347,6 +347,12 @@ Measurement Pairer::pair_one(const PendingVideo& pending, const AudioObservation
     m.audio_tai_ns = audio->tai_ns;
     m.expected_av_offset_ms = audio->timecode ? (audio->audio_send_ns - audio->event_time_ns) / 1e6 : pending.expected_offset_ms;
     m.av_offset_ms = audio->time_ms - pending.video.time_ms;
+    if (sender_calibration_.calibrated()) {
+        // The generator's own output offset is not part of the chain under test.
+        m.raw_av_offset_ms = m.av_offset_ms;
+        m.sender_calibration_ms = sender_calibration_.offset_ms;
+        m.av_offset_ms = *m.av_offset_ms - sender_calibration_.offset_ms;
+    }
     m.deviation_ms = *m.av_offset_ms - m.expected_av_offset_ms;
     m.correlation = audio->correlation;
     m.audio_level_dbfs = audio->level_dbfs;

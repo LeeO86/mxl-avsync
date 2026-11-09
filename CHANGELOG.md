@@ -17,6 +17,87 @@
 
 ## Mobile (not released yet)
 
+- Test signal (iPhone and Android) no longer stops by itself about 5 minutes
+  after the last clock check ("Clock reference expired"). The app keeps
+  checking the clock while the signal runs and hands each new check to it; the
+  source timestamps slew to it at most 100 ppm (0.1 ms per second), never
+  jumping, and only for events not queued yet (core
+  `PhoneGeneratorPlan::retime`). It still stops when no check gets through for
+  too long (no network), or when a new check is further off than the
+  uncertainty limit. The status line shows "NTP UTC (check … s ago,
+  adjusting ±… ms)". A signal started before the first clock check (device
+  UTC) now switches to NTP UTC with the first check within the limit, slewed
+  the same way; one further off keeps it on device UTC (no stop, said in the
+  status line). Before, it stayed on device UTC for the whole run.
+  The app now also checks a minute before the holdover would pass the limit,
+  not only after. New native call `updateGeneratorClock(options)`
+  (`docs/phone-clock.md`).
+- Android test signal: Signal → Start test signal now works on Android, with
+  the same picture, options (1 or 2 events/s, title, subtitle, image), AVS4 QR
+  (test ID, title, sender calibration), stable sender ID and "Stopped" screen
+  as on the iPhone. Frames are timed with Choreographer, the sound with one
+  AudioTrack placed to the sample by its output timestamps
+  (`docs/phone-generator.md`). Not tested on a phone yet.
+- Calibrator wizard on Android: Settings → With calibrator now shows on Android
+  too. The camera step uses the new camera view method `beginCalibrator`
+  (lowest ISO where the camera allows it), the screen step the generator's
+  calibration mode with the microphone listening. Not tested with a board yet.
+- Analysers subtract the sender calibration: when the AVS4 QR carries one, the
+  AV offset shown and saved is the measured value minus the sender's own
+  screen-vs-speaker offset. Measure and Results show the raw value and the
+  sender calibration in a small line; saved results keep `rawOffsetMs` and
+  `senderCalibrationMs`. Done once in core C++, so iOS and Android behave the
+  same; this phone's own camera-vs-mic calibration is still subtracted on top,
+  once. "check" in Results also marks a different sender calibration.
+- Debug → Clear calibration now asks first and says it clears both: the
+  analyser calibration and the sender calibration.
+- Results: a sender's default name is its Title from the QR (the newest one),
+  then the short ID. A nickname you set always wins.
+- iPhone test signal: Stop now clears the whole picture (the scale and the
+  marker stayed on screen before) and shows a large "Stopped".
+- Calibrator wizard (iPhone): Settings → With calibrator. Step 2 measures
+  camera vs microphone with the calibrator board's flashes and clicks and saves
+  it like a clap calibration (method `calibrator-pulse`). Step 3 shows the
+  generator's calibration pattern (halves swap every 500 ms, a beep 100 ms
+  later) and saves screen vs speaker as the phone's sender calibration; the test
+  signal then sends it in the AVS4 QR (method `transponder`) instead of "not
+  calibrated". A TV fed by the container's calibration pattern can be measured
+  too (not saved). New camera view method `beginCalibrator(mode)`, generator
+  option `mode: 'calibration'` and `senderCalibration*` options. Not tested
+  with a real board yet (`docs/calibration.md`, `docs/calibrator.md`).
+- Container generator: `AVSYNC_PATTERN=calibration` (live; Signal API
+  `pattern`, web form "Picture") sends the calibration pattern instead of the
+  test signal, for a phone with the calibrator on a TV or monitor.
+- iPhone generator: the source ID stays the same when the generator is stopped
+  and started again. It changes only after a reinstall, a new app version or
+  build, or another event rate; name, subtitle and image do not change it
+  (`docs/phone-generator.md`).
+- New picture QR **AVS4** (replaces AVS2/AVS3; update all phones and containers
+  together, old ones cannot read it). It also carries the real test ID, the
+  generator Title (at most 24 bytes, cut at a whole character) and the sender
+  calibration (sent as "not calibrated" for now). Same QR size (version 4,
+  33 × 33 modules), error correction M instead of Q. The phone report's `signal`
+  has the new `name` and `senderCalibration` and the real `testId` (was
+  `source-<hex>`). The Android reader takes `AVS4:` (`docs/phone-generator.md`).
+- Results are grouped by sender, with a nickname per sender (pencil) and one
+  reference result per sender (★). The other results of that sender show Δ AV
+  offset and, when both have a latency, Δ video/audio latency; Measure shows the
+  live Δ ("Δ +18.4 ms vs Studio iPhone"). "check" marks a Δ when the camera mode
+  or calibration differs from the reference. Saved results now also keep
+  `testId` and `captureContext`; older saved state loads unchanged
+  (`mobile-app/src/results.mjs`, `mobile-app/README.md`).
+- Tap to focus (iOS and Android): a quick tap on the camera picture in Measure
+  runs the 1.5 s automatic focus and exposure again, metered on the tapped
+  spot, then locks as before. A yellow square marks the spot and fades after
+  the lock. Frames from those 1.5 s are dropped and the measurement starts
+  fresh after the lock; the last reading stays greyed meanwhile. Taps are
+  ignored during calibration. New camera view method `focusAt(x, y)`.
+- Restart and camera start: frames and audio of the 1.5 s automatic step are no
+  longer measured; the measurement starts fresh after the lock. Restart meters
+  focus and exposure at the centre again (forgets a tapped spot). On Android,
+  Restart now re-runs the 1.5 s step and lock as on iOS. If the lock cannot
+  happen (no camera result within 3 s of retries on Android, or the camera
+  cannot be configured on iOS), the measurement starts anyway.
 - Android test APK from GitHub Actions (`.github/workflows/android-apk.yaml`): a
   release APK (arm64-v8a) as a workflow artifact, on demand and on pull requests
   that touch the app or the core (`mobile-app/README.md`).
@@ -41,6 +122,28 @@
   dark with light icons instead of white. Found on the Android emulator.
 - Android: the instrumented test (`connectedDebugAndroidTest`) builds; React
   Native's `libc++_shared.so` and the module's no longer collide.
+
+## Container (not released yet)
+
+- Analyzer (live and file): subtracts the sender calibration from the AVS4 QR
+  from `av_offset_ms` (and `deviation_ms`, grade, metrics). Events keep
+  `raw_av_offset_ms` and `sender_calibration_ms`; `/api/v1/measurement` has
+  `raw_offset_ms` and `sender_calibration_ms`; the web UI Input card shows
+  "AV sync raw"; the file result `summary` has `sender_calibration_ms` and
+  `median_raw_av_offset_ms`. Not calibrated: no change.
+- Generator: the default `AVSYNC_TEST_ID` is now `<NMOS seed>-` plus a short
+  hash of the seed, the app version and the timing settings (event rate, audio
+  timecode, video format, AV offset, audio/video lead, source emit offsets),
+  the same rule as the iPhone generator. It
+  stays the same over restarts. A set `AVSYNC_TEST_ID` is used as before.
+  `GET /api/v1/generator` shows the `test_id` in use; the settings page shows
+  it greyed in the empty `AVSYNC_TEST_ID` field.
+- Picture QR **AVS4** (replaces AVS2/AVS3, no backwards compatibility): carries
+  the real test ID, the Signal form Title (`AVSYNC_SOURCE`) as the generator name and the sender
+  calibration (not calibrated for now). Same QR size, error correction M. The
+  analyzer's `/api/v1/status` has a new `signal` object (`test_id`, `name`,
+  `sender_calibration`, …) and the web UI shows it in the Input card. File
+  generator and analyzer use AVS4 too (SPECIFICATION "QR + optical code").
 
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 

@@ -1,7 +1,9 @@
 package io.leeo86.mxl.avsync
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.GnssMeasurementsEvent
 import android.location.Location
@@ -12,7 +14,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.MediaStore
 import expo.modules.kotlin.Promise
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import android.view.WindowManager
@@ -21,13 +25,54 @@ class AvsyncModule : Module() {
   private val handler = Handler(Looper.getMainLooper())
   private var cancel: (() -> Unit)? = null
   private var ntpBusy = false
+  private var generator: AvsyncGenerator? = null
+  private var imagePick: Promise? = null
+  private val context get() = appContext.reactContext ?: throw IllegalStateException("The app is not ready.")
   override fun definition() = ModuleDefinition {
     Name("Avsync")
     Function("supportsLiveCapture") { true }
-    Function("supportsGenerator") { false } // generate() comes with the Android generator.
     Function("deviceVersion") { Build.VERSION.RELEASE }
     Function("loadState") { appContext.reactContext?.getSharedPreferences("avsync", Context.MODE_PRIVATE)?.getString("session.v1", null) }
-    Function("saveState") { value: String -> appContext.reactContext?.getSharedPreferences("avsync", Context.MODE_PRIVATE)?.edit()?.putString("session.v1", value)?.apply(); Unit }
+    Function("saveState") { value: String ->
+      val preferences = appContext.reactContext?.getSharedPreferences("avsync", Context.MODE_PRIVATE)
+      val old = imageID(preferences?.getString("session.v1", null)); val next = imageID(value)
+      preferences?.edit()?.putString("session.v1", value)?.apply()
+      if (old != null && old != next) GeneratorImageStore.remove(context, old)
+      Unit
+    }
+
+    // The fullscreen test signal (AvsyncGenerator); the promise resolves when it closes.
+    Function("supportsGenerator") { true }
+    AsyncFunction("generate") { rate: Int, taiUtc: Double, promise: Promise -> presentGenerator(rate, taiUtc, emptyMap(), promise) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("generateStyled") { rate: Int, taiUtc: Double, options: Map<String, String>, promise: Promise ->
+      presentGenerator(rate, taiUtc, options, promise)
+    }.runOnQueue(Queues.MAIN)
+    // A newer clock check for the running test signal (docs/phone-clock.md); ignored when none runs.
+    AsyncFunction("updateGeneratorClock") { options: Map<String, String> ->
+      generator?.updateClock(options.filterKeys { it.startsWith("clock") })
+      Unit
+    }.runOnQueue(Queues.MAIN)
+    Function("generatorImageInfo") { id: String -> GeneratorImageStore.info(context, id) }
+    // The system photo picker (Android 13+) or document picker: only the chosen image is shared, no storage permission.
+    AsyncFunction("pickGeneratorImage") { promise: Promise ->
+      val activity = appContext.currentActivity
+      if (imagePick != null || activity == null || generator != null) { promise.reject("IMAGE_PICKER_BUSY", "Close the current screen first.", null); return@AsyncFunction }
+      val intent = if (Build.VERSION.SDK_INT >= 33) Intent(MediaStore.ACTION_PICK_IMAGES).setType("image/*")
+        else Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE)
+      imagePick = promise
+      try { activity.startActivityForResult(intent, PICK_IMAGE) }
+      catch (e: Exception) { imagePick = null; promise.reject("IMAGE_IMPORT_FAILED", e.message ?: "No image picker on this phone.", e) }
+    }.runOnQueue(Queues.MAIN)
+    OnActivityResult { _, result ->
+      if (result.requestCode != PICK_IMAGE) return@OnActivityResult
+      val promise = imagePick ?: return@OnActivityResult
+      imagePick = null
+      val uri = result.data?.data
+      if (result.resultCode != Activity.RESULT_OK || uri == null) { promise.resolve(null); return@OnActivityResult }
+      Thread({
+        runCatching { GeneratorImageStore.save(context, uri) }.fold({ promise.resolve(it) }, { promise.reject("IMAGE_IMPORT_FAILED", it.message ?: "Image import failed.", it) })
+      }, "avsync.image").start()
+    }
     Function("clockNow") { PhoneClock.now() }
     AsyncFunction("synchronizeClock") { server: String, promise: Promise ->
       if (ntpBusy) { promise.reject("CLOCK_BUSY", "A clock check is already running", null); return@AsyncFunction }
@@ -55,12 +100,39 @@ class AvsyncModule : Module() {
       Prop("captureFps") { view: AvsyncCameraView, fps: Double -> view.setRequestedFps(fps) }
       Prop("taiUtcOffset") { view: AvsyncCameraView, seconds: Double -> view.setTaiUtcOffset(seconds) }
       AsyncFunction("beginCalibration") { view: AvsyncCameraView -> view.beginCalibration() }
+      AsyncFunction("beginCalibrator") { view: AvsyncCameraView, mode: String -> view.beginCalibrator(mode) }
       AsyncFunction("resumeAnalysis") { view: AvsyncCameraView -> view.resumeAnalysis() }
+      AsyncFunction("focusAt") { view: AvsyncCameraView, x: Double, y: Double -> view.focusAt(x, y) }
     }
     OnActivityEntersForeground { AvsyncCameraView.setForeground(true) }
-    OnActivityEntersBackground { AvsyncCameraView.setForeground(false); handler.post { cancel?.invoke() } }
-    OnDestroy { handler.post { cancel?.invoke() } }
+    OnActivityEntersBackground { AvsyncCameraView.setForeground(false); handler.post { cancel?.invoke(); generator?.pause() } }
+    OnDestroy { handler.post { cancel?.invoke(); generator?.shutdown() } }
   }
+
+  private fun imageID(json: String?): String? = runCatching { org.json.JSONObject(json ?: return null).optString("generatorImageId").ifEmpty { null } }.getOrNull()
+
+  private fun presentGenerator(rate: Int, taiUtc: Double, options: Map<String, String>, promise: Promise) {
+    val activity = appContext.currentActivity
+    if ((rate != 1 && rate != 2) || !taiUtc.isFinite() || taiUtc < 0 || taiUtc > 100 || activity == null || generator != null || imagePick != null) {
+      promise.reject("GENERATOR_UNAVAILABLE", "Close the current screen and use 1 or 2 events/s.", null); return
+    }
+    // Whitespace runs become one space; at most `limit` characters (code points), as the app sends them.
+    fun label(key: String, limit: Int): String {
+      val text = (options[key] ?: "").split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+      return text.substring(0, text.offsetByCodePoints(0, minOf(limit, text.codePointCount(0, text.length))))
+    }
+    try {
+      val image = GeneratorImageStore.load(context, options["imageId"] ?: "")
+      // mode "calibration": the calibration pattern for the calibrator board instead of the test signal.
+      val screen = AvsyncGenerator(activity, AvsyncGenerator.Options(rate, taiUtc, label("name", 64), label("subtitle", 128), image,
+        options.filterKeys { it.startsWith("clock") }, options["keepAwake"] != "false", options.filterKeys { it.startsWith("senderCalibration") },
+        options["mode"] == "calibration")) { result -> generator = null; promise.resolve(result) }
+      generator = screen
+      screen.show()
+    } catch (e: Exception) { generator = null; promise.reject("GENERATOR_IMAGE_UNAVAILABLE", e.message ?: "The generator could not start.", e) }
+  }
+
+  private companion object { const val PICK_IMAGE = 0x4156 }
   private fun startClock(promise: Promise) {
     val context = appContext.reactContext
     if (context == null || Build.VERSION.SDK_INT < 29) { promise.reject("GNSS_UNAVAILABLE", "GNSS clock mapping requires Android 10 or newer", null); return }

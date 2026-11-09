@@ -16,6 +16,16 @@ class CaptureTest {
     assertEquals(120, CaptureProfile.choose(ranges + (240 to 240), outputs, 240)!!.fps)
     assertNull(CaptureProfile.choose(listOf(30 to 30), listOf(out(640, 480, 30)), 0))
   }
+  @Test fun tapMapsToMeteringSquare() {
+    // Portrait view, sensor turned 90°, 16:9 stream from a 4:3 active array (crop 4000×2250).
+    val stream = CaptureProfile.Size(1920, 1080)
+    assertEquals(Triple(1859, 1359, 281), CaptureProfile.meteringSquare(.5, .5, 1000, 2000, 90, stream, 4000, 3000))
+    // View top-left: sensor left edge (clamped), near the bottom of the crop.
+    val (left, top, _) = CaptureProfile.meteringSquare(0.0, 0.0, 1000, 2000, 90, stream, 4000, 3000)
+    assertEquals(0, left); assertEquals(2359.0, top.toDouble(), 1.0)
+    // View bottom-right: the opposite corner, clamped inside the array.
+    assertEquals(Triple(4000 - 281, 359, 281), CaptureProfile.meteringSquare(1.0, 1.0, 1000, 2000, 90, stream, 4000, 3000))
+  }
   @Test fun normalSessionTakes90And120() {
     // Option 1: the normal session lists 90 or 120 fps; 120 at 1080p is listed as 8 333 334 ns.
     val fast = listOf(out(4000, 3000, 30), CaptureProfile.Output(CaptureProfile.Size(1920, 1080), 8_333_334), out(1280, 720, 120))

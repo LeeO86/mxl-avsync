@@ -18,8 +18,9 @@ white and one black, so the panel's total light stays the same.
   The moved 2-chip run tells even from odd events. Both patterns have 4 rising
   and 4 falling transitions and end in the rest state.
 - **QR:** names event k from half a period before its burst to half a period
-  after it (`AVS3:` + the same 54 hex characters as AVS2, version-4 Q). It is
-  still and readable during the whole burst.
+  after it. Since AVS4 the text is `AVS4:` + base45 (version 4, correction M);
+  it also carries the test id, the generator name and the sender calibration
+  (see the specification). It is still and readable during the whole burst.
 - **Audio:** unchanged 1200/600-baud timecode with CRC/FEC, onset at the event.
 
 ## Why it is stable on any display and camera

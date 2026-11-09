@@ -28,6 +28,10 @@ class PhoneAnalyzer private constructor(private var handle: Long) : AutoCloseabl
   fun calibrating() = calibrating(live())
   fun calibrationError(): String? = calibrationError(live())
   fun takeCalibration(): CalibrationTake? = takeCalibration(live())
+  // Calibrator board take: "camera" or "display" (docs/calibrator.md); pollCalibrator gives JSON reports.
+  fun beginCalibrator(mode: String) = beginCalibrator(live(), mode == "display")
+  fun calibratorActive() = calibratorActive(live())
+  fun pollCalibrator(): String? = pollCalibrator(live())
   fun picture(): DoubleArray? = picture(live())
 
   override fun close() { if (handle != 0L) { destroy(handle); handle = 0 } }
@@ -52,6 +56,9 @@ class PhoneAnalyzer private constructor(private var handle: Long) : AutoCloseabl
     @JvmStatic external fun calibrating(h: Long): Boolean
     @JvmStatic external fun calibrationError(h: Long): String?
     @JvmStatic external fun takeCalibration(h: Long): CalibrationTake?
+    @JvmStatic external fun beginCalibrator(h: Long, display: Boolean)
+    @JvmStatic external fun calibratorActive(h: Long): Boolean
+    @JvmStatic external fun pollCalibrator(h: Long): String?
     @JvmStatic external fun picture(h: Long): DoubleArray?
   }
 }

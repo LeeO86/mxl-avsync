@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { liveView, offsetText, offsetSentence, savedResult, clockCorrection, clockText, HOLD_MS } from './live.mjs';
+import { liveView, offsetText, offsetSentence, savedResult, senderCalibrationText, clockCorrection, clockText, HOLD_MS } from './live.mjs';
 
-const status = extra => ({ kind: 'status', stage: 'measuring', timeMs: 5000, signal: { live: true, sourceId: 7 },
+const status = extra => ({ kind: 'status', stage: 'measuring', timeMs: 5000, signal: { live: true, sourceId: 7, testId: 'phone-ab' },
  reading: { offsetMs: 12.5, spreadMs: 0.8, events: 8, videoLatencyMs: 70, audioLatencyMs: 82.5 }, ...extra });
 const reference = { source: 'ntp', clockId: 'c', timebase: 'ios-host', referenceUnixMs: 1.8e12, referenceMonotonicMs: 1000, uncertaintyMs: 2 };
 const mapping = { clockId: 'c', timebase: 'ios-host', monotonicMs: 3000, deviceUnixMs: 1.8e12 + 2000 - 15 };
@@ -13,6 +13,23 @@ test('a measuring report shows the calibrated AV offset and no latency without a
  assert.equal(view.reading.offsetMs, 10);
  assert.equal(view.reading.rawOffsetMs, 12.5);
  assert.equal(view.reading.videoLatencyMs, null);
+});
+
+test('the sender calibration is subtracted natively once; the analyser calibration here; raw kept', () => {
+ // Native: measured +50.5, sender calibration +38.0 already off offsetMs.
+ const report = status({ signal: { live: true, sourceId: 7, testId: 'phone-ab', name: 'Studio iPhone' },
+  reading: { offsetMs: 12.5, rawOffsetMs: 50.5, senderCalibrationMs: 38, spreadMs: 0.8, events: 8 } });
+ const view = liveView(report, { calibrationMs: 2.5 });
+ assert.equal(view.reading.offsetMs, 10);
+ assert.equal(view.reading.rawOffsetMs, 50.5);
+ assert.equal(view.reading.senderCalibrationMs, 38);
+ assert.equal(view.reading.title, 'Studio iPhone');
+ assert.equal(senderCalibrationText(view.reading), 'raw +50.5 ms · sender calibration +38.0 ms');
+ const saved = savedResult(view.reading, { calibration: { offset_ms: 2.5 }, now: 1 });
+ assert.deepEqual([saved.offsetMs, saved.rawOffsetMs, saved.senderCalibrationMs, saved.calibrationMs, saved.title], [10, 50.5, 38, 2.5, 'Studio iPhone']);
+ // Not calibrated sender: nothing extra shown.
+ assert.equal(liveView(status()).reading.senderCalibrationMs, null);
+ assert.equal(senderCalibrationText(liveView(status()).reading), '');
 });
 
 test('the NTP reference corrects device-UTC latencies', () => {
@@ -48,6 +65,8 @@ test('texts and saved results', () => {
  assert.equal(offsetSentence(0.2), 'Audio and video in sync');
  const saved = savedResult(liveView(status()).reading, { calibration: { offset_ms: 1 }, now: 42 });
  assert.deepEqual([saved.id, saved.offsetMs, saved.calibrationMs, saved.held], ['42', 12.5, 1, false]);
+ const withContext = savedResult(liveView(status()).reading, { captureContext: { cameraMode: 'm' }, now: 43 });
+ assert.deepEqual([withContext.sourceId, withContext.testId, withContext.captureContext], [7, 'phone-ab', { cameraMode: 'm' }]);
 });
 
 test('the clock label shows the check accuracy and its age, not the holdover allowance', () => {

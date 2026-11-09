@@ -1,4 +1,5 @@
 #include "avsync/picture_reader.hpp"
+#include "avsync/calibrator.hpp"
 #include "avsync/optical_code.hpp"
 #include "engine.hpp"
 
@@ -32,7 +33,7 @@ PlanConfig plan_from(const Config& config, const VideoFormat& format)
     plan.offset_ms = config.offset_ms;
     plan.live = true;
     plan.timecode_baud = config.audio_timecode == "legacy" ? 0 : std::stoi(config.audio_timecode);
-    plan.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
+    plan.source_id = timecode_source_id(config.effective_test_id().c_str());
     plan.chirp_ms = config.chirp_ms;
     plan.chirp_low_hz = config.chirp_low_hz;
     plan.chirp_high_hz = config.chirp_high_hz;
@@ -49,6 +50,49 @@ ChirpSpec chirp_from(const Config& config)
     spec.high_hz = config.chirp_high_hz;
     spec.level_dbfs = config.chirp_level_dbfs;
     return spec;
+}
+
+// AVSYNC_PATTERN=calibration (docs/calibrator.md, display mode): the calibrator board lies on a
+// screen showing this picture. Left half white or black, the right half the opposite, and a grey
+// tick on the pattern line at the top and bottom edges. Two v210 grains, made once per size.
+const std::vector<uint8_t>& calibration_picture(int width, int rows, bool left_white)
+{
+    static thread_local std::vector<uint8_t> packed[2];
+    static thread_local int made_width = 0, made_rows = 0;
+    if (made_width != width || made_rows != rows) {
+        made_width = width, made_rows = rows;
+        std::vector<uint16_t> luma(static_cast<size_t>(width) * static_cast<size_t>(rows));
+        const int tick = std::max(2, width / 480), edge = std::max(1, rows / 16);
+        for (int i = 0; i < 2; ++i) {
+            for (int row = 0; row < rows; ++row) {
+                for (int x = 0; x < width; ++x) {
+                    uint16_t v = ((x < width / 2) == (i == 0)) ? kYWhite : kYBlack;
+                    if (std::abs(2 * x + 1 - width) < 2 * tick && (row < edge || row >= rows - edge)) v = 512;
+                    luma[static_cast<size_t>(row) * width + x] = v;
+                }
+            }
+            packed[i].assign(v210_line_bytes(width) * static_cast<size_t>(rows), 0);
+            pack_v210(luma.data(), nullptr, nullptr, width, rows, width, packed[i].data());
+        }
+    }
+    return packed[left_white ? 0 : 1];
+}
+
+// The calibration beep, D = 100 ms after each swap of the picture above (same grain grid), added
+// to the samples [first, first + count) at the chirp level.
+void calibration_audio(Rate pace, uint64_t first, float* mono, size_t count, double level_dbfs)
+{
+    static const std::vector<float> beep = calibration_beep(48000);
+    const Rate audio{48000, 1};
+    const float gain = static_cast<float>(2 * std::pow(10.0, level_dbfs / 20)); // the beep peaks at 0.5
+    const uint64_t start = time_of_index(audio, first), back = 200000000ULL;
+    for (uint64_t k = calibration_period(index_at(pace, start > back ? start - back : 0), pace.num, pace.den);; ++k) {
+        const uint64_t at = index_at(audio, time_of_index(pace, calibration_swap_frame(k, pace.num, pace.den)) + 100000000ULL);
+        if (at >= first + count) break;
+        for (size_t i = 0; i < beep.size(); ++i) {
+            if (at + i >= first && at + i < first + count) mono[at + i - first] += gain * beep[i];
+        }
+    }
 }
 
 void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
@@ -173,7 +217,7 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             // onset - (lead + half a block): the published audio emit offset. The write before it stops at
             // the onset, and the thread wakes for the onset's own commit.
             std::optional<uint64_t> onset;
-            if (!halted && audio_config.audio_enable) {
+            if (!halted && audio_config.audio_enable && audio_config.pattern != "calibration") {
                 for (const auto& event : events_near(audio_config, audio_written)) {
                     if (event.audio_sample >= 0 && static_cast<uint64_t>(event.audio_sample) >= audio_written
                         && (!onset || static_cast<uint64_t>(event.audio_sample) < *onset)) {
@@ -202,7 +246,15 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
             if (target > audio_written && max_write > 0) {
                 const int frames = static_cast<int>(std::min<uint64_t>(target - audio_written, 48000));
                 samples.assign(static_cast<size_t>(frames * audio_config.audio_channels), 0.f);
-                if (!halted && audio_config.audio_enable) {
+                if (!halted && audio_config.audio_enable && audio_config.pattern == "calibration") {
+                    std::vector<float> mono(static_cast<size_t>(frames), 0.f);
+                    calibration_audio(pace, audio_written, mono.data(), mono.size(), audio_config.chirp_level_dbfs);
+                    for (int frame = 0; frame < frames; ++frame) {
+                        for (int channel = 0; channel < audio_config.audio_channels; ++channel) {
+                            samples[static_cast<size_t>(frame * audio_config.audio_channels + channel)] = mono[static_cast<size_t>(frame)];
+                        }
+                    }
+                } else if (!halted && audio_config.audio_enable) {
                     PlanConfig plan = plan_from(audio_config, *format);
                     const auto events = events_near(audio_config, audio_written);
                     std::vector<float> mono(static_cast<size_t>(frames));
@@ -266,7 +318,10 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (slot.skipped > 0 && callbacks.count_missed) {
             callbacks.count_missed(true, slot.skipped); // grains never written
         }
-        if (!halted) {
+        if (!halted && config.pattern == "calibration") {
+            packed = &calibration_picture(format->width, grain_rows, calibration_left_white(index, pace.num, pace.den));
+            qr_seq = ~0ULL; // the test picture starts fresh afterwards
+        } else if (!halted) {
             const auto render_start = std::chrono::steady_clock::now();
             const Period period = plan_period(*format, config.event_rate);
             const uint64_t seq = index / static_cast<uint64_t>(std::max(1, period.grains));
@@ -299,8 +354,9 @@ void run_generator(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 QrPayload payload;
                 payload.timecode = config.audio_timecode != "legacy";
                 payload.qr_flash = payload.optical_code = payload.timecode;
-                payload.source_id = timecode_source_id((config.test_id.empty() ? config.seed() : config.test_id).c_str());
-                payload.test_id = config.test_id.empty() ? config.seed() : config.test_id;
+                payload.test_id = config.effective_test_id();
+                payload.source_id = timecode_source_id(payload.test_id.c_str());
+                payload.name = config.source; // the Signal form Title; cosmetic. Output offset not calibrated yet
                 payload.mode = "LIVE";
                 payload.k = named_seq;
                 payload.tk = static_cast<int64_t>(time_of_index(pace, named));
@@ -625,6 +681,19 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
     bool tracker_optical = false;
     AudioTimecodeStream timecode_stream;
     std::optional<QrPayload> signal_qr;
+    // Report the QR source (ID, name, sender calibration) to the status API when it changes.
+    std::optional<QrPayload> reported_signal;
+    auto report_signal = [&] {
+        auto same = [](const QrPayload& a, const QrPayload& b) {
+            return a.source_id == b.source_id && a.test_id == b.test_id && a.name == b.name && a.mode == b.mode && a.rate == b.rate &&
+                a.format == b.format && a.estimated_source == b.estimated_source && a.calibration.method == b.calibration.method &&
+                a.calibration.offset_ms == b.calibration.offset_ms && a.calibration.uncertainty_ms == b.calibration.uncertainty_ms &&
+                a.calibration.day == b.calibration.day;
+        };
+        if (bool(signal_qr) == bool(reported_signal) && (!signal_qr || same(*signal_qr, *reported_signal))) return;
+        reported_signal = signal_qr;
+        if (callbacks.set_signal) callbacks.set_signal(signal_qr);
+    };
     double qr_read_ms = -1e30;
     std::optional<Pairer> pairer;
     std::string tracker_flow;
@@ -942,9 +1011,10 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                 }
                 signal_qr=next;qr_flash.observe(*qr_detection,tai_ns/1e6);
             } else if(qr_detection&&signal_qr&&signal_qr->qr_flash) {
-                signal_qr.reset();qr_flash.reset();tracker.reset();continue;
+                signal_qr.reset();qr_flash.reset();tracker.reset();report_signal();continue;
             }
         }
+        report_signal();
         if(signal_qr&&signal_qr->qr_flash) {
             VideoObservation frame;frame.grain_index=int64_t(want);frame.time_ms=tai_ns/1e6;frame.tai_ns=tai_ns;
             frame.have_arrival=true;frame.arrival_ms=video_arrived_ns/1e6;
@@ -984,6 +1054,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
                     signal_qr = std::move(next);
                 }
             }
+            report_signal();
         }
         // The picture's strip counts source frames, not the camera/encoder's
         // frame rate. Keep received MXL timestamps for the measurement itself.
@@ -1118,6 +1189,7 @@ void run_analyzer(std::atomic<bool>& stop, LiveCallbacks& callbacks)
         if (pairer) {
             pairer->set_reference(current_reference(video.domain_id));
             pairer->set_live_stream(true);
+            pairer->set_sender_calibration(signal_qr ? signal_qr->calibration : SenderCalibration{});
             for (const auto& event : pairer->poll(static_cast<double>(tai_now()) / 1e6)) {
                 {
                     std::lock_guard lock(caption.mu);

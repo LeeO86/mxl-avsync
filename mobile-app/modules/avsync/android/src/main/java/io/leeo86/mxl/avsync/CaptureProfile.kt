@@ -43,6 +43,28 @@ object CaptureProfile {
     return (if (exact) 0L else 1L shl 40) + (if (wide) 0L else 1L shl 39) + size.width.toLong() * size.height
   }
 
+  // Tap to focus: a point on the aspect-filled, rotated preview (0…1 across the view) as a metering
+  // square (left, top, side) in active-array coordinates. The stream is the centred crop of the
+  // active array with the stream's aspect (no zoom). The square is 1/8 of the stream's short side.
+  fun meteringSquare(x: Double, y: Double, viewW: Int, viewH: Int, rotation: Int, stream: Size, activeW: Int, activeH: Int): Triple<Int, Int, Int> {
+    val sideways = rotation % 180 != 0
+    val cw = (if (sideways) stream.height else stream.width).toDouble()
+    val ch = (if (sideways) stream.width else stream.height).toDouble()
+    val scale = maxOf(viewW / cw, viewH / ch)
+    // Undo the centred aspect-fill crop: the point in the upright camera picture.
+    val p = ((x - .5) * viewW / (cw * scale) + .5).coerceIn(0.0, 1.0)
+    val q = ((y - .5) * viewH / (ch * scale) + .5).coerceIn(0.0, 1.0)
+    // Undo the rotation (the inverse of OutlineView's mapping): the point in the sensor image.
+    val (u, v) = when (rotation) { 90 -> q to 1 - p; 180 -> 1 - p to 1 - q; 270 -> 1 - q to p; else -> p to q }
+    val aspect = stream.width.toDouble() / stream.height
+    val cropW = minOf(activeW.toDouble(), activeH * aspect)
+    val cropH = cropW / aspect
+    val side = (minOf(cropW, cropH) / 8).toInt()
+    val left = ((activeW - cropW) / 2 + u * cropW - side / 2.0).toInt().coerceIn(0, activeW - side)
+    val top = ((activeH - cropH) / 2 + v * cropH - side / 2.0).toInt().coerceIn(0, activeH - side)
+    return Triple(left, top, side)
+  }
+
   // Exposure of the full frame interval; ISO scaled to keep the auto-exposure brightness.
   fun fixedExposure(autoExposureNs: Long, autoIso: Int, frameNs: Long, exposureRange: LongRange, isoRange: IntRange): Pair<Long, Int> {
     val exposure = frameNs.coerceIn(exposureRange)

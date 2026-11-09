@@ -90,6 +90,19 @@ std::string Config::seed() const
     return nmos_seed.empty() ? host_id + "-avsync" : nmos_seed;
 }
 
+// An operator-set AVSYNC_TEST_ID stays as it is. Empty: the NMOS seed plus a short hash of the
+// seed, the app version and the timing settings, the same rule as the phone generator.
+// Title, source and subtitle are not inputs.
+std::string Config::effective_test_id() const
+{
+    if (!test_id.empty()) return test_id;
+    return generator_test_id(seed() + "-", seed(), kAppVersion,
+                             {"rate=" + std::to_string(event_rate), "timecode=" + audio_timecode,
+                              "format=" + video_format, "offset_ms=" + std::to_string(offset_ms),
+                              "audio_lead_ms=" + std::to_string(audio_lead_ms), "video_lead_ms=" + std::to_string(video_lead_ms),
+                              "emit_video_ms=" + source_emit_video_ms, "emit_audio_ms=" + source_emit_audio_ms});
+}
+
 std::string Config::label() const
 {
     return nmos_label.empty() ? host_id : nmos_label;
@@ -112,7 +125,7 @@ bool is_restart_key(const std::string& key)
 bool is_live_key(const std::string& key)
 {
     return key == "AVSYNC_AV_OFFSET_MS" || key == "AVSYNC_CHIRP_LEVEL_DBFS" || key == "AVSYNC_AUDIO_ENABLE"
-        || key == "AVSYNC_EVENT_RATE" || key == "AVSYNC_AUDIO_TIMECODE"
+        || key == "AVSYNC_EVENT_RATE" || key == "AVSYNC_AUDIO_TIMECODE" || key == "AVSYNC_PATTERN"
         || key == "AVSYNC_TEST_ID" || key == "AVSYNC_TITLE" || key == "AVSYNC_SOURCE" || key == "AVSYNC_SUBTITLE" || key == "AVSYNC_NOTES"
         || key == "AVSYNC_AUDIO_CHANNEL" || key == "AVSYNC_AUDIO_THRESHOLD" || key == "AVSYNC_QR_RATE"
         || key == "AVSYNC_PASS_MIN_MS" || key == "AVSYNC_PASS_MAX_MS" || key == "AVSYNC_WARN_MIN_MS" || key == "AVSYNC_WARN_MAX_MS"
@@ -159,6 +172,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     };
     config.role = pick("AVSYNC_ROLE", "");
     config.audio_timecode = pick("AVSYNC_AUDIO_TIMECODE", "1200");
+    config.pattern = pick("AVSYNC_PATTERN", "test");
     config.event_rate = event_rate_value(pick("AVSYNC_EVENT_RATE", "2"));
     config.chirp_ms = static_cast<int>(num(pick("AVSYNC_CHIRP_MS", "30"), "AVSYNC_CHIRP_MS"));
     config.chirp_low_hz = num(pick("AVSYNC_CHIRP_LOW_HZ", "700"), "AVSYNC_CHIRP_LOW_HZ");
@@ -175,7 +189,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.qr_period_ms = static_cast<int>(num(pick("AVSYNC_QR_PERIOD_MS", "1000"), "AVSYNC_QR_PERIOD_MS"));
     config.host_id = short_host(pick("HOST_ID", config.host_id));
     config.nmos_seed = pick("NMOS_SEED", config.host_id + "-avsync");
-    config.test_id = pick("AVSYNC_TEST_ID", config.nmos_seed);
+    config.test_id = pick("AVSYNC_TEST_ID", "");
     config.title = pick("AVSYNC_TITLE", "");
     config.source = pick("AVSYNC_SOURCE", "");
     config.subtitle = pick("AVSYNC_SUBTITLE", "");
@@ -222,6 +236,7 @@ Config load_config(const std::map<std::string, std::string>& extra)
     config.log_format = pick("LOG_FORMAT", "json");
     config.shutdown_timeout_s = static_cast<int>(num(pick("SHUTDOWN_TIMEOUT_S", "10"), "SHUTDOWN_TIMEOUT_S"));
     require(config.audio_timecode == "legacy" || config.audio_timecode == "600" || config.audio_timecode == "1200", "AVSYNC_AUDIO_TIMECODE must be legacy, 600 or 1200");
+    require(config.pattern == "test" || config.pattern == "calibration", "AVSYNC_PATTERN must be test or calibration");
     if (config.audio_timecode != "legacy") {
         require(config.event_rate == 1 || config.event_rate == 2, "timecode supports 1 or 2 events/s");
         require(config.audio_timecode != "600" || config.event_rate == 1, "600 baud requires 1 event/s");
@@ -251,6 +266,7 @@ nlohmann::json config_settings(const Config& config)
     return {
         {"AVSYNC_ROLE", config.role},
         {"AVSYNC_AUDIO_TIMECODE", config.audio_timecode},
+        {"AVSYNC_PATTERN", config.pattern},
         {"AVSYNC_EVENT_RATE", std::to_string(config.event_rate)},
         {"AVSYNC_CHIRP_MS", std::to_string(config.chirp_ms)},
         {"AVSYNC_CHIRP_LOW_HZ", std::to_string(config.chirp_low_hz)},
@@ -301,6 +317,7 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
         const std::string value = text(it.value());
         const std::string& key = it.key();
         if (key == "AVSYNC_AUDIO_TIMECODE") next.audio_timecode = value;
+        else if (key == "AVSYNC_PATTERN") next.pattern = value;
         else if (key == "AVSYNC_EVENT_RATE") next.event_rate = event_rate_value(value);
         else if (key == "AVSYNC_CHIRP_MS") next.chirp_ms = static_cast<int>(num(value, key.c_str()));
         else if (key == "AVSYNC_CHIRP_LOW_HZ") next.chirp_low_hz = num(value, key.c_str());
@@ -338,6 +355,7 @@ void apply_settings(Config& config, const nlohmann::json& flat, std::vector<std:
     require(windows_valid(GradeWindows{next.pass_min_ms, next.pass_max_ms, next.warn_min_ms, next.warn_max_ms}), "grade windows");
     require(next.offset_ms >= -500 && next.offset_ms <= 500, "AVSYNC_AV_OFFSET_MS");
     require(next.audio_timecode == "legacy" || next.audio_timecode == "600" || next.audio_timecode == "1200", "AVSYNC_AUDIO_TIMECODE must be legacy, 600 or 1200");
+    require(next.pattern == "test" || next.pattern == "calibration", "AVSYNC_PATTERN must be test or calibration");
     if (next.audio_timecode != "legacy") {
         require(next.event_rate == 1 || next.event_rate == 2, "timecode supports 1 or 2 events/s");
         require(next.audio_timecode != "600" || next.event_rate == 1, "600 baud requires 1 event/s");

@@ -20,6 +20,7 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.media.AudioManager
 import android.media.ImageReader
 import android.os.Build
@@ -61,6 +62,10 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var generation = 0
   private var camera: CameraDevice? = null
   private var session: CameraCaptureSession? = null
+  // The repeating request of the session, kept for tap to focus.
+  private var repeating: CaptureRequest.Builder? = null
+  // The 1.5 s auto step (camera start, Restart, tap to focus): frames and audio are dropped until the lock.
+  private var focusing = false
   private var reader: ImageReader? = null
   private var fast: HighSpeedCapture? = null
   // Set when a high-speed session failed; the normal session is used until the rate changes.
@@ -82,6 +87,9 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private var lastQrScan = 0L
   private var lastHousekeeping = 0L
   private var calibrationReported = false
+  // Calibrator camera take: starts at the next lock (endFocus), which uses the lowest ISO (lowGain).
+  private var pendingCalibrator: String? = null
+  private var lowGain = false
   private var lastFrameMs = -1.0
   private var maxFrameGapMs = 0.0
   private var failedFrames = 0
@@ -119,8 +127,21 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       emit(mapOf("kind" to "status", "fps" to 0, "message" to "Capture rate changed · collecting fresh events"))
     }
   }
-  fun beginCalibration() { outline.clear(); capture.post { generation++; calibrationReported = false; analyzer.beginCalibration() } }
-  fun resumeAnalysis() { outline.clear(); capture.post { generation++; calibrationReported = false; analyzer.reset() } }
+  fun beginCalibration() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; analyzer.beginCalibration() } }
+  // Calibrator board take ("camera" or "display", docs/calibrator.md). For the camera the LED floods
+  // the lens: run the auto step again and lock at the lowest ISO; the take starts at the lock.
+  fun beginCalibrator(mode: String) {
+    outline.clear()
+    capture.post {
+      generation++; focusing = false; calibrationReported = false; analyzer.reset()
+      if (mode != "camera") { pendingCalibrator = null; lowGain = false; analyzer.beginCalibrator(mode); return@post }
+      pendingCalibrator = mode; lowGain = true
+      refocus(null, null)
+    }
+  }
+  // Restart: drop the history and run the auto step again, metered at the centre (also cancels a calibrator take).
+  fun resumeAnalysis() { outline.clear(); capture.post { generation++; focusing = false; calibrationReported = false; pendingCalibrator = null; lowGain = false; analyzer.reset(); refocus(null, null) } }
+  fun focusAt(x: Double, y: Double) { capture.post { if (pendingCalibrator == null && !analyzer.calibratorActive()) refocus(x, y) } }
 
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
@@ -181,7 +202,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       // REALTIME timestamps are CLOCK_BOOTTIME, like the microphone. UNKNOWN is checked on the first frame.
       cameraClock = if (c.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) "realtime" else null
       monotonicToBootNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
-      generation++; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0; failedFrames = 0
+      generation++; focusing = false; calibrationReported = false; analyzer.reset(); lastFrameMs = -1.0; maxFrameGapMs = 0.0; failedFrames = 0
       main.post { configureTransform() }
       if (!picked.highSpeed) {
         val imageReader = ImageReader.newInstance(picked.size.width, picked.size.height, ImageFormat.YUV_420_888, 4)
@@ -189,7 +210,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
         reader = imageReader
       }
       val microphone = AudioCapture(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager) { samples, n, pts ->
-        capture.post { if (running) { analyzer.pushAudio(samples, n, pts, 48_000); housekeeping() } }
+        capture.post { if (running && !focusing) { analyzer.pushAudio(samples, n, pts, 48_000); housekeeping() } }
       }
       running = true
       manager.openCamera(id, object : CameraDevice.StateCallback() {
@@ -207,6 +228,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   private fun stopCapture() {
     generation++
     running = false
+    focusing = false
+    repeating = null
     audio?.stop(); audio = null
     runCatching { session?.close() }; session = null
     runCatching { camera?.close() }; camera = null
@@ -235,6 +258,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
           set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         }
         exposureMode = "auto"
+        repeating = request; focusing = true
         s.setRepeatingRequest(request.build(), results, capture)
         // About 1.5 s of automatic exposure, then fixed focus, white balance and exposure.
         capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
@@ -264,6 +288,7 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
           set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(picked.aeMin, picked.aeMax))
         }
         exposureMode = "auto"
+        repeating = request; focusing = true
         try { burst.setRepeatingBurst(burst.createHighSpeedRequestList(request.build()), results, capture) }
         catch (e: Exception) { return fallBack(e.message ?: "burst refused") }
         capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
@@ -282,10 +307,11 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   // Exposure = the full frame interval, with the ISO that keeps the automatic brightness.
-  private fun lockExposure(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
+  private fun lockExposure(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder, tries: Int = 0) {
     if (session != s) return
-    // The first result can come late (slow cameras, the emulator): try again every 100 ms.
-    val result = lastResult ?: return retryLock(device, s, request)
+    // The first result can come late (slow cameras, the emulator): try again every 100 ms for 3 s,
+    // then give up on the lock and end the hold, so the analysis runs with what the camera has.
+    val result = lastResult ?: return if (tries < 30) retryLock(device, s, request, tries + 1) else endFocus()
     if (s is CameraConstrainedHighSpeedCaptureSession) return lockHighSpeed(s, request)
     val c = characteristics!!
     val capabilities = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList().orEmpty()
@@ -302,7 +328,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     val exposureRange = c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
     val isoRange = c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
     if (CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR in capabilities && exposure != null && iso != null && exposureRange != null && isoRange != null) {
-      val (fixed, gain) = CaptureProfile.fixedExposure(exposure, iso, frameNs, exposureRange.lower..exposureRange.upper, isoRange.lower..isoRange.upper)
+      val (fixed, auto) = CaptureProfile.fixedExposure(exposure, iso, frameNs, exposureRange.lower..exposureRange.upper, isoRange.lower..isoRange.upper)
+      val gain = if (lowGain) isoRange.lower else auto
       request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
       request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, fixed)
       request.set(CaptureRequest.SENSOR_SENSITIVITY, gain)
@@ -313,10 +340,11 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       exposureMode = "ae-locked"
     }
     runCatching { s.setRepeatingRequest(request.build(), results, capture) }.onFailure { fail(it.message ?: "Cannot lock the camera exposure.") }
+    endFocus()
   }
 
-  private fun retryLock(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder) {
-    capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 100)
+  private fun retryLock(device: CameraDevice, s: CameraCaptureSession, request: CaptureRequest.Builder, tries: Int) {
+    capture.postAtTime({ lockExposure(device, s, request, tries) }, LOCK, SystemClock.uptimeMillis() + 100)
   }
 
   // High-speed requests ignore manual exposure and focus: lock AE and AWB where AE stands, and
@@ -331,6 +359,52 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
       s.setRepeatingBurst(s.createHighSpeedRequestList(request.build()), results, capture)
       exposureMode = "ae-locked"
     }.onFailure { fail(it.message ?: "Cannot lock the camera exposure.") }
+    endFocus()
+  }
+
+  // Tap to focus (x, y: 0…1 across the view) or Restart (null: the camera's default, centred
+  // metering): hold the analysis, re-run the 1.5 s auto step with AF and AE metered there, lock
+  // again as at start, then start fresh (endFocus), so no frame from the auto step reaches a reading.
+  private fun refocus(x: Double?, y: Double?) {
+    val s = session ?: return; val device = camera ?: return; val request = repeating ?: return
+    val c = characteristics ?: return; val picked = choice ?: return
+    if (!running || analyzer.calibrating() || lastFrameMs < 0) return
+    val region = if (x == null || y == null) null else {
+      val active = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+      val (x0, y0, side) = CaptureProfile.meteringSquare(x, y, width, height, sensorRotation(), picked.size, active.width(), active.height())
+      arrayOf(MeteringRectangle(x0, y0, side, side, MeteringRectangle.METERING_WEIGHT_MAX))
+    }
+    capture.removeCallbacksAndMessages(LOCK)
+    generation++; focusing = true; exposureMode = "auto"
+    main.post { outline.clear() }
+    if ((c.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0) > 0) request.set(CaptureRequest.CONTROL_AF_REGIONS, region)
+    if ((c.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0) > 0) request.set(CaptureRequest.CONTROL_AE_REGIONS, region)
+    request.set(CaptureRequest.CONTROL_AE_LOCK, false)
+    request.set(CaptureRequest.CONTROL_AWB_LOCK, false)
+    // Cameras without manual exposure: the calibrator take meters as dark as allowed instead of the lowest ISO.
+    request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, if (lowGain) c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)?.lower ?: 0 else 0)
+    runCatching {
+      if (s is CameraConstrainedHighSpeedCaptureSession) {
+        // AF stays continuous-video in this mode: one cancel trigger releases the locked focus.
+        request.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+        s.captureBurst(s.createHighSpeedRequestList(request.build()), results, capture)
+        request.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+        s.setRepeatingBurst(s.createHighSpeedRequestList(request.build()), results, capture)
+      } else {
+        request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+        s.setRepeatingRequest(request.build(), results, capture)
+      }
+    }.onFailure { return fail(it.message ?: "Cannot refocus the camera.") }
+    capture.postAtTime({ lockExposure(device, s, request) }, LOCK, SystemClock.uptimeMillis() + 1500)
+  }
+
+  // After the lock: drop what came before and start fresh.
+  private fun endFocus() {
+    if (!focusing) return
+    focusing = false; generation++; calibrationReported = false; analyzer.reset()
+    pendingCalibrator?.let { analyzer.beginCalibrator(it) }
+    pendingCalibrator = null; lowGain = false
   }
 
   private val results = object : CameraCaptureSession.CaptureCallback() {
@@ -384,6 +458,8 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     val (exposure, readout) = frameMeta[timestampNs] ?: frameMeta.values.lastOrNull() ?: (0.0 to 0.0)
     if (lastFrameMs >= 0) maxFrameGapMs = maxOf(maxFrameGapMs, pts - lastFrameMs)
     lastFrameMs = pts
+    // Counted (the high-speed no-frames check needs it) but not analysed during the auto step.
+    if (focusing) return
     analyzer.pushVideo(luma, width, height, stride, pts, exposure, readout)
     val now = SystemClock.uptimeMillis()
     if (!qrBusy && now - lastQrScan >= 100 && analyzer.qrScanSuggested(pts)) {
@@ -412,6 +488,13 @@ class AvsyncCameraView(context: Context, appContext: AppContext) : ExpoView(cont
     analyzer.setTaiUtcSeconds(taiUtcSeconds)
     val corners = analyzer.picture()
     main.post { outline.show(corners) }
+    // A calibrator take reports about once a second (as iOS: otherwise the live poll goes on).
+    analyzer.pollCalibrator()?.let { text ->
+      val report = toMap(JSONObject(text))
+      if (report["kind"] != "calibrator-progress") analyzer.reset() // done: live analysis resumes
+      emit(report)
+      return
+    }
     if (analyzer.calibrating()) {
       if (calibrationReported) return
       analyzer.takeCalibration()?.let { take ->

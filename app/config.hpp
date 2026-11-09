@@ -13,6 +13,7 @@ struct Config {
     std::string role;
     int event_rate = 2;
     std::string audio_timecode = "1200"; // legacy, 600, 1200
+    std::string pattern = "test";         // generator output: test (the AV sync test signal) or calibration (calibrator board)
     int chirp_ms = 30;
     double chirp_low_hz = 700;
     double chirp_high_hz = 2500;
@@ -30,7 +31,7 @@ struct Config {
     std::string source_emit_video_ms;
     std::string source_emit_audio_ms;
     int qr_period_ms = 1000;
-    std::string test_id;
+    std::string test_id; // empty: the stable default from effective_test_id()
     std::string title;
     std::string source;
     std::string subtitle;
@@ -81,6 +82,7 @@ struct Config {
     std::map<std::string, std::string> from_env;
 
     std::string seed() const;
+    std::string effective_test_id() const;
     std::string label() const;
 };
 

@@ -1,5 +1,24 @@
 # mxl-avsync — Implementation plan
 
+## Tap to focus (mobile, unreleased, 2026-11-07)
+
+Maintainer decision: a quick tap on the Measure camera picture re-runs the
+1.5 s automatic exposure/focus/white-balance step metered on the tapped spot,
+then locks exactly as at start (§12 and `docs/mobile-native.md` only describe
+the full-frame lock). Addition, not a change to the lock: frames and audio
+from the tap to the lock are dropped and the analyzer is reset at the lock, so
+no reading uses the refocus window. The JS side reuses the restart path but
+keeps the held reading (greyed) instead of clearing it. Taps are ignored while
+a calibration flow is open (aim, clap, review), because the reset at the lock
+would cut a running take. Maintainer decision (same day): the hold applies to
+every 1.5 s auto step, so camera start and Restart also drop the auto-step
+frames and start the analyzer fresh at the lock, and Restart meters at the
+centre again (iOS point of interest 0.5/0.5, Android default regions). Android
+Restart now re-runs the auto step and lock like iOS. If the lock fails, the
+hold still ends and analysis continues with the focus it has. The native
+parts (iOS point conversion, Android region mapping and high-speed AF cancel)
+were not compiled or run on a device in this change.
+
 ## Diagnostic TestFlight delivery (2026-11-01)
 
 After local validation the maintainer explicitly authorized one EAS Cloud build
@@ -1247,3 +1266,172 @@ callers retain synchronous scanning by default. Snapshot cost and worker delay
 are reported, and reading freshness includes that delay. No pulse timestamp
 smoothing or display/transport compensation is introduced. Protocol and
 container release version stay 2.0.7; real iPhone improvement remains a field test.
+
+## Stable sender ID (2026-11-07)
+
+Maintainer request: the analyser will group saved results by sender ID, so the
+ID must survive a generator restart. Deviation: the iPhone generator no longer
+makes a random `phone-…` ID on every start. All generators use one core function,
+`generator_test_id(prefix, install_id, app_version, settings)`: prefix + 12 hex
+digits of FNV-1a 64 (top 48 bits) over the fields, each ended by a newline.
+Settings are `key=value` strings; a future timing setting (music, output offset,
+sender calibration) is one more entry. Name, subtitle and image are not inputs.
+- iPhone: prefix `phone-`, a random install ID kept in UserDefaults (new after a
+  reinstall), version `<CFBundleShortVersionString> (<CFBundleVersion>)` so each
+  TestFlight build gets a new ID, settings `rate=<1|2>`.
+- Container: an `AVSYNC_TEST_ID` that is set stays as it is. Its default changes
+  from the NMOS seed to `<seed>-` + hash of the seed, `kAppVersion` and the timing
+  settings (rate, audio timecode, video format, AV offset, audio/video lead,
+  source emit offsets; maintainer 2026-11-07: they shift picture or sound). The
+  binary has no build or commit id, so the version alone stands for the build.
+  The settings page shows the automatic id greyed in the empty field. The id is computed
+  when used, so a live rate change gives the new id at once, and config export
+  keeps the empty value instead of freezing an old id. `GET /api/v1/generator`
+  shows `test_id`. The analyzer's own fallback label stays the NMOS seed.
+- Android (2026-11-08): prefix `phone-`, a random install ID in the app's
+  preferences (new after a reinstall), version `<versionName> (<versionCode>)`,
+  settings `rate=<1|2>`, through the same core function.
+The core test holds the shared test vector.
+
+Generator name in the QR: not done. The live QR of the phone and the container
+(timecode 600/1200) is the compact `AVS2:`/`AVS3:` text of exactly 59 characters;
+the core parser rejects any other length and Android reads only `AVS3:`. A name
+in it would make today's analysers lose the picture. Only the JSON QR (legacy
+timecode, FILE) ignores unknown keys. Open for a maintainer decision.
+
+## AVS4 picture QR (2026-11-07)
+
+Maintainer decision: no backwards compatibility (two iPhones, one Android phone
+and two containers, all updated together). AVS4 replaces the AVS2/AVS3 QR text
+and answers the open "generator name in the QR" point above.
+
+- Carries everything AVS3 did, plus the real test id, the generator name
+  (container: Signal form Title, `AVSYNC_SOURCE`; phone: Title field; at most 24 UTF-8 bytes, cut at a
+  whole character) and the sender calibration (method none/clap/transponder/
+  pulse-train, offset, uncertainty, date; the offset has the `av_offset_ms` sign:
+  sound minus picture, positive = sound later). Generators send method none until the
+  source-output calibration exists. Layout: SPECIFICATION "QR + optical code".
+- Size: before, 59 alphanumeric characters at version 4 (33 modules), ECC Q.
+  After, at most 90 characters at version 4 (33 modules), ECC M. The module
+  count and the picture layout stay the same. Keeping ECC Q would need version 6
+  (41 modules, about 20 % smaller modules at the same QR size) for the same 90 characters.
+- Compact encoding, chosen to stay inside version 4: base45 (QR alphanumeric,
+  5.5 bits per character, against 4 bits per byte value for hex), flags, rate and
+  format packed into one byte, k in 40 bits, offset in 24 bits, test id at 6 bits
+  per character, source id derived from the id (CRC-32) instead of sent. A test
+  id that does not fit (more than 50 characters, 42 with a calibration block, or other characters than
+  `0-9a-zA-Z-_`) falls back to the source id alone and the analyzer shows
+  `source-<hex>` as before. Stable phone (18) and container ids fit.
+- Readability: a synthetic check (blur, noise, downscaling, ZXing, 40 seeds per
+  cell) gave the same smallest readable module size for AVS3/Q and AVS4/M
+  (about 1.6 px per module clean, 2 px with noise); with strong blur plus noise
+  ECC M read a little less often. The picture tests (QR through a simulated
+  240 fps camera at 640×360), the file QR round trips (crop, rotation, camera
+  tile, H.264) and the MXL phone fixture all pass. Not yet tried on a real
+  monitor at distance.
+- Analyzer outputs: phone report `signal.name`, the real `signal.testId` and
+  `signal.senderCalibration`; container `/api/v1/status` `signal` and the web UI
+  Input card. Results grouping (mobile app) will use `signal.name` later.
+- `AVS2:`/`AVS3:` are no longer generated or parsed (no test fixture needs them).
+  The JSON QR (legacy timecode) is unchanged.
+
+## Saved results by sender (mobile, 2026-11-07)
+
+Maintainer request: group Results by sender, with nicknames and a per-sender
+reference. Pure logic in `mobile-app/src/results.mjs` (grouping, Δ, check
+marker, result limit, state loading) with node tests; Results, Measure and App
+only render it. Session state gains `senders: {[sourceId]: {nickname,
+referenceId}}`; older state loads with an empty map. Saved results now also keep
+the signal's `testId` and the report's `captureContext`. No native change.
+
+Deviations from the request: the default nickname is a short form of the
+sender ID (`testId`, e.g. `phone-3fa9…`, or the hex `sourceId`), not the
+generator title, because the title is only drawn in the picture and is in
+neither the QR nor the report. The check marker compares `cameraMode` and the
+calibration offset; results saved before this change have no `cameraMode`, so
+only calibration is compared for them. The 100-result limit stays, but a
+reference result is never dropped by it. `sourceId` 0 (a QR without a timecode
+ID) counts as unknown sender.
+
+
+## Calibrator wizard (2026-11-08)
+
+Maintainer design (2026-11-08): Settings → With calibrator, a three-step wizard
+(plug in, camera, screen) for the calibrator board (contract
+`docs/calibrator.md`, hardware on PR #69). The clap calibration is unchanged.
+
+- Analysis in core C++ (`calibrator.hpp`): sound onsets (click/beep), flash
+  onsets from row bands, camera pairing, display pairing, robust median and
+  uncertainty; the calibration pattern (frame based) and the beep. Unit tests
+  on synthetic signals (noise, missing pulses, stray sound, rolling shutter
+  with known, estimated and fitted readout, long exposure, slow screen,
+  sensor mismatch, external TV, failures). `PhoneAnalyzer::begin_calibrator`
+  runs the camera take (and an audio-only take for an external screen).
+- Screen calibration is a mode of the generators, not a React view: iPhone
+  `generateStyled(..., {mode: 'calibration'})` (same display link, layers,
+  audio engine and player node), container `AVSYNC_PATTERN=calibration`
+  (live key, Signal API `pattern`, web form "Picture"). Android: added
+  later the same way (see "Android generator and calibrator take").
+- Results: camera → analyser calibration record (method `calibrator-pulse`,
+  same validity as the clap); screen → `senderCalibration` in the session
+  state (method `transponder`, 90 days, same OS version, sent only on the same
+  audio output) → AVS4 QR of the phone generator.
+
+Deviations and choices:
+
+- AVS4 method: `transponder` for the sender calibration (the board answers
+  each screen swap with a click). `pulse-train` stays unused: the flash train
+  of camera mode calibrates the analyser, not a sender.
+- Contract additions, no firmware change (listed in `docs/calibrator.md`):
+  the generator's sound is a 4 ms 1.5 kHz beep; camera mode uses every paired
+  pulse incl. the start pulses; display mode does not need the swap times
+  (beep 0–450 ms after the click).
+- iOS rolling shutter: no readout time from the camera, full-frame exposure;
+  the readout is fitted over the pulses (the board's clock drifts against the
+  camera). The camera take locks exposure at the lowest ISO.
+- The screen calibration needs the microphone, so the generator runs the
+  audio session in play-and-record (built-in speaker) instead of playback.
+  Same output node and latency compensation; to verify on a device (open
+  point in `docs/calibrator.md`).
+- Constants still 0: buzzer delay, display path difference. Camera mode
+  subtracts 1.5 cm sound travel.
+- Decided (Adrian, 2026-11-08): the analysers subtract the sender calibration
+  once in core (`Pairer::set_sender_calibration`), keep the raw value
+  (`raw_av_offset_ms` / `rawOffsetMs`) and the calibration next to it. The
+  phone's analyser calibration stays in the app (`liveView`), so nothing is
+  counted twice.
+- The wizard and the calibrator take were iOS only at first; Android got them
+  with its generator (next section).
+- Debug → Clear calibration clears the sender calibration too (decided; with
+  a confirm that says both are cleared).
+- The iPhone pattern size assumes about 6 pt per mm (current iPhones); the
+  outline is a placing guide, the pattern line itself is exact.
+
+## Android generator and calibrator take (2026-11-08)
+
+Maintainer rule: all generators get the same features. Android gets the phone
+generator (test signal and calibration pattern) and the calibrator take, behind
+the same JS API as iOS (`supportsGenerator`, `generate`, `generateStyled`,
+`pickGeneratorImage`, `generatorImageInfo`, camera view `beginCalibrator`), so
+the app has no platform branch for them (only the Title placeholder).
+
+- Shared core and renderer: `PhoneGeneratorPlan`, `generator_test_id`, the AVS4
+  QR, `render_picture`/`render_sync_foreground` and the calibration functions
+  compile into the Android library as on iOS (`generator_jni.cpp`).
+- Text: Android draws the renderer's text itself (DejaVu Sans from the iOS
+  resource folder, `GeneratorText.kt` through JNI), as iOS uses CoreText.
+  Deviation from the server: not Blend2D; glyph shapes can differ by a pixel.
+- Frame time: Choreographer's expected presentation time on Android 13+;
+  before that the frame start plus two display periods (an estimate). The
+  screen asks for a 60 Hz display mode; on a display that stays at 90/120 Hz
+  each frame still shows the 60 Hz plan's frame for its time.
+- Sound: one streaming AudioTrack, packets placed by `AudioTrack.getTimestamp`
+  (frame ↔ System.nanoTime) instead of AAudio/Oboe: exact sample placement from
+  API 24, no native audio code or new dependency. The timestamp includes the
+  output latency, so nothing is subtracted. An underrun stops the signal.
+- Calibrator camera take: lowest ISO when the camera allows manual exposure,
+  else auto exposure locked at the lowest exposure compensation; high-speed
+  mode only AE lock.
+- The calibration pattern is drawn in real millimetres (display xdpi).
+- Not verified on a device here (no emulator with KVM): timing, the pattern,
+  the microphone during playback, the photo picker. Device test list in the PR.

@@ -535,7 +535,7 @@ void avs2_part(Yuv422p10& frame, int part, const PictureInfo& info, const Avs2La
     switch (part) {
     case kAvs2Qr: {
         const auto code = qrcodegen::QrCode::encodeSegments(
-            qrcodegen::QrSegment::makeSegments(info.qr_json.c_str()), qrcodegen::QrCode::Ecc::QUARTILE, 4, 4, -1, false);
+            qrcodegen::QrSegment::makeSegments(info.qr_json.c_str()), qrcodegen::QrCode::Ecc::MEDIUM, 4, 4, -1, false); // AVS4: version 4, ECC M
         fill_yuv(frame, g.qr_x, g.qr_y, g.qr_size, g.qr_size, {kYWhite, kYNeutralChroma, kYNeutralChroma});
         for (int y = 0; y < 33; ++y)
             for (int x = 0; x < 33; ++x)
@@ -566,7 +566,7 @@ void render_picture(Yuv422p10& frame, const PictureInfo& info, uint64_t seq, int
 {
     draw_smpte_eg1(frame);
     LumaView view{frame.y.data(), frame.width, frame.height, frame.width};
-    if((info.qr_json.starts_with("AVS2:") || info.qr_json.starts_with("AVS3:"))) {
+    if(info.qr_json.starts_with(kQrCompactPrefix)) {
         const auto layout=avs2_layout(frame.width,frame.height);
         avs2_static(frame,info,layout);
         for(int part=0;part<kAvs2Parts;++part)avs2_part(frame,part,info,layout,seq,frame_in_period,period_frames,marker_white);
@@ -660,7 +660,7 @@ const std::vector<uint8_t>& LivePicture::render(int width, int rows, const Pictu
     bool marker_white)
 {
     packed_.resize(v210_line_bytes(width) * static_cast<size_t>(rows));
-    if (!(info.qr_json.starts_with("AVS2:") || info.qr_json.starts_with("AVS3:"))) {
+    if (!info.qr_json.starts_with(kQrCompactPrefix)) {
         key_.clear();
         if (frame_.width != width || frame_.height != rows) frame_.resize(width, rows);
         render_picture(frame_, info, seq, frame_in_period, period_frames, marker_white);
