@@ -11,7 +11,37 @@
   black mask), QR code to the project site. Board files CERN-OHL-P-2.0, firmware MIT.
   A first batch of 10 is ordered; not tested yet.
 
-## Mobile (not released yet)
+## 2.2.0 (2026-11-09) and Mobile 2.2.0 (2026-11-09)
+
+Release notes: [docs/release-notes-2.2.0.md](docs/release-notes-2.2.0.md). AVS4 is not
+compatible with 2.1.x: update containers, iPhones and Android phones together.
+
+### Container
+
+- Analyzer (live and file): subtracts the sender calibration from the AVS4 QR
+  from `av_offset_ms` (and `deviation_ms`, grade, metrics). Events keep
+  `raw_av_offset_ms` and `sender_calibration_ms`; `/api/v1/measurement` has
+  `raw_offset_ms` and `sender_calibration_ms`; the web UI Input card shows
+  "AV sync raw"; the file result `summary` has `sender_calibration_ms` and
+  `median_raw_av_offset_ms`. Not calibrated: no change.
+- Generator: the default `AVSYNC_TEST_ID` is now `<NMOS seed>-` plus a short
+  hash of the seed, the app version and the timing settings (event rate, audio
+  timecode, video format, AV offset, audio/video lead, source emit offsets),
+  the same rule as the iPhone generator. It
+  stays the same over restarts. A set `AVSYNC_TEST_ID` is used as before.
+  `GET /api/v1/generator` shows the `test_id` in use; the settings page shows
+  it greyed in the empty `AVSYNC_TEST_ID` field.
+- Picture QR **AVS4** (replaces AVS2/AVS3, no backwards compatibility): carries
+  the real test ID, the Signal form Title (`AVSYNC_SOURCE`) as the generator name and the sender
+  calibration (not calibrated for now). Same QR size, error correction M. The
+  analyzer's `/api/v1/status` has a new `signal` object (`test_id`, `name`,
+  `sender_calibration`, …) and the web UI shows it in the Input card. File
+  generator and analyzer use AVS4 too (SPECIFICATION "QR + optical code").
+- Container generator: `AVSYNC_PATTERN=calibration` (live; Signal API
+  `pattern`, web form "Picture") sends the calibration pattern instead of the
+  test signal, for a phone with the calibrator on a TV or monitor.
+
+### Mobile
 
 - Test signal (iPhone and Android) no longer stops by itself about 5 minutes
   after the last clock check ("Clock reference expired"). The app keeps
@@ -61,9 +91,6 @@
   too (not saved). New camera view method `beginCalibrator(mode)`, generator
   option `mode: 'calibration'` and `senderCalibration*` options. Not tested
   with a real board yet (`docs/calibration.md`, `docs/calibrator.md`).
-- Container generator: `AVSYNC_PATTERN=calibration` (live; Signal API
-  `pattern`, web form "Picture") sends the calibration pattern instead of the
-  test signal, for a phone with the calibrator on a TV or monitor.
 - iPhone generator: the source ID stays the same when the generator is stopped
   and started again. It changes only after a reinstall, a new app version or
   build, or another event rate; name, subtitle and image do not change it
@@ -118,28 +145,6 @@
   dark with light icons instead of white. Found on the Android emulator.
 - Android: the instrumented test (`connectedDebugAndroidTest`) builds; React
   Native's `libc++_shared.so` and the module's no longer collide.
-
-## Container (not released yet)
-
-- Analyzer (live and file): subtracts the sender calibration from the AVS4 QR
-  from `av_offset_ms` (and `deviation_ms`, grade, metrics). Events keep
-  `raw_av_offset_ms` and `sender_calibration_ms`; `/api/v1/measurement` has
-  `raw_offset_ms` and `sender_calibration_ms`; the web UI Input card shows
-  "AV sync raw"; the file result `summary` has `sender_calibration_ms` and
-  `median_raw_av_offset_ms`. Not calibrated: no change.
-- Generator: the default `AVSYNC_TEST_ID` is now `<NMOS seed>-` plus a short
-  hash of the seed, the app version and the timing settings (event rate, audio
-  timecode, video format, AV offset, audio/video lead, source emit offsets),
-  the same rule as the iPhone generator. It
-  stays the same over restarts. A set `AVSYNC_TEST_ID` is used as before.
-  `GET /api/v1/generator` shows the `test_id` in use; the settings page shows
-  it greyed in the empty `AVSYNC_TEST_ID` field.
-- Picture QR **AVS4** (replaces AVS2/AVS3, no backwards compatibility): carries
-  the real test ID, the Signal form Title (`AVSYNC_SOURCE`) as the generator name and the sender
-  calibration (not calibrated for now). Same QR size, error correction M. The
-  analyzer's `/api/v1/status` has a new `signal` object (`test_id`, `name`,
-  `sender_calibration`, …) and the web UI shows it in the Input card. File
-  generator and analyzer use AVS4 too (SPECIFICATION "QR + optical code").
 
 ## 2.1.1 (2026-11-04) and Mobile 2.0.8 build 12 (2026-11-04)
 
