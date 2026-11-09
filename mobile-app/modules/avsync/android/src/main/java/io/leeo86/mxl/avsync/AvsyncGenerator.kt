@@ -72,7 +72,10 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
   private var sourceID = ""
   private var lastStatus = 0.0
   private var utcMinusHost = 0.0
+  private var planUtcMinusHost = 0.0 // the mapping the plan's stamps started from
+  private var clockReference = options.clockReference // the newest accepted clock check (updateClock)
   private var usingReference = false
+  private var deviceNote = "" // why a signal on device UTC did not switch to a clock check
   private var senderCalibrationNote = ""
   // Calibration pattern: the microphone take.
   private var recorder: AudioCapture? = null
@@ -190,7 +193,7 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
     if (finishing) return
     finishing = true
     val result = mutableMapOf<String, Any>("source" to sourceID, "eventRate" to rate, "skippedDisplayFrames" to lateFrames,
-      "audioPresentationLatencyMs" to outputLatency * 1000, "estimated" to true, "clockReference" to options.clockReference, "clockApplied" to usingReference)
+      "audioPresentationLatencyMs" to outputLatency * 1000, "estimated" to true, "clockReference" to clockReference, "clockApplied" to usingReference)
     calibrationResult?.let { result["calibration"] = it }
     calibrationError?.let { result["calibrationError"] = it }
     stop("Closed")
@@ -245,10 +248,20 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
     raster.show(frame)
     if (now - lastStatus > 0.5) {
       lastStatus = now
-      if (referenceExpired()) return stop("Clock reference expired. Close and synchronize again.")
+      // Expires when no newer clock check arrived in time (updateClock), by the rule of the app.
+      var clockNote = ""
+      val r = clockReference
+      val anchor = r["clockMonotonicMs"]?.toDoubleOrNull(); val radius = r["clockUncertaintyMs"]?.toDoubleOrNull(); val limit = r["clockLimitMs"]?.toDoubleOrNull()
+      if (usingReference && anchor != null && radius != null && limit != null) {
+        val age = PhoneClock.nowMs() - anchor
+        if (PhoneGenerator.clockReferenceExpired(age, radius, limit)) return stop("Clock reference expired. Close and synchronize again.")
+        val remaining = plan.clockOffsetMs(Long.MAX_VALUE) - plan.clockOffsetMs(frame.sequence)
+        clockNote = " (check ${(age / 1000).toLong()} s ago" +
+          (if (abs(remaining) >= 0.05) String.format(java.util.Locale.ROOT, ", adjusting %+.1f ms", remaining) else "") + ")"
+      }
       if (abs(System.currentTimeMillis() / 1000.0 - now - utcMinusHost) > 0.1) return stop("Phone clock changed. Tap Start to create a fresh clock mapping.")
       outputLatency = audio.latencyNs / 1e9
-      status.text = "TEST SIGNAL ACTIVE · 1200 baud · $rate/s · frame skips $lateFrames\nEstimated output timing · ${if (usingReference) "NTP UTC" else "device UTC"} · " +
+      status.text = "TEST SIGNAL ACTIVE · 1200 baud · $rate/s · frame skips $lateFrames\nEstimated output timing · ${if (usingReference) "NTP UTC$clockNote" else "device UTC$deviceNote"} · " +
         "audio lead ${Math.round(outputLatency * 1000)} ms$senderCalibrationNote"
     }
   }
@@ -263,15 +276,12 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
     utcMinusHost = utc - (before + after) / 2e9
     var referenceUtcMinusHost = utcMinusHost
     usingReference = false
-    // The clock reference is on PhoneClock (elapsedRealtime); the host clock here is System.nanoTime.
-    val r = options.clockReference
-    val unixMs = r["clockUnixMs"]?.toDoubleOrNull(); val bootMs = r["clockMonotonicMs"]?.toDoubleOrNull()
-    val nowBootMs = before / 1e6 + bootMinusHost * 1000
-    if (r["clockId"] == PhoneClock.identifier && unixMs != null && bootMs != null && unixMs in 1e12..4e12 && bootMs.isFinite() &&
-        nowBootMs - bootMs >= 0 && nowBootMs - bootMs < 300_000) {
-      referenceUtcMinusHost = (unixMs - bootMs) / 1000 + bootMinusHost
+    GeneratorClock.referenceMapping(clockReference, before / 1e6 + bootMinusHost * 1000, bootMinusHost)?.let {
+      referenceUtcMinusHost = it
       usingReference = true
     }
+    planUtcMinusHost = referenceUtcMinusHost
+    deviceNote = ""
     val epochTai = ((referenceUtcMinusHost + options.taiUtc + epochHost) * 1e9).roundToLong()
     val next = PhoneGenerator(sourceID, rate, epochTai, epochHost, options.name.ifEmpty { "Android" })
     plan = next
@@ -307,14 +317,31 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
     images.keys.removeAll { it + 1 < shown }
   }
 
-  private fun referenceExpired(): Boolean {
-    if (!usingReference) return false
-    val r = options.clockReference
-    val anchor = r["clockMonotonicMs"]?.toDoubleOrNull() ?: return false
-    val radius = r["clockUncertaintyMs"]?.toDoubleOrNull() ?: return false
-    val limit = r["clockLimitMs"]?.toDoubleOrNull() ?: return false
-    val age = PhoneClock.nowMs() - anchor
-    return age > 300_000 || radius + age * 50 / 1e6 > limit
+  // A newer clock check from the app (docs/phone-clock.md), like updateClock on iOS. Before the plan starts
+  // (or while stopped) it replaces the reference for the next start. While the signal runs, the stamps of the
+  // events not scheduled yet slew to it (core retime, 100 ppm); host times and the Test ID stay. A signal on
+  // device UTC switches to NTP UTC this way. A check further from the current stamps than the limit stops a
+  // signal on NTP UTC; one on device UTC keeps running and says so in the status line.
+  fun updateClock(reference: Map<String, String>) {
+    if (calibrate || finishing) return
+    val bootMinusHost = (SystemClock.elapsedRealtimeNanos() - System.nanoTime()) / 1e9
+    val nowBootMs = PhoneClock.nowMs()
+    val mapping = GeneratorClock.referenceMapping(reference, nowBootMs, bootMinusHost) ?: return
+    val anchor = reference["clockMonotonicMs"]?.toDoubleOrNull() ?: return
+    val radius = reference["clockUncertaintyMs"]?.toDoubleOrNull() ?: return
+    val limit = reference["clockLimitMs"]?.toDoubleOrNull() ?: return
+    if (PhoneGenerator.clockReferenceExpired(nowBootMs - anchor, radius, limit)) return
+    val plan = plan ?: run { clockReference = reference; return }
+    val offset = mapping - planUtcMinusHost
+    if (plan.retime(Math.round(offset * 1e9), nextAudio, Math.round(limit * 1e6))) {
+      clockReference = reference; usingReference = true; deviceNote = ""; return
+    }
+    val change = offset * 1000 - plan.clockOffsetMs(nextAudio)
+    if (!usingReference) {
+      deviceNote = String.format(java.util.Locale.ROOT, " (clock check %+.1f ms off, more than the %.0f ms limit)", change, limit); return
+    }
+    clockReference = reference
+    stop(String.format(java.util.Locale.ROOT, "New clock check is %+.1f ms off (more than the %.0f ms limit). Tap Start for a fresh clock mapping.", change, limit))
   }
 
   // ---- Sender calibration and calibration pattern ----
@@ -488,6 +515,19 @@ class AvsyncGenerator(private val activity: Activity, private val options: Optio
     }
 
     private fun appIcon(context: Context): Bitmap? = runCatching { context.assets.open("icon.png").use { BitmapFactory.decodeStream(it) } }.getOrNull()
+  }
+}
+
+// The clock check as a mapping for the generator (JVM tests). The check is on PhoneClock (elapsedRealtime),
+// the generator's host clock is System.nanoTime: UTC minus host seconds, or null for another clock or when
+// the check is not 0–300 s old at nowBootMs.
+object GeneratorClock {
+  fun referenceMapping(r: Map<String, String>, nowBootMs: Double, bootMinusHost: Double): Double? {
+    val unixMs = r["clockUnixMs"]?.toDoubleOrNull() ?: return null
+    val bootMs = r["clockMonotonicMs"]?.toDoubleOrNull() ?: return null
+    val age = nowBootMs - bootMs
+    if (r["clockId"] != PhoneClock.identifier || unixMs !in 1e12..4e12 || !bootMs.isFinite() || !(age >= 0 && age < 300_000)) return null
+    return (unixMs - bootMs) / 1000 + bootMinusHost
   }
 }
 

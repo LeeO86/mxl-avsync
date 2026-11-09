@@ -45,4 +45,13 @@ class GeneratorTest {
     // A short view: the halves fill it.
     assertEquals(0f, GeneratorLayout.calibration(1080f, 500f, mm).top, 0f)
   }
+  @Test fun clockCheckMapsToTheHostClock() {
+    // A check on PhoneClock 1 s before now: UTC minus host = (unix - boot) / 1000 + (boot - host).
+    val check = mapOf("clockId" to PhoneClock.identifier, "clockUnixMs" to "1800000000000", "clockMonotonicMs" to "50000")
+    assertEquals(1_799_999_950.0 + 2.5, GeneratorClock.referenceMapping(check, 51_000.0, 2.5)!!, 1e-6)
+    assertNull(GeneratorClock.referenceMapping(check, 350_000.0, 2.5))   // 300 s old
+    assertNull(GeneratorClock.referenceMapping(check, 49_000.0, 2.5))    // from the future
+    assertNull(GeneratorClock.referenceMapping(check + ("clockId" to "other"), 51_000.0, 2.5))
+    assertNull(GeneratorClock.referenceMapping(check + ("clockUnixMs" to "17"), 51_000.0, 2.5))
+  }
 }

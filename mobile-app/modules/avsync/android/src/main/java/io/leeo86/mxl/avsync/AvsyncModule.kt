@@ -47,6 +47,11 @@ class AvsyncModule : Module() {
     AsyncFunction("generateStyled") { rate: Int, taiUtc: Double, options: Map<String, String>, promise: Promise ->
       presentGenerator(rate, taiUtc, options, promise)
     }.runOnQueue(Queues.MAIN)
+    // A newer clock check for the running test signal (docs/phone-clock.md); ignored when none runs.
+    AsyncFunction("updateGeneratorClock") { options: Map<String, String> ->
+      generator?.updateClock(options.filterKeys { it.startsWith("clock") })
+      Unit
+    }.runOnQueue(Queues.MAIN)
     Function("generatorImageInfo") { id: String -> GeneratorImageStore.info(context, id) }
     // The system photo picker (Android 13+) or document picker: only the chosen image is shared, no storage permission.
     AsyncFunction("pickGeneratorImage") { promise: Promise ->

@@ -47,6 +47,18 @@ class PhoneGeneratorTest {
     }
   }
 
+  @Test fun clockRefreshSlewsStampsNotHostTimes() {
+    // core PhoneGeneratorPlan::retime: events from 5 on move to +2 ms at 100 ppm; a 50 ms change is refused.
+    PhoneGenerator("phone-985274814721", 2, 1_800_000_000_000_000_000L, 100.0, "Android").use { g ->
+      assertTrue(g.retime(2_000_000L, 5, 20_000_000L))
+      assertFalse(g.retime(50_000_000L, 5, 20_000_000L))
+      assertEquals(0.0, g.clockOffsetMs(4), 0.0); assertEquals(2.0, g.clockOffsetMs(100), 1e-9)
+      assertEquals(149.5, g.hostTime(100), 1e-9)
+    }
+    assertTrue(PhoneGenerator.clockReferenceExpired(300_001.0, 0.0, 20.0))
+    assertFalse(PhoneGenerator.clockReferenceExpired(1000.0, 5.0, 20.0))
+  }
+
   @Test fun calibrationPatternAndAnalysis() {
     // Period k lasts 500 ms: at 60 fps the swaps are every 30 frames, left half white in even periods.
     assertTrue(PhoneGenerator.calibrationLeftWhite(0, 60)); assertFalse(PhoneGenerator.calibrationLeftWhite(30, 60))

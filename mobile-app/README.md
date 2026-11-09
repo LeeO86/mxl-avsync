@@ -29,7 +29,8 @@ with its sound audible. After a few events the screen shows:
 - the **spread** (±, half the 10–90 % range) and the number of events in the
   reading (the last 8 within 10 s);
 - **video and audio latency** from the source time to this phone, once the
-  clock is synchronized (NTP, automatic, renewed every 4 minutes).
+  clock is synchronized (NTP, automatic, renewed every 4 minutes or sooner;
+  a running test signal takes the new checks too, see `docs/phone-clock.md`).
 
 When the signal drops, the last reading stays greyed for 8 s. **Save** stores
 it in Results. **Restart** clears the history, for example after moving the

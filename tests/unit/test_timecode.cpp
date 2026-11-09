@@ -293,6 +293,96 @@ TEST_CASE("phone generator uses one scheduled clock for QR, flash and independen
     CHECK_THROWS(encode_timecode(1,epoch,0,false,true));
 }
 
+TEST_CASE("phone generator clock refresh slews stamps of unscheduled events only") {
+    constexpr int64_t epoch = 1792963237123456789LL, ms = 1000000;
+    for (int rate : {1,2}) {
+        const int64_t period = 1000000000LL / rate, step = 100 * period / 1000000; // 100 ppm of a period
+        PhoneGeneratorPlan plan("phone-slew",rate,epoch,100);
+        const double host = plan.host_seconds(10);
+        const auto before = plan.qr(9).tk;
+        REQUIRE(plan.retime(5*ms,10,20*ms));
+        CHECK(plan.qr(9).tk == before);                       // already scheduled: unchanged
+        CHECK(plan.host_seconds(10) == host);                 // host times never move
+        CHECK(plan.frame_at(host) == uint64_t(9*60/rate));
+        int64_t last = plan.qr(10).tk;
+        CHECK(last == epoch + 9*period);
+        for (uint64_t k = 11; k < 400; ++k) {                 // never faster than the slew rate
+            const auto tk = plan.qr(k).tk;
+            CHECK(std::llabs(tk - last - period) <= step);
+            last = tk;
+        }
+        CHECK(plan.clock_offset_ns(10 + uint64_t((5*ms + step - 1)/step)) == 5*ms);
+        CHECK(plan.clock_offset_ns(1000) == 5*ms);
+        // A second check while still slewing starts from where the stamps are at that event.
+        const auto mid = plan.clock_offset_ns(30), earlier = plan.clock_offset_ns(29);
+        REQUIRE(plan.retime(-1*ms,30,20*ms));
+        CHECK(plan.clock_offset_ns(30) == mid);
+        CHECK(plan.clock_offset_ns(29) == earlier);
+        CHECK(plan.clock_offset_ns(2000) == -1*ms);
+        // More than the limit away from the current stamps: refused, nothing changes.
+        CHECK_FALSE(plan.retime(25*ms,2000,20*ms));
+        CHECK(plan.clock_offset_ns(5000) == -1*ms);
+        CHECK_FALSE(plan.retime(0,0,20*ms));
+        // Audio and picture of one event carry the same slewed stamp.
+        AudioTimecode packet; const auto qr = plan.qr(40);
+        REQUIRE(parse_timecode(encode_timecode(qr.source_id,qr.tk,0,true,true),packet));
+        VideoObservation video; video.seq=40; REQUIRE(identify_video(video,qr));
+        CHECK(video.event_time_ns == quantize_timecode_ns(qr.tk));
+    }
+}
+
+TEST_CASE("phone generator started on device UTC switches to the first clock check within the limit") {
+    // The plan's start mapping is device UTC (offset 0). The native side retimes with
+    // NTP minus device; a refusal keeps the signal on device UTC (no stop).
+    constexpr int64_t epoch = 1792963237123456789LL, ms = 1000000;
+    PhoneGeneratorPlan plan("phone-switch",2,epoch,0);
+    CHECK_FALSE(plan.retime(35*ms,10,20*ms));                  // device clock 35 ms off: stays device UTC
+    CHECK(plan.clock_offset_ns(100000) == 0);
+    CHECK(plan.qr(500).tk == epoch + 499*500000000LL);
+    REQUIRE(plan.retime(12*ms,200,20*ms));                     // a later check within the limit: switch
+    CHECK(plan.clock_offset_ns(200) == 0);
+    CHECK(plan.clock_offset_ns(200 + 12*ms/50000) == 12*ms);   // 240 events = 120 s at 100 ppm
+    int64_t last = plan.qr(200).tk;
+    for (uint64_t k = 201; k < 500; ++k) { const auto tk = plan.qr(k).tk; CHECK(std::llabs(tk - last - 500000000LL) <= 50000); last = tk; }
+    CHECK(plan.host_seconds(300) == doctest::Approx(149.5));
+}
+
+TEST_CASE("phone generator keeps running past 5 minutes with refreshed clock checks and stops without them") {
+    // A 15 min run at 2 events/s: status every 0.5 s, packets 2.5 s ahead, a check
+    // (radius 8 ms, limit 20 ms) whenever the app's rule asks for one
+    // (clockCheckDue in mobile-app/src/time-reference.mjs: 240 s old, or the limit within 60 s).
+    constexpr int64_t epoch = 1792963237123456789LL, ms = 1000000;
+    const double radius = 8, limit = 20;
+    for (bool network : {true,false}) {
+        PhoneGeneratorPlan plan("phone-run",2,epoch,0);
+        double anchor = 0, stopped = -1; int64_t target = 0; int checks = 0;
+        const int64_t truth[] = {3*ms,-2*ms,4*ms,1*ms,-3*ms};
+        uint64_t next = 1;
+        for (double now = 0; now <= 900 && stopped < 0; now += .5) {
+            while (plan.host_seconds(next) < now + 2.5) ++next;
+            const double age = (now - anchor) * 1000;
+            const bool due = age > 240000 || (age > 30000 && radius + (age + 60000) * 50 / 1e6 > limit);
+            if (network && due) {
+                target = truth[checks++ % 5];
+                REQUIRE(plan.retime(target,next,int64_t(limit*ms)));
+                anchor = now;
+            }
+            if (clock_reference_expired((now - anchor) * 1000,radius,limit)) stopped = now;
+        }
+        if (network) {
+            CHECK(stopped < 0);
+            CHECK(checks >= 4);
+            CHECK(plan.clock_offset_ns(next + 1000) == target);
+        } else {
+            CHECK(stopped > 240); CHECK(stopped <= 240.5); // 8 ms + 240 s x 50 ppm = 20 ms
+        }
+    }
+    CHECK(clock_reference_expired(300001,0,20));
+    CHECK_FALSE(clock_reference_expired(300000,5,20));
+    CHECK(clock_reference_expired(-1,0,20));
+    CHECK(clock_reference_expired(std::nan(""),0,20));
+}
+
 TEST_CASE("phone source latency stays explicitly estimated even with receiver clock lock") {
     for (auto state : {"locked","unlocked","unknown"}) {
         ReferenceInfo ref; ref.type="tai-ptp"; ref.sync_state=state;

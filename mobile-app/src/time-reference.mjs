@@ -53,6 +53,17 @@ export function referenceAt(reference, mapping, maxUncertaintyMs = 20) {
   sampleUncertaintyMs, holdoverUncertaintyMs, holdoverDriftPpm: CLOCK_DRIFT_PPM, unixMs };
 }
 
+// When the app runs its next clock check (in front, also while the test signal runs, which stops once
+// its reference expires by referenceAt's rule): a minute before the 5 min age limit, or, at most every
+// 30 s, once the holdover allowance would pass the limit within a minute.
+export const CLOCK_RECHECK_MS = 30000, CLOCK_MARGIN_MS = 60000;
+export function clockCheckDue(reference, jsMono = performance.now(), limitMs = 20) {
+ if (!reference) return true;
+ const age = jsMono-reference.receivedJsMonoMs+reference.ageAtReceiptMs;
+ if (!(age >= 0) || age > CLOCK_MAX_AGE_MS-CLOCK_MARGIN_MS) return true;
+ return age > CLOCK_RECHECK_MS && reference.uncertaintyMs+(age+CLOCK_MARGIN_MS)*CLOCK_DRIFT_PPM/1e6 > limitMs;
+}
+
 export function clockRadiusText(ms) {
  if (!Number.isFinite(ms) || ms < 0) return 'unknown';
  return ms < 0.1 ? '<0.1 ms' : `±${ms.toFixed(1)} ms`;
