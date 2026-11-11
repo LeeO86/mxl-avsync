@@ -10,6 +10,8 @@ phone's camera and microphone (calibrate once per phone).
 
 Part of [mxl-stack](https://github.com/LeeO86/mxl-stack), a collection of open-source MXL media functions with Docker Compose and Kubernetes examples.
 
+![mxl-avsync analyzer: audio and video in sync, latency and diagnostics](assets/web-ui.png)
+
 Get `ghcr.io/leeo86/mxl-avsync:2.2.0` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
 for iOS TestFlight information. Upgrade compact-signal generator and receivers
 together: the picture QR is now AVS4 (it also carries the test ID, the
