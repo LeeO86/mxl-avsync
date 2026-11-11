@@ -1,6 +1,6 @@
 # mxl-avsync
 
-AV sync and latency measurement for MXL, iPhone and Android. Version 2.1 uses a
+AV sync and latency measurement for MXL, iPhone and Android. Version 2.2 uses a
 large QR code beside two always-opposite light fields that swap in a short
 burst at each event (AVS3), plus independently decodable audio timecode. File,
 live MXL and the phone apps share the signal and measuring core. The analyzer
@@ -8,12 +8,14 @@ reports audio/video offset and, with a suitable clock reference, latency.
 Phone-clock latency is an estimate; its physical accuracy depends on the
 phone's camera and microphone (calibrate once per phone).
 
-Get `ghcr.io/leeo86/mxl-avsync:2.1.0` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
+Part of [mxl-stack](https://github.com/LeeO86/mxl-stack), a collection of open-source MXL media functions with Docker Compose and Kubernetes examples.
+
+Get `ghcr.io/leeo86/mxl-avsync:2.2.0` or see the [AVsync project site](https://leeo86.github.io/mxl-avsync/)
 for iOS TestFlight information. Upgrade compact-signal generator and receivers
 together: the picture QR is now AVS4 (it also carries the test ID, the
 generator name and the sender calibration); AVS2/AVS3 generators and receivers
 cannot read it, and AVS4 receivers ignore them. Legacy signals remain supported.
-[Signal and validation details](docs/qr-flash.md) · [Release notes](docs/release-notes-2.1.0.md).
+[Signal and validation details](docs/qr-flash.md) · [Release notes](docs/release-notes-2.2.0.md).
 
 
 **Status: measuring core, file tools, control plane, live MXL reader and writer, and the phone core.** The container image is `ghcr.io/leeo86/mxl-avsync`, user 1000:1000. `/metrics` exports every family from the first scrape, counters at 0. Latency gauges are not exported. `mxl-avsync` links libmxl when the package is found; `avsync-core` does not. `/readyz` is 200 when the process and HTTP service are up and, with NMOS registration configured, the node is listed in the Query API. The generator also requires its output flows to be created. Analyzer routes and signal are independent: `not_routed`, `waiting` and `no_signal` remain ready and are reported in `/statusz`, the input-state metric and the UI. The analyzer also writes a result picture flow, and the web UI polls `/api/v1/preview/input.jpg` and `/api/v1/preview/generated.jpg` once a second. Clock state comes from an optional ptp4l management socket (`AVSYNC_PTP_SOCKET`), otherwise the kernel (`adjtimex(2)`); `AVSYNC_PTP_STATUS_URL` is an explicit override. `/statusz`, `/api/v1/status`, the UI and metrics identify `sync_source` (`ptp4l`, `kernel` or `url`). See [clock reference and deployment requirements](docs/clock-reference.md) for socket permissions, PTP error reporting and NTP TAI setup. Latency and the index shifts are reported only when that clock is locked and the QR names the event. Latency is arrival vs the content timestamp; directly behind the generator it is the generator's own write timing (both essences committed about 20–25 ms early, so negative). The main value is the AV sync, which is what MXL consumers see. For an absolute latency (emission → arrival, never negative, with ± and the clock named), enter the source's emit offsets on the analyzer (`AVSYNC_SOURCE_EMIT_VIDEO_MS` / `AVSYNC_SOURCE_EMIT_AUDIO_MS`, copied from the generator's `/api/v1/status` `emit_offsets`), or route the generator's flows directly with a Query API configured (the analyzer then reads the generator's flow tag `urn:x-mxl:tag:avsync-emit-offset-ms/v1.0`); without either the latency is relative to the source timestamp. Alert rules: `deploy/prometheus/avsync-rules.yaml`; per-release bench over several paths: `tools/bench_paths.py`. `video_content_vs_grain_ms` and `audio_content_vs_grain_ms` compare that content time with the MXL grain timestamp even when the clock is unknown. This repo does not implement ST 2110, SRT, or SIP; those flows come from the sibling gateways. File-mode H.264 and G.711 are test aids. A real phone still needs a device. Read [SPECIFICATION.md](SPECIFICATION.md), [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) and [docs/test-matrix.md](docs/test-matrix.md).
