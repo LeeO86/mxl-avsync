@@ -15,6 +15,9 @@ ROTATION_OFFSET = {
     "QSOP-28": 270,
     "SOT-23": -90,
     "USB_C_Receptacle_HRO_TYPE-C-31-M-12": 180,
+    # JLC's footprint for the XL-3216UWC-FB (C3646935) has the anode where ours has the
+    # cathode: at 0° the 10-board test batch came with D1 reversed (2026-11).
+    "LED_1206_ReverseMount_XL-3216UWC-FB": 180,
 }
 import csv
 import os
