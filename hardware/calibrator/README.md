@@ -2,7 +2,10 @@
 
 <!-- SPDX-License-Identifier: CERN-OHL-P-2.0 -->
 
-**Status: v0.3 proposal, in development. Not ordered, not built, not tested.**
+**Status: v0.3. Test batch of 10 built by JLC (2026-11): firmware flashes over USB and the
+buzzer works, but LED D1 came reversed (JLC placed it at 0° with its anode on our cathode pad),
+so it never lights. Fixed in `fab/calibrator-cpl-jlc.csv` (D1 180°) for the next order; the test
+boards need D1 turned by hand.**
 
 A small giveaway board (66 × 22 mm) for the AVsync app. The phone powers it over a
 USB-C to USB-C cable. **No cable comes with the board: the user needs their own.**
@@ -214,8 +217,10 @@ checked one.
 - CPL rotations: JLC's 0° is the orientation of its own footprint for each part, which is
   not always KiCad's. `scripts/jlc_files.py` adds the known offsets for the stock footprints
   (QSOP-28 +270°, SOT-23 −90°, HRO USB-C +180°; values from the community list of JLC
-  corrections, e.g. matthewlai/JLCKicadTools). Custom footprints (buzzer, reverse LED,
-  sensors) and the button keep KiCad's rotation. Still check every part in JLC's placement
+  corrections, e.g. matthewlai/JLCKicadTools) and the reverse LED (+180°, found on the test
+  batch). The other custom footprints (buzzer, sensors) and the button keep KiCad's rotation.
+  **D1 check in the preview:** JLC's "+" must sit on the buzzer side and the cathode bar
+  on the board edge (notch) side; sensors: C on the edge side. Still check every part in JLC's placement
   preview before ordering (or use "Confirm Parts Placement"); JLC also places by the pin-1
   and polarity marks in the silkscreen.
 
